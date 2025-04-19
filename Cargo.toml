@@ -8,6 +8,11 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/Eddieg26/hydra"
 
 [workspace]
+members = ["crates/*", "examples/ecs/*"]
 
-
-[dependencies]
+[workspace.dependencies]
+async-executor = "1.13.1"
+downcast-rs = "2.0.1"
+fixedbitset = "0.5.7"
+futures-lite = "2.6.0"
+indexmap = "2.8.0"

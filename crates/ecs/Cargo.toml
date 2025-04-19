@@ -1,0 +1,11 @@
+[package]
+name = "ecs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-executor = { workspace = true }
+downcast-rs = { workspace = true }
+fixedbitset = { workspace = true }
+futures-lite = { workspace = true }
+indexmap = { workspace = true }
