@@ -1,0 +1,13 @@
+[package]
+name = "hydra-engin"
+version = "0.0.0"
+edition = "2024"
+authors = ["eddie_0226@outlook.com"]
+description = "A ecs powered multi threaded game engine"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Eddieg26/hydra"
+
+[workspace]
+
+
+[dependencies]
