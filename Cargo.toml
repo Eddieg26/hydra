@@ -1,5 +1,5 @@
 [package]
-name = "hydra-engin"
+name = "hydra-engine"
 version = "0.0.0"
 edition = "2024"
 authors = ["eddie_0226@outlook.com"]
