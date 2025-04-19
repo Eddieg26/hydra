@@ -837,14 +837,7 @@ impl_base_query_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q))
 #[cfg(test)]
 mod tests {
 
-    use crate::{
-        core::bitset::FixedBitSet,
-        system::SystemMeta,
-        world::archetype::{
-            ArchetypeId,
-            table::{Row, TableCell},
-        },
-    };
+    use crate::system::SystemMeta;
 
     use super::*;
 
