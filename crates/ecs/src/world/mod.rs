@@ -6,6 +6,7 @@ pub mod command;
 pub mod component;
 pub mod entity;
 pub mod event;
+pub mod hierarchy;
 pub mod resource;
 
 pub use archetype::*;
@@ -14,6 +15,7 @@ pub use command::*;
 pub use component::*;
 pub use entity::*;
 pub use event::*;
+pub use hierarchy::*;
 pub use resource::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

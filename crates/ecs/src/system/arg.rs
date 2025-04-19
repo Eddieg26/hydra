@@ -1,4 +1,4 @@
-use super::{IntoSystemConfigs, SystemConfig, SystemConfigs, SystemId, SystemMeta};
+use super::{IntoSystemConfigs, SystemConfig, SystemConfigs, SystemId, SystemInit, SystemMeta};
 use crate::{
     system::{Access, SystemAccess},
     world::{Entities, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell},
@@ -11,7 +11,7 @@ pub unsafe trait SystemArg: Sized {
 
     type State: Send + Sync + 'static;
 
-    fn init(world: &mut World) -> Self::State;
+    fn init(system: &mut SystemInit) -> Self::State;
 
     /// Validates that the argument can be accessed by the system
     unsafe fn validate(state: &Self::State, world: WorldCell, system: &SystemMeta) -> bool {
@@ -46,7 +46,7 @@ unsafe impl SystemArg for () {
 
     type State = ();
 
-    fn init(_: &mut World) -> Self::State {
+    fn init(_: &mut SystemInit) -> Self::State {
         ()
     }
 
@@ -64,7 +64,7 @@ unsafe impl SystemArg for &World {
 
     type State = ();
 
-    fn init(_: &mut World) -> Self::State {
+    fn init(_: &mut SystemInit) -> Self::State {
         ()
     }
 
@@ -86,7 +86,7 @@ unsafe impl SystemArg for &Entities {
 
     type State = ();
 
-    fn init(_: &mut World) -> Self::State {
+    fn init(_: &mut SystemInit) -> Self::State {
         ()
     }
 
@@ -104,8 +104,8 @@ unsafe impl<R: Resource + Send> SystemArg for &R {
 
     type State = ResourceId;
 
-    fn init(world: &mut World) -> Self::State {
-        world.register_resource::<R>()
+    fn init(system: &mut SystemInit) -> Self::State {
+        system.world.register_resource::<R>()
     }
 
     unsafe fn get<'world, 'state>(
@@ -126,8 +126,8 @@ unsafe impl<R: Resource + Send> SystemArg for &mut R {
 
     type State = ResourceId;
 
-    fn init(world: &mut World) -> Self::State {
-        world.register_resource::<R>()
+    fn init(system: &mut SystemInit) -> Self::State {
+        system.world.register_resource::<R>()
     }
 
     unsafe fn get<'world, 'state>(
@@ -148,8 +148,8 @@ unsafe impl<R: Resource> SystemArg for NonSend<'_, R> {
 
     type State = ResourceId;
 
-    fn init(world: &mut World) -> Self::State {
-        world.register_non_send_resource::<R>()
+    fn init(system: &mut SystemInit) -> Self::State {
+        system.world.register_non_send_resource::<R>()
     }
 
     unsafe fn get<'world, 'state>(
@@ -176,8 +176,8 @@ unsafe impl<R: Resource> SystemArg for NonSendMut<'_, R> {
 
     type State = ResourceId;
 
-    fn init(world: &mut World) -> Self::State {
-        world.register_non_send_resource::<R>()
+    fn init(system: &mut SystemInit) -> Self::State {
+        system.world.register_non_send_resource::<R>()
     }
 
     unsafe fn get<'world, 'state>(
@@ -204,8 +204,8 @@ unsafe impl<A: SystemArg> SystemArg for Option<A> {
 
     type State = A::State;
 
-    fn init(world: &mut World) -> Self::State {
-        A::init(world)
+    fn init(system: &mut SystemInit) -> Self::State {
+        A::init(system)
     }
 
     unsafe fn validate(state: &Self::State, world: WorldCell, system: &SystemMeta) -> bool {
@@ -246,8 +246,8 @@ macro_rules! impl_into_system_configs {
             fn configs(self) -> SystemConfigs {
                 let name = std::any::type_name::<F>();
 
-                let init = |world: &mut World| {
-                    let ($($arg,)*) = ($($arg::init(world),)*);
+                let init = |system: &mut super::SystemInit| {
+                    let ($($arg,)*) = ($($arg::init(system),)*);
                     let state = ($($arg,)*);
                     Box::new(state) as Box<dyn Any + Send + Sync>
                 };
@@ -318,8 +318,8 @@ macro_rules! impl_into_system_configs {
             type Item<'world, 'state> = ($($arg::Item<'world, 'state>,)*);
             type State = ($($arg::State,)*);
 
-            fn init(world: &mut World) -> Self::State {
-                let ($($arg,)*) = ($($arg::init(world),)*);
+            fn init(system: &mut SystemInit) -> Self::State {
+                let ($($arg,)*) = ($($arg::init(system),)*);
                 ($($arg,)*)
             }
 

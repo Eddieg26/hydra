@@ -1,7 +1,7 @@
 use crate::core::{Frame, ObjectStatus, blob::Ptr, sparse::SparseIndex};
 use crate::system::Access;
 use crate::world::{
-    Component, ComponentId, Components, Entity, World,
+    Component, ComponentId, Entity, World,
     archetype::{
         Archetype, ArchetypeQuery,
         table::{Column, RowIndex},
@@ -9,8 +9,8 @@ use crate::world::{
     cell::WorldCell,
 };
 
-use super::SystemAccess;
 use super::arg::SystemArg;
+use super::{SystemAccess, SystemInit};
 
 pub trait BaseQuery {
     type Item<'w>;
@@ -20,10 +20,11 @@ pub trait BaseQuery {
     /// This is used to create the query state when the query is first created.
     type Data: Send + Sync + Sized;
 
-    fn init(components: &Components, query: &mut ArchetypeQuery) -> Self::Data;
+    fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data;
 
     fn state<'w>(
-        data: &Self::Data,
+        data: &'w Self::Data,
+        world: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
         system_frame: Frame,
@@ -36,14 +37,41 @@ pub trait BaseQuery {
     }
 }
 
+impl BaseQuery for () {
+    type Item<'w> = ();
+
+    type State<'w> = ();
+
+    type Data = ();
+
+    fn init(_: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
+        ()
+    }
+
+    fn state<'w>(
+        _: &'w Self::Data,
+        _: WorldCell<'w>,
+        _: &'w Archetype,
+        _: Frame,
+        _: Frame,
+    ) -> Self::State<'w> {
+        ()
+    }
+
+    fn get<'w>(_: &mut Self::State<'w>, _: Entity, _: RowIndex) -> Self::Item<'w> {
+        ()
+    }
+}
+
 pub trait BaseFilter {
     type State<'w>;
     type Data: Send + Sync + Sized;
 
-    fn init(components: &Components, query: &mut ArchetypeQuery) -> Self::Data;
+    fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data;
 
     fn state<'w>(
         data: &Self::Data,
+        world: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
         system_frame: Frame,
@@ -56,11 +84,17 @@ impl BaseFilter for () {
     type State<'w> = ();
     type Data = ();
 
-    fn init(_: &Components, _: &mut ArchetypeQuery) -> Self::Data {
+    fn init(_: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
         ()
     }
 
-    fn state<'w>(_: &Self::Data, _: &'w Archetype, _: Frame, _: Frame) -> Self::State<'w> {
+    fn state<'w>(
+        _: &Self::Data,
+        _: WorldCell<'w>,
+        _: &'w Archetype,
+        _: Frame,
+        _: Frame,
+    ) -> Self::State<'w> {
         ()
     }
 
@@ -70,48 +104,23 @@ impl BaseFilter for () {
 }
 
 pub struct Not<F: BaseFilter>(std::marker::PhantomData<F>);
-// impl<F: BaseFilter> BaseFilter for Not<F> {
-//     type State<'w> = F::State<'w>;
-
-//     type Data = F::Data;
-
-//     fn init(components: &Components, query: &mut ArchetypeQuery) -> Self::Data {
-//         F::init(components, query)
-//     }
-
-//     fn state<'w>(
-//         data: &Self::Data,
-//         archetype: &'w Archetype,
-//         current_frame: Frame,
-//         system_frame: Frame,
-//     ) -> Self::State<'w> {
-//         F::state(data, archetype, current_frame, system_frame)
-//     }
-
-//     fn filter<'w>(state: &Self::State<'w>, entity: Entity, row: RowIndex) -> bool {
-//         !F::filter(state, entity, row)
-//     }
-// }
-
 impl<C: Component> BaseFilter for Not<Added<C>> {
     type State<'w> = <Added<C> as BaseFilter>::State<'w>;
 
     type Data = <Added<C> as BaseFilter>::Data;
 
-    fn init(components: &Components, query: &mut ArchetypeQuery) -> Self::Data {
-        let id = <Added<C> as BaseFilter>::init(components, query);
-        query.any.set(id.to_usize(), false);
-
-        id
+    fn init(system: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
+        system.world.register::<C>()
     }
 
     fn state<'w>(
         data: &Self::Data,
+        world: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
         system_frame: Frame,
     ) -> Self::State<'w> {
-        <Added<C> as BaseFilter>::state(data, archetype, current_frame, system_frame)
+        <Added<C> as BaseFilter>::state(data, world, archetype, current_frame, system_frame)
     }
 
     fn filter<'w>(state: &Self::State<'w>, entity: Entity, row: RowIndex) -> bool {
@@ -124,20 +133,18 @@ impl<C: Component> BaseFilter for Not<Modified<C>> {
 
     type Data = <Modified<C> as BaseFilter>::Data;
 
-    fn init(components: &Components, query: &mut ArchetypeQuery) -> Self::Data {
-        let id = <Modified<C> as BaseFilter>::init(components, query);
-        query.any.set(id.to_usize(), false);
-
-        id
+    fn init(system: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
+        system.world.register::<C>()
     }
 
     fn state<'w>(
         data: &Self::Data,
+        world: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
         system_frame: Frame,
     ) -> Self::State<'w> {
-        <Modified<C> as BaseFilter>::state(data, archetype, current_frame, system_frame)
+        <Modified<C> as BaseFilter>::state(data, world, archetype, current_frame, system_frame)
     }
 
     fn filter<'w>(state: &Self::State<'w>, entity: Entity, row: RowIndex) -> bool {
@@ -150,17 +157,15 @@ impl<C: Component> BaseFilter for With<'_, C> {
     type State<'w> = bool;
     type Data = ComponentId;
 
-    fn init(components: &Components, query: &mut ArchetypeQuery) -> Self::Data {
-        let id = components.get_id::<C>().expect(&format!(
-            "Component not registered: {}",
-            std::any::type_name::<C>()
-        ));
+    fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
+        let id = system.world.register::<C>();
 
         query.any(id)
     }
 
     fn state<'w>(
         data: &Self::Data,
+        _: WorldCell<'w>,
         archetype: &'w Archetype,
         _: Frame,
         _: Frame,
@@ -178,17 +183,15 @@ impl<C: Component> BaseFilter for Without<C> {
     type State<'w> = bool;
     type Data = ComponentId;
 
-    fn init(components: &Components, query: &mut ArchetypeQuery) -> Self::Data {
-        let id = components.get_id::<C>().expect(&format!(
-            "Component not registered: {}",
-            std::any::type_name::<C>()
-        ));
+    fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
+        let id = system.world.register::<C>();
 
         query.exclude(id)
     }
 
     fn state<'w>(
         data: &Self::Data,
+        _: WorldCell<'w>,
         archetype: &'w Archetype,
         _: Frame,
         _: Frame,
@@ -212,17 +215,13 @@ impl<C: Component> BaseFilter for Added<C> {
     type State<'w> = AddedComponent<'w, C>;
     type Data = ComponentId;
 
-    fn init(components: &Components, query: &mut ArchetypeQuery) -> Self::Data {
-        let id = components.get_id::<C>().expect(&format!(
-            "Component not registered: {}",
-            std::any::type_name::<C>()
-        ));
-
-        query.any(id)
+    fn init(system: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
+        system.world.register::<C>()
     }
 
     fn state<'w>(
         data: &Self::Data,
+        _: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
         system_frame: Frame,
@@ -257,17 +256,15 @@ impl<C: Component> BaseFilter for Modified<C> {
     type State<'w> = ModifiedComponent<'w, C>;
     type Data = ComponentId;
 
-    fn init(components: &Components, query: &mut ArchetypeQuery) -> Self::Data {
-        let id = components.get_id::<C>().expect(&format!(
-            "Component not registered: {}",
-            std::any::type_name::<C>()
-        ));
+    fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
+        let id = system.world.register::<C>();
 
         query.any(id)
     }
 
     fn state<'w>(
         data: &Self::Data,
+        _: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
         system_frame: Frame,
@@ -314,17 +311,15 @@ impl<C: Component> BaseQuery for &C {
 
     type Data = ComponentId;
 
-    fn init(components: &Components, query: &mut ArchetypeQuery) -> Self::Data {
-        let id = components.get_id::<C>().expect(&format!(
-            "Component not registered: {}",
-            std::any::type_name::<C>()
-        ));
+    fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
+        let id = system.world.register::<C>();
 
         query.include(id)
     }
 
     fn state<'w>(
         data: &Self::Data,
+        _: WorldCell<'w>,
         archetype: &'w Archetype,
         _: Frame,
         _: Frame,
@@ -381,12 +376,13 @@ impl<C: Component> BaseQuery for &mut C {
 
     type Data = ComponentId;
 
-    fn init(components: &Components, query: &mut ArchetypeQuery) -> Self::Data {
-        <&C as BaseQuery>::init(components, query)
+    fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
+        <&C as BaseQuery>::init(system, query)
     }
 
     fn state<'w>(
         data: &Self::Data,
+        _: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
         _: Frame,
@@ -433,17 +429,15 @@ impl<C: Component> BaseQuery for Option<&C> {
 
     type Data = ComponentId;
 
-    fn init(components: &Components, _: &mut ArchetypeQuery) -> Self::Data {
-        let id = components.get_id::<C>().expect(&format!(
-            "Component not registered: {}",
-            std::any::type_name::<C>()
-        ));
+    fn init(system: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
+        let id = system.world.register::<C>();
 
         id
     }
 
     fn state<'w>(
         data: &Self::Data,
+        _: WorldCell<'w>,
         archetype: &'w Archetype,
         _: Frame,
         _: Frame,
@@ -473,17 +467,15 @@ impl<C: Component> BaseQuery for Option<&mut C> {
 
     type Data = ComponentId;
 
-    fn init(components: &Components, _: &mut ArchetypeQuery) -> Self::Data {
-        let id = components.get_id::<C>().expect(&format!(
-            "Component not registered: {}",
-            std::any::type_name::<C>()
-        ));
+    fn init(system: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
+        let id = system.world.register::<C>();
 
         id
     }
 
     fn state<'w>(
         data: &Self::Data,
+        _: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
         _: Frame,
@@ -513,11 +505,17 @@ impl BaseQuery for Entity {
 
     type Data = ();
 
-    fn init(_: &Components, _: &mut ArchetypeQuery) -> Self::Data {
+    fn init(_: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
         ()
     }
 
-    fn state<'w>(_: &Self::Data, _: &'w Archetype, _: Frame, _: Frame) -> Self::State<'w> {
+    fn state<'w>(
+        _: &Self::Data,
+        _: WorldCell<'w>,
+        _: &'w Archetype,
+        _: Frame,
+        _: Frame,
+    ) -> Self::State<'w> {
         ()
     }
 
@@ -533,10 +531,10 @@ pub struct QueryState<Q: BaseQuery, F: BaseFilter = ()> {
 }
 
 impl<Q: BaseQuery, F: BaseFilter> QueryState<Q, F> {
-    pub fn new(world: &World) -> Self {
+    pub fn new(system: &mut SystemInit) -> Self {
         let mut query = ArchetypeQuery::default();
-        let data = Q::init(world.components(), &mut query);
-        let filter = F::init(world.components(), &mut query);
+        let data = Q::init(system, &mut query);
+        let filter = F::init(system, &mut query);
 
         QueryState {
             query,
@@ -578,11 +576,7 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> Query<'w, 's, Q, F> {
 
     pub fn contains(&self, entity: Entity) -> bool {
         let world = unsafe { self.world.get() };
-        let Some(archetype) = world
-            .archetypes()
-            .entity_archetype(entity)
-            .and_then(|id| world.archetypes().archetype(id))
-        else {
+        let Some(archetype) = world.archetypes().entity_archetype(entity) else {
             return false;
         };
 
@@ -592,6 +586,7 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> Query<'w, 's, Q, F> {
 
         let filter = F::state(
             &self.state.filter,
+            self.world,
             archetype,
             self.current_frame,
             self.system_frame,
@@ -606,8 +601,8 @@ unsafe impl<Q: BaseQuery + 'static, F: BaseFilter + 'static> SystemArg for Query
 
     type State = QueryState<Q, F>;
 
-    fn init(world: &mut World) -> Self::State {
-        QueryState::new(world)
+    fn init(system: &mut SystemInit) -> Self::State {
+        QueryState::new(system)
     }
 
     unsafe fn get<'world, 'state>(
@@ -642,12 +637,14 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> QueryIter<'w, 's, Q, F> {
             .map(|archetype| {
                 let state = Q::state(
                     &query.state.data,
+                    query.world,
                     archetype,
                     query.current_frame,
                     query.system_frame,
                 );
                 let filter_state = F::state(
                     &query.state.filter,
+                    query.world,
                     archetype,
                     query.current_frame,
                     query.system_frame,
@@ -703,12 +700,14 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> Iterator for QueryIter<'w, 's, Q, F> {
             self.entities = self.archetypes.get(self.archetype).map(|archetype| {
                 self.state = Some(Q::state(
                     &self.query.state.data,
+                    self.query.world,
                     archetype,
                     self.query.current_frame,
                     self.query.system_frame,
                 ));
                 self.filter = Some(F::state(
                     &self.query.state.filter,
+                    self.query.world,
                     archetype,
                     self.query.current_frame,
                     self.query.system_frame,
@@ -733,13 +732,13 @@ macro_rules! impl_base_query_for_tuples {
 
                 type Data = ($($name::Data), +);
 
-                fn init(components: &Components, query: &mut ArchetypeQuery) -> Self::Data {
-                    ($($name::init(components, query),)*)
+                fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
+                    ($($name::init(system, query),)*)
                 }
 
-                fn state<'w>(data: &Self::Data, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
+                fn state<'w>(data: &'w Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
                     let ($($name,)*) = data;
-                    ($($name::state($name, archetype, current_frame, system_frame),)*)
+                    ($($name::state($name, world, archetype, current_frame, system_frame),)*)
                 }
 
                 fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w> {
@@ -766,13 +765,13 @@ macro_rules! impl_base_query_for_tuples {
 
                 type Data = ($($name::Data), +);
 
-                fn init(components: &Components, query: &mut ArchetypeQuery) -> Self::Data {
-                    ($($name::init(components, query),)*)
+                fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
+                    ($($name::init(system, query),)*)
                 }
 
-                fn state<'w>(data: &Self::Data, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
+                fn state<'w>(data: &Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
                     let ($($name,)*) = data;
-                    ($($name::state($name, archetype, current_frame, system_frame),)*)
+                    ($($name::state($name, world, archetype, current_frame, system_frame),)*)
                 }
 
                 fn filter<'w>(state: &Self::State<'w>, entity: Entity, row: RowIndex) -> bool {
@@ -793,13 +792,13 @@ macro_rules! impl_base_query_for_tuples {
 
                 type Data = ($($name::Data), +);
 
-                fn init(components: &Components, query: &mut ArchetypeQuery) -> Self::Data {
-                    ($($name::init(components, query),)*)
+                fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
+                    ($($name::init(system, query),)*)
                 }
 
-                fn state<'w>(data: &Self::Data, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
+                fn state<'w>(data: &Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
                     let ($($name,)*) = data;
-                    ($($name::state($name, archetype, current_frame, system_frame),)*)
+                    ($($name::state($name, world, archetype, current_frame, system_frame),)*)
                 }
 
                 fn filter<'w>(state: &Self::State<'w>, entity: Entity, row: RowIndex) -> bool {
@@ -859,7 +858,8 @@ mod tests {
         world.add_component(entity, Age(0));
         world.add_component(entity, Name("Bob"));
 
-        let state = QueryState::<(&Age, &Name)>::new(&world);
+        let mut system = SystemInit::new(&mut world, None);
+        let state = QueryState::<(&Age, &Name)>::new(&mut system);
         let query = Query::new(&world, &state);
         let iter = query.iter();
 
@@ -876,7 +876,8 @@ mod tests {
         world.add_component(entity, Age(0));
         world.add_component(entity, Name("Bob"));
 
-        let state = QueryState::<&Age, With<Name>>::new(&world);
+        let mut system = SystemInit::new(&mut world, None);
+        let state = QueryState::<&Age, With<Name>>::new(&mut system);
         let query = Query::new(&world, &state);
 
         assert!(query.contains(entity));
@@ -892,7 +893,8 @@ mod tests {
         world.add_component(entity, Age(0));
         world.add_component(entity, Name("Bob"));
 
-        let state = QueryState::<&Age, Without<Name>>::new(&world);
+        let mut system = SystemInit::new(&mut world, None);
+        let state = QueryState::<&Age, Without<Name>>::new(&mut system);
         let query = Query::new(&world, &state);
 
         assert!(!query.contains(entity));
@@ -908,7 +910,8 @@ mod tests {
         world.add_component(entity, Age(0));
         world.add_component(entity, Name("Bob"));
 
-        let mut state = Query::<&Age, Added<Name>>::init(&mut world);
+        let mut system = SystemInit::new(&mut world, None);
+        let mut state = Query::<&Age, Added<Name>>::init(&mut system);
         let system = SystemMeta::default();
         let query = unsafe { Query::get(&mut state, world.cell(), &system) };
 
@@ -928,7 +931,8 @@ mod tests {
         let entity_b = world.spawn();
         world.add_component(entity_b, Age(1));
 
-        let state = QueryState::<&Age, Not<Added<Name>>>::new(&world);
+        let mut system = SystemInit::new(&mut world, None);
+        let state = QueryState::<&Age, Not<Added<Name>>>::new(&mut system);
         let query = Query::new(&world, &state);
 
         assert!(!query.contains(entity_a));
@@ -947,7 +951,8 @@ mod tests {
         world.add_component(entity_a, Age(32));
         world.add_component(entity_b, Name("Bob"));
 
-        let state = QueryState::<Entity, Or<(With<Age>, With<Name>)>>::new(&world);
+        let mut system = SystemInit::new(&mut world, None);
+        let state = QueryState::<Entity, Or<(With<Age>, With<Name>)>>::new(&mut system);
         let query = Query::new(&world, &state);
 
         assert!(query.contains(entity_a));

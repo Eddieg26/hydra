@@ -113,8 +113,10 @@ impl Archetypes {
         self.archetypes.get(id.0 as usize)
     }
 
-    pub fn entity_archetype(&self, entity: Entity) -> Option<ArchetypeId> {
-        self.entity_map.get(&entity).copied()
+    pub fn entity_archetype(&self, entity: Entity) -> Option<&Archetype> {
+        self.entity_map
+            .get(&entity)
+            .and_then(|id| self.archetypes.get(id.0 as usize))
     }
 
     pub fn components(&self) -> &Components {
@@ -354,7 +356,10 @@ mod tests {
         let entity = Entity::root(0);
         let archetype = archetypes.add_entity(entity);
 
-        assert_eq!(archetypes.entity_archetype(entity), Some(archetype));
+        assert_eq!(
+            archetypes.entity_archetype(entity).map(|a| a.id),
+            Some(archetype)
+        );
     }
 
     #[test]

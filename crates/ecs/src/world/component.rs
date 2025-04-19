@@ -1,4 +1,4 @@
-use crate::ext;
+use crate::{SparseIndex, ext};
 use std::{alloc::Layout, any::TypeId, collections::HashMap};
 
 pub trait Component: Send + Sync + 'static {}
@@ -64,11 +64,13 @@ impl Components {
     }
 
     pub fn get<C: Component>(&self) -> Option<&ComponentMeta> {
-        self.map.get(&TypeId::of::<C>()).and_then(|id| {
-            self.components
-                .get(id.0 as usize)
-                .filter(|meta| meta.id == *id)
-        })
+        self.map
+            .get(&TypeId::of::<C>())
+            .and_then(|id| self.components.get(id.0 as usize))
+    }
+
+    pub fn get_by_id(&self, id: ComponentId) -> Option<&ComponentMeta> {
+        self.components.get(id.to_usize())
     }
 
     pub fn get_id<C: Component>(&self) -> Option<ComponentId> {

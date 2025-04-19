@@ -1,5 +1,5 @@
 use super::{Component, Entity, Row, World};
-use crate::system::arg::SystemArg;
+use crate::{system::arg::SystemArg, SystemInit};
 
 pub trait Command: Sized + Send + Sync + 'static {
     fn execute(self, world: &mut World);
@@ -96,7 +96,7 @@ unsafe impl SystemArg for Commands<'_, '_> {
 
     type State = CommandBuffer;
 
-    fn init(_: &mut World) -> Self::State {
+    fn init(_: &mut SystemInit) -> Self::State {
         CommandBuffer::new()
     }
 
@@ -143,7 +143,7 @@ unsafe impl SystemArg for Spawner<'_, '_> {
 
     type State = Vec<(Entity, Row)>;
 
-    fn init(_: &mut World) -> Self::State {
+    fn init(_: &mut SystemInit) -> Self::State {
         vec![]
     }
 

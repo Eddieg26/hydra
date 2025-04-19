@@ -1,4 +1,5 @@
 use crate::{
+    Component, Resource,
     core::{AccessBitset, Frame, SparseIndex},
     world::{ComponentId, ResourceId, World, cell::WorldCell},
 };
@@ -80,13 +81,105 @@ impl Default for SystemMeta {
     }
 }
 
+pub struct SystemInit<'w> {
+    world: &'w mut World,
+    name: Option<SystemName>,
+    components: AccessBitset,
+    resources: AccessBitset,
+}
+
+impl<'w> SystemInit<'w> {
+    pub fn new(world: &'w mut World, name: Option<SystemName>) -> Self {
+        Self {
+            name,
+            components: AccessBitset::with_capacity(world.components().len()),
+            resources: AccessBitset::with_capacity(world.components().len()),
+            world,
+        }
+    }
+
+    pub fn name(&self) -> Option<&SystemName> {
+        self.name.as_ref()
+    }
+
+    pub fn world(&mut self) -> &mut World {
+        self.world
+    }
+
+    pub fn read_component<C: Component>(&mut self) -> ComponentId {
+        let component = self.world.register::<C>();
+        self.components.grow(component.to_usize());
+        if !self.components.read(component.to_usize()) {
+            let meta = self.world.components().get_by_id(component).unwrap();
+            panic!("{:?}: Invalid read access: {}", self.name, meta.name());
+        }
+
+        component
+    }
+
+    pub fn read_resource<R: Resource + Send>(&mut self) -> ResourceId {
+        let resource = self.world.register_resource::<R>();
+        self.resources.grow(resource.to_usize());
+        if !self.resources.read(resource.to_usize()) {
+            let meta = self.world.resources().get_meta(resource).unwrap();
+            panic!("{:?}: Invalid write access: {}", self.name, meta.name());
+        }
+
+        resource
+    }
+
+    pub fn read_non_send_resource<R: Resource>(&mut self) -> ResourceId {
+        let resource = self.world.register_non_send_resource::<R>();
+        self.resources.grow(resource.to_usize());
+        if !self.resources.read(resource.to_usize()) {
+            let meta = self.world.resources().get_meta(resource).unwrap();
+            panic!("{:?}: Invalid write access: {}", self.name, meta.name());
+        }
+
+        resource
+    }
+
+    pub fn write_component<C: Component>(&mut self) -> ComponentId {
+        let component = self.world.register::<C>();
+        self.components.grow(component.to_usize());
+        if !self.components.write(component.to_usize()) {
+            let meta = self.world.components().get_by_id(component).unwrap();
+            panic!("{:?}: Invalid write access: {}", self.name, meta.name());
+        }
+
+        component
+    }
+
+    pub fn write_resource<R: Resource + Send>(&mut self) -> ResourceId {
+        let resource = self.world.register_resource::<R>();
+        self.resources.grow(resource.to_usize());
+        if !self.resources.write(resource.to_usize()) {
+            let meta = self.world.resources().get_meta(resource).unwrap();
+            panic!("{:?}: Invalid write access: {}", self.name, meta.name());
+        }
+
+        resource
+    }
+
+    pub fn write_non_send_resource<R: Resource>(&mut self) -> ResourceId {
+        let resource = self.world.register_non_send_resource::<R>();
+        self.resources.grow(resource.to_usize());
+        if !self.resources.write(resource.to_usize()) {
+            let meta = self.world.resources().get_meta(resource).unwrap();
+            panic!("{:?}: Invalid write access: {}", self.name, meta.name());
+        }
+
+        resource
+    }
+}
+
 pub struct SystemConfig {
     id: SystemId,
     name: Option<SystemName>,
     exclusive: bool,
     send: bool,
     dependencies: HashSet<SystemId>,
-    init: fn(&mut World) -> Box<dyn Any + Send + Sync>,
+    init: fn(&mut SystemInit) -> Box<dyn Any + Send + Sync>,
     access: fn(&Box<dyn Any + Send + Sync>) -> Vec<SystemAccess>,
     run: SystemRun,
     apply: SystemApply,
@@ -94,28 +187,20 @@ pub struct SystemConfig {
 
 impl SystemConfig {
     pub fn into_system_node(self, world: &mut World) -> SystemNode {
-        let state = (self.init)(world);
-        let mut components = AccessBitset::with_capacity(world.components().len());
-        let mut resources = AccessBitset::with_capacity(world.resources().len());
+        let mut init = SystemInit {
+            name: self.name,
+            components: AccessBitset::with_capacity(world.components().len()),
+            resources: AccessBitset::with_capacity(world.components().len()),
+            world,
+        };
 
-        for access in (self.access)(&state) {
-            match access {
-                SystemAccess::Component { id, access } => match access {
-                    Access::Read => components.read(id.to_usize()),
-                    Access::Write => components.write(id.to_usize()),
-                },
-                SystemAccess::Resource { id, access } => match access {
-                    Access::Read => resources.read(id.to_usize()),
-                    Access::Write => resources.write(id.to_usize()),
-                },
-            };
-        }
+        let state = (self.init)(&mut init);
 
         let meta = SystemMeta {
             id: self.id,
-            name: self.name,
-            components,
-            resources,
+            name: init.name,
+            components: init.components,
+            resources: init.resources,
             send: self.send,
             exclusive: self.exclusive,
             frame: Frame::ZERO,

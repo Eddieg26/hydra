@@ -1,5 +1,5 @@
 use super::{World, WorldCell, resource::Resource};
-use crate::system::arg::SystemArg;
+use crate::{system::arg::SystemArg, SystemInit};
 use std::{any::TypeId, collections::HashMap};
 
 pub trait Event: Send + Sync + Sized + 'static {}
@@ -112,8 +112,8 @@ unsafe impl<E: Event> SystemArg for EventReader<'_, E> {
 
     type State = ();
 
-    fn init(world: &mut super::World) -> Self::State {
-        world.register_event::<E>();
+    fn init(system: &mut SystemInit) -> Self::State {
+        system.world().register_event::<E>();
         ()
     }
 
@@ -150,8 +150,8 @@ unsafe impl<E: Event> SystemArg for EventWriter<'_, E> {
 
     type State = Vec<E>;
 
-    fn init(world: &mut super::World) -> Self::State {
-        world.register_event::<E>();
+    fn init(system: &mut SystemInit) -> Self::State {
+        system.world().register_event::<E>();
         vec![]
     }
 

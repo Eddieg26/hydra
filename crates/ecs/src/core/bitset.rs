@@ -74,6 +74,10 @@ impl AccessBitset {
         false
     }
 
+    pub fn grow(&mut self, size: usize) {
+        self.bits.grow(size * 2);
+    }
+
     pub fn iter(&self) -> AccessBitsetIter {
         AccessBitsetIter {
             bits: self,
