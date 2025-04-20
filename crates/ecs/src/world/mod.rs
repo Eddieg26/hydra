@@ -6,7 +6,6 @@ pub mod command;
 pub mod component;
 pub mod entity;
 pub mod event;
-pub mod hierarchy;
 pub mod resource;
 
 pub use archetype::*;
@@ -15,7 +14,6 @@ pub use command::*;
 pub use component::*;
 pub use entity::*;
 pub use event::*;
-pub use hierarchy::*;
 pub use resource::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,12 +211,12 @@ impl World {
         self.archetypes.get_component_mut::<C>(entity)
     }
 
-    pub fn add_component<C: Component>(&mut self, entity: Entity, component: C) {
-        self.archetypes.add_component(entity, component, self.frame);
+    pub fn add_component<C: Component>(&mut self, entity: Entity, component: C) -> EntityIndex {
+        self.archetypes.add_component(entity, component, self.frame)
     }
 
-    pub fn remove_component<C: Component>(&mut self, entity: Entity) {
-        self.archetypes.remove_component::<C>(entity);
+    pub fn remove_component<C: Component>(&mut self, entity: Entity) -> Option<(EntityIndex, C)> {
+        self.archetypes.remove_component::<C>(entity)
     }
 
     pub fn add_components(&mut self, entity: Entity, components: Row) {
@@ -230,8 +228,100 @@ impl World {
         self.archetypes.remove_components(entity, components);
     }
 
+    pub fn entity_mut(&mut self, entity: Entity) -> EntityMut {
+        // TODO: Add tracked error detection
+        let index = self.archetypes.get_entity(entity).unwrap();
+        EntityMut::new(self, entity, index)
+    }
+
+    pub fn entity_ref(&self, entity: Entity) -> EntityWorldRef {
+        // TODO: Add tracked error detection
+        let index = self.archetypes.get_entity(entity).unwrap();
+        EntityWorldRef::new(self, entity, index)
+    }
+
     pub fn update(&mut self) {
         self.frame += 1;
         self.events.update(unsafe { self.cell() });
+    }
+}
+
+pub struct EntityMut<'w> {
+    pub(crate) world: &'w mut World,
+    entity: Entity,
+    index: EntityIndex,
+}
+
+impl<'w> EntityMut<'w> {
+    fn new(world: &'w mut World, entity: Entity, index: EntityIndex) -> Self {
+        Self {
+            world,
+            entity,
+            index,
+        }
+    }
+
+    pub fn id(&self) -> Entity {
+        self.entity
+    }
+
+    pub fn index(&self) -> EntityIndex {
+        self.index
+    }
+
+    pub fn add_component<C: Component>(&mut self, component: C) -> &mut Self {
+        self.index = self.world.add_component(self.entity, component);
+        self
+    }
+
+    pub fn remove_component<C: Component>(&mut self) -> Option<C> {
+        let (index, component) = self.world.remove_component::<C>(self.entity)?;
+        self.index = index;
+        Some(component)
+    }
+
+    pub fn get_component<C: Component>(&self) -> Option<&C> {
+        let component = self.world.components().get_id::<C>()?;
+        self.world.archetypes[self.index.archetype]
+            .table()
+            .get_row_component::<C>(self.index.row, component)
+    }
+
+    pub fn get_component_mut<C: Component>(&mut self) -> Option<&mut C> {
+        let component = self.world.components().get_id::<C>()?;
+        self.world.archetypes[self.index.archetype]
+            .table_mut()
+            .get_row_component_mut::<C>(self.index.row, component)
+    }
+}
+
+pub struct EntityWorldRef<'w> {
+    world: &'w World,
+    entity: Entity,
+    index: EntityIndex,
+}
+
+impl<'w> EntityWorldRef<'w> {
+    fn new(world: &'w World, entity: Entity, index: EntityIndex) -> Self {
+        Self {
+            world,
+            entity,
+            index,
+        }
+    }
+
+    pub fn id(&self) -> Entity {
+        self.entity
+    }
+
+    pub fn index(&self) -> EntityIndex {
+        self.index
+    }
+
+    pub fn get_component<C: Component>(&self) -> Option<&C> {
+        let component = self.world.components().get_id::<C>()?;
+        self.world.archetypes[self.index.archetype]
+            .table()
+            .get_row_component::<C>(self.index.row, component)
     }
 }

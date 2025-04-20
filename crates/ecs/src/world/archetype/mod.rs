@@ -32,7 +32,7 @@ impl Archetype {
         &self.table
     }
 
-    pub fn table_mut(&mut self) -> &mut Table {
+    pub(crate) fn table_mut(&mut self) -> &mut Table {
         &mut self.table
     }
 
@@ -56,6 +56,12 @@ impl Archetype {
 
     pub fn has_component_id(&self, id: ComponentId) -> bool {
         self.table.has_component(id)
+    }
+
+    pub fn get_entity(&self, entity: Entity) -> Option<EntityIndex> {
+        self.table
+            .get_entity_row(entity)
+            .map(|row| EntityIndex::new(self.id, row))
     }
 
     pub fn add_entity(&mut self, entity: Entity, row: Row) {
@@ -119,6 +125,11 @@ impl Archetypes {
             .and_then(|id| self.archetypes.get(id.0 as usize))
     }
 
+    pub fn get_entity(&self, entity: Entity) -> Option<EntityIndex> {
+        self.entity_archetype(entity)
+            .and_then(|archetype| archetype.get_entity(entity))
+    }
+
     pub fn components(&self) -> &Components {
         &self.components
     }
@@ -174,7 +185,12 @@ impl Archetypes {
         archetype.table.get_component_mut(entity, id)
     }
 
-    pub fn add_component<C: Component>(&mut self, entity: Entity, component: C, frame: Frame) {
+    pub fn add_component<C: Component>(
+        &mut self,
+        entity: Entity,
+        component: C,
+        frame: Frame,
+    ) -> EntityIndex {
         let id = unsafe { self.components.get_id_unchecked::<C>() };
 
         let (_, mut row) = match self.remove_entity(entity) {
@@ -190,10 +206,15 @@ impl Archetypes {
 
         row.insert_cell(id, component);
 
-        self.add_entity_inner(entity, row);
+        self.add_entity_inner(entity, row)
     }
 
-    pub fn add_components(&mut self, entity: Entity, mut components: Row, frame: Frame) {
+    pub fn add_components(
+        &mut self,
+        entity: Entity,
+        mut components: Row,
+        frame: Frame,
+    ) -> EntityIndex {
         let (_, mut row) = match self.remove_entity(entity) {
             Some((id, row)) => (id, row),
             None => (ArchetypeId::EMPTY, Row::new()),
@@ -208,10 +229,10 @@ impl Archetypes {
             row.insert_cell(id, component);
         }
 
-        self.add_entity_inner(entity, row);
+        self.add_entity_inner(entity, row)
     }
 
-    pub fn remove_component<C: Component>(&mut self, entity: Entity) -> Option<C> {
+    pub fn remove_component<C: Component>(&mut self, entity: Entity) -> Option<(EntityIndex, C)> {
         let id = unsafe { self.components.get_id_unchecked::<C>() };
 
         let (_, mut row) = match self.remove_entity(entity) {
@@ -221,16 +242,16 @@ impl Archetypes {
 
         let component = row.remove(id);
 
-        self.add_entity_inner(entity, row);
+        let index = self.add_entity_inner(entity, row);
 
-        component.map(|c| c.into_value())
+        component.map(|c| (index, c.into_value()))
     }
 
     pub fn remove_components(
         &mut self,
         entity: Entity,
         components: Vec<ComponentId>,
-    ) -> Option<Row> {
+    ) -> Option<(EntityIndex, Row)> {
         let (_, mut row) = match self.remove_entity(entity) {
             Some((id, row)) => (id, row),
             None => return None,
@@ -243,23 +264,13 @@ impl Archetypes {
             }
         }
 
-        self.add_entity_inner(entity, row);
+        let index = self.add_entity_inner(entity, row);
 
-        Some(removed)
-    }
-
-    pub fn modify_component<C: Component>(&mut self, entity: Entity, frame: Frame) {
-        let id = unsafe { self.components.get_id_unchecked::<C>() };
-
-        let Some(archetype_id) = self.entity_map.get(&entity) else {
-            return;
-        };
-        let archetype = &mut self.archetypes[archetype_id.0 as usize];
-        archetype.modify_component(entity, id, frame);
+        Some((index, removed))
     }
 
     #[inline]
-    fn add_entity_inner(&mut self, entity: Entity, components: Row) -> ArchetypeId {
+    fn add_entity_inner(&mut self, entity: Entity, components: Row) -> EntityIndex {
         let mut ids = components.ids().to_vec();
         ids.sort();
 
@@ -268,10 +279,10 @@ impl Archetypes {
         match self.archetype_map.get(&id).copied() {
             Some(id) => {
                 let archetype = &mut self.archetypes[id.0 as usize];
-                archetype.table.add_entity(entity, components);
+                let row = archetype.table.add_entity(entity, components);
                 self.entity_map.insert(entity, id);
 
-                id
+                EntityIndex::new(id, row)
             }
             None => {
                 let mut bits = self.bitset.clone();
@@ -287,7 +298,8 @@ impl Archetypes {
                 self.archetypes.push(archetype);
                 self.entity_map.insert(entity, archetype_id);
                 self.archetype_map.insert(id, archetype_id);
-                archetype_id
+
+                EntityIndex::new(archetype_id, RowIndex(0))
             }
         }
     }
@@ -331,6 +343,18 @@ impl ArchetypeQuery {
         self.any.grow(id.to_usize() + 1);
         self.any.set(id.to_usize(), true);
         id
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EntityIndex {
+    pub archetype: ArchetypeId,
+    pub row: RowIndex,
+}
+
+impl EntityIndex {
+    pub fn new(archetype: ArchetypeId, row: RowIndex) -> Self {
+        Self { archetype, row }
     }
 }
 
@@ -406,7 +430,7 @@ mod tests {
         archetypes.add_component(entity, Age(0), Frame::ZERO);
 
         let age = archetypes.remove_component::<Age>(entity);
-        assert_eq!(age, Some(Age(0)));
+        assert_eq!(age.map(|(_, a)| a), Some(Age(0)));
     }
 
     #[test]
@@ -424,7 +448,7 @@ mod tests {
         archetypes.add_components(entity, components, Frame::ZERO);
 
         let components = vec![age, name];
-        let components = archetypes.remove_components(entity, components).unwrap();
+        let components = archetypes.remove_components(entity, components).unwrap().1;
 
         let age = components.get::<Age>(age);
         assert_eq!(age, Some(&Age(0)));

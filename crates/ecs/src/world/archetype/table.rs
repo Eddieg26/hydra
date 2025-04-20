@@ -306,7 +306,7 @@ pub struct Table {
 }
 
 impl Table {
-    pub fn add_entity(&mut self, entity: Entity, mut row: Row) {
+    pub fn add_entity(&mut self, entity: Entity, mut row: Row) -> RowIndex {
         self.entities.insert(entity);
 
         self.columns.iter_mut().for_each(|(id, column)| {
@@ -316,6 +316,8 @@ impl Table {
                 panic!("Row does not contain all columns for entity: {:?}", entity);
             }
         });
+
+        RowIndex(self.entities.get_index_of(&entity).unwrap() as u32)
     }
 
     pub fn remove_entity(&mut self, entity: Entity) -> Option<Row> {
@@ -385,6 +387,24 @@ impl Table {
         let index = self.entities.get_index_of(&entity)?;
         let column = self.columns.get_mut(component)?;
         column.get_mut::<C>(index)
+    }
+
+    pub fn get_row_component<C: Component>(
+        &self,
+        row: RowIndex,
+        component: ComponentId,
+    ) -> Option<&C> {
+        let column = self.columns.get(component)?;
+        column.get::<C>(row.to_usize())
+    }
+
+    pub fn get_row_component_mut<C: Component>(
+        &mut self,
+        row: RowIndex,
+        component: ComponentId,
+    ) -> Option<&mut C> {
+        let column = self.columns.get_mut(component)?;
+        column.get_mut::<C>(row.to_usize())
     }
 
     pub fn contains(&self, entity: Entity) -> bool {
