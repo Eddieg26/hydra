@@ -8,6 +8,7 @@ use crate::world::{
     },
     cell::WorldCell,
 };
+use crate::{EntityEvents, Event, EventId, Events};
 
 use super::arg::SystemArg;
 use super::{SystemAccess, SystemInit};
@@ -521,6 +522,61 @@ impl BaseQuery for Entity {
 
     fn get<'w>(_: &mut Self::State<'w>, entity: Entity, _: RowIndex) -> Self::Item<'w> {
         entity
+    }
+}
+
+impl<E: Event> BaseQuery for Events<E> {
+    type Item<'w> = EntityEvents<'w, E>;
+
+    type State<'w> = &'w Events<E>;
+
+    type Data = ();
+
+    fn init(system: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
+        system.world.register_event::<E>();
+    }
+
+    fn state<'w>(
+        _: &Self::Data,
+        world: WorldCell<'w>,
+        _: &'w Archetype,
+        _: Frame,
+        _: Frame,
+    ) -> Self::State<'w> {
+        unsafe { world.get() }.resource::<Events<E>>()
+    }
+
+    fn get<'w>(state: &mut Self::State<'w>, entity: Entity, _: RowIndex) -> Self::Item<'w> {
+        EntityEvents::new(&state, state.entity(entity))
+    }
+}
+
+impl<E: Event> BaseFilter for E {
+    type State<'w> = &'w Events<E>;
+
+    type Data = ();
+
+    fn init(system: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
+        system.world.register_event::<E>();
+    }
+
+    fn state<'w>(
+        _: &Self::Data,
+        world: WorldCell<'w>,
+        _: &'w Archetype,
+        _: Frame,
+        _: Frame,
+    ) -> Self::State<'w> {
+        unsafe { world.get() }.resource::<Events<E>>()
+    }
+
+    fn filter<'w>(state: &Self::State<'w>, entity: Entity, _: RowIndex) -> bool {
+        state
+            .read
+            .entities
+            .get(&entity)
+            .map(|events| !events.is_empty())
+            .unwrap_or(false)
     }
 }
 

@@ -6,11 +6,13 @@ use crate::{
 use std::{any::Any, borrow::Cow, cell::UnsafeCell, collections::HashSet};
 
 pub mod arg;
+pub mod commands;
 pub mod executor;
 pub mod query;
 pub mod schedule;
 
 pub use arg::*;
+pub use commands::*;
 pub use executor::*;
 pub use query::*;
 pub use schedule::*;
@@ -180,7 +182,6 @@ pub struct SystemConfig {
     send: bool,
     dependencies: HashSet<SystemId>,
     init: fn(&mut SystemInit) -> Box<dyn Any + Send + Sync>,
-    access: fn(&Box<dyn Any + Send + Sync>) -> Vec<SystemAccess>,
     run: SystemRun,
     apply: SystemApply,
 }
@@ -290,6 +291,22 @@ impl SystemConfigs {
     }
 }
 
+pub trait IntoSystemConfig<M> {
+    type In;
+
+    fn config(self) -> SystemConfig;
+}
+
+impl<M, I: IntoSystemConfig<M>> IntoSystemConfigs<M> for I {
+    fn configs(self) -> SystemConfigs {
+        SystemConfigs::Config(self.config())
+    }
+
+    fn before<Marker>(self, configs: impl IntoSystemConfigs<Marker>) -> SystemConfigs {
+        self.configs().before(configs)
+    }
+}
+
 pub trait IntoSystemConfigs<M> {
     fn configs(self) -> SystemConfigs;
     fn before<Marker>(self, configs: impl IntoSystemConfigs<Marker>) -> SystemConfigs;
@@ -337,25 +354,22 @@ impl IntoSystemConfigs<()> for SystemConfigs {
     }
 }
 
-impl<F: Fn() + Send + Sync + 'static> IntoSystemConfigs<()> for F {
-    fn configs(self) -> SystemConfigs {
-        SystemConfigs::Config(SystemConfig {
+impl<F: Fn() + Send + Sync + 'static> IntoSystemConfig<()> for F {
+    type In = ();
+
+    fn config(self) -> SystemConfig {
+        SystemConfig {
             id: SystemId::new(),
             name: None,
             exclusive: false,
             send: true,
             dependencies: HashSet::new(),
             init: |_| Box::new(()),
-            access: |_| vec![],
             run: Box::new(move |_, _, _| {
                 self();
             }),
             apply: Box::new(|_, _| {}),
-        })
-    }
-
-    fn before<Marker>(self, configs: impl IntoSystemConfigs<Marker>) -> SystemConfigs {
-        self.configs().before(configs)
+        }
     }
 }
 

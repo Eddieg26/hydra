@@ -2,7 +2,6 @@ use crate::core::Frame;
 
 pub mod archetype;
 pub mod cell;
-pub mod command;
 pub mod component;
 pub mod entity;
 pub mod event;
@@ -10,7 +9,6 @@ pub mod resource;
 
 pub use archetype::*;
 pub use cell::*;
-pub use command::*;
 pub use component::*;
 pub use entity::*;
 pub use event::*;
@@ -102,12 +100,12 @@ impl World {
         self.resources.register::<false, R>()
     }
 
-    pub fn register_event<E: Event>(&mut self) {
+    pub fn register_event<E: Event>(&mut self) -> EventId {
         if !self.resources.contains::<Events<E>>() {
             self.add_resource(Events::<E>::new());
         }
 
-        self.events.register::<E>();
+        self.events.register::<E>()
     }
 
     pub fn add_resource<R: Resource + Send>(&mut self, resource: R) {

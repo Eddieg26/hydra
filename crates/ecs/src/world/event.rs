@@ -1,24 +1,49 @@
-use super::{World, WorldCell, resource::Resource};
-use crate::{system::arg::SystemArg, SystemInit};
+use super::{Entity, World, WorldCell, resource::Resource};
+use crate::{SystemInit, system::arg::SystemArg};
 use std::{any::TypeId, collections::HashMap};
 
 pub trait Event: Send + Sync + Sized + 'static {}
 
+pub type EventId = u32;
+pub type EventIndex = usize;
+
+pub struct EventStorage<E: Event> {
+    pub(crate) events: Vec<E>,
+    pub(crate) entities: HashMap<Entity, Vec<EventIndex>>,
+}
+
+impl<E: Event> Default for EventStorage<E> {
+    fn default() -> Self {
+        Self {
+            events: vec![],
+            entities: HashMap::new(),
+        }
+    }
+}
+
 pub struct Events<E: Event> {
-    write: Vec<E>,
-    read: Vec<E>,
+    pub(crate) write: EventStorage<E>,
+    pub(crate) read: EventStorage<E>,
 }
 
 impl<E: Event> Events<E> {
     pub fn new() -> Self {
         Self {
-            write: Vec::new(),
-            read: Vec::new(),
+            write: EventStorage::default(),
+            read: EventStorage::default(),
         }
     }
 
     pub fn update(&mut self) {
         self.read = std::mem::take(&mut self.write);
+    }
+
+    pub fn entity(&self, entity: Entity) -> std::slice::Iter<'_, usize> {
+        self.read
+            .entities
+            .get(&entity)
+            .map(|events| events.iter())
+            .unwrap_or([].iter())
     }
 }
 
@@ -31,7 +56,7 @@ pub struct EventMeta {
 
 pub struct EventRegistry {
     metas: Vec<EventMeta>,
-    map: HashMap<TypeId, usize>,
+    map: HashMap<TypeId, EventId>,
 }
 
 impl EventRegistry {
@@ -42,14 +67,14 @@ impl EventRegistry {
         }
     }
 
-    pub fn register<E: Event>(&mut self) {
+    pub fn register<E: Event>(&mut self) -> EventId {
         let ty = TypeId::of::<E>();
-        if self.map.contains_key(&ty) {
-            return;
+        if let Some(ty) = self.map.get(&ty).copied() {
+            return ty;
         }
 
+        let id = self.metas.len() as u32;
         let name = std::any::type_name::<E>();
-        let index = self.metas.len();
         self.metas.push(EventMeta {
             name,
             update: |world| {
@@ -58,12 +83,19 @@ impl EventRegistry {
             },
         });
 
-        self.map.insert(ty, index);
+        self.map.insert(ty, id);
+        id
+    }
+
+    pub fn get_id<E: Event>(&self) -> Option<EventId> {
+        self.map.get(&TypeId::of::<E>()).copied()
     }
 
     pub fn get<E: Event>(&self) -> Option<&EventMeta> {
         let ty = TypeId::of::<E>();
-        self.map.get(&ty).and_then(|&index| self.metas.get(index))
+        self.map
+            .get(&ty)
+            .and_then(|&index| self.metas.get(index as usize))
     }
 
     pub fn update(&self, mut world: WorldCell) {
@@ -88,8 +120,8 @@ impl<'state, E: Event> Iterator for EventReader<'state, E> {
     type Item = &'state E;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.events.read.len() {
-            let event = &self.events.read[self.index];
+        if self.index < self.events.read.events.len() {
+            let event = &self.events.read.events[self.index];
             self.index += 1;
             Some(event)
         } else {
@@ -127,32 +159,60 @@ unsafe impl<E: Event> SystemArg for EventReader<'_, E> {
     }
 }
 
+pub struct EntityEvents<'state, E: Event> {
+    events: &'state Events<E>,
+    indicies: std::slice::Iter<'state, EventIndex>,
+}
+
+impl<'state, E: Event> EntityEvents<'state, E> {
+    pub fn new(events: &'state Events<E>, indicies: std::slice::Iter<'state, EventIndex>) -> Self {
+        Self { events, indicies }
+    }
+}
+
+impl<'state, E: Event> Iterator for EntityEvents<'state, E> {
+    type Item = &'state E;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.indicies
+            .next()
+            .copied()
+            .map(|index| &self.events.read.events[index])
+    }
+}
+
 pub struct EventWriter<'state, E: Event> {
-    events: &'state mut Vec<E>,
+    storage: &'state mut EventStorage<E>,
 }
 
 impl<'state, E: Event> EventWriter<'state, E> {
-    pub fn new(events: &'state mut Vec<E>) -> Self {
-        Self { events }
+    pub fn new(storage: &'state mut EventStorage<E>) -> Self {
+        Self { storage }
     }
 
     pub fn send(&mut self, event: E) {
-        self.events.push(event);
+        self.storage.events.push(event);
+    }
+
+    pub fn trigger(&mut self, entity: Entity, event: E) {
+        let index = self.storage.events.len();
+        self.storage.events.push(event);
+        self.storage.entities.entry(entity).or_default().push(index);
     }
 
     pub fn send_batch(&mut self, events: Vec<E>) {
-        self.events.extend(events);
+        self.storage.events.extend(events);
     }
 }
 
 unsafe impl<E: Event> SystemArg for EventWriter<'_, E> {
     type Item<'world, 'state> = EventWriter<'state, E>;
 
-    type State = Vec<E>;
+    type State = EventStorage<E>;
 
     fn init(system: &mut SystemInit) -> Self::State {
         system.world().register_event::<E>();
-        vec![]
+        EventStorage::default()
     }
 
     unsafe fn get<'world, 'state>(
@@ -165,6 +225,11 @@ unsafe impl<E: Event> SystemArg for EventWriter<'_, E> {
 
     fn apply(state: &mut Self::State, world: &mut super::World) {
         let events = world.resource_mut::<Events<E>>();
-        events.write.append(state);
+        let offset = events.write.events.len();
+        events.write.events.append(&mut state.events);
+        for (entity, added) in state.entities.drain() {
+            let indices = events.write.entities.entry(entity).or_default();
+            indices.extend(added.iter().map(|i| *i + offset));
+        }
     }
 }

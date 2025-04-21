@@ -1,5 +1,6 @@
-use super::{IntoSystemConfigs, SystemConfig, SystemConfigs, SystemId, SystemInit, SystemMeta};
+use super::{IntoSystemConfig, SystemConfig, SystemId, SystemInit, SystemMeta};
 use crate::{
+    CommandBuffer, Commands,
     system::{Access, SystemAccess},
     world::{Entities, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell},
 };
@@ -96,6 +97,28 @@ unsafe impl SystemArg for &Entities {
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
         unsafe { world.get().entities() }
+    }
+}
+
+unsafe impl SystemArg for Commands<'_, '_> {
+    type Item<'world, 'state> = Commands<'world, 'state>;
+
+    type State = CommandBuffer;
+
+    fn init(_: &mut SystemInit) -> Self::State {
+        CommandBuffer::new()
+    }
+
+    fn apply(state: &mut Self::State, world: &mut World) {
+        CommandBuffer::execute(state, world);
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        _: super::WorldCell<'world>,
+        _: &crate::system::SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        Commands::new(state)
     }
 }
 
@@ -238,12 +261,14 @@ unsafe impl<A: SystemArg> SystemArg for Option<A> {
 macro_rules! impl_into_system_configs {
     ($($arg:ident),*) => {
     #[allow(non_snake_case)]
-    impl<F, $($arg: SystemArg),*> IntoSystemConfigs<(F, $($arg),*)> for F
+    impl<F, $($arg: SystemArg),*> IntoSystemConfig<(F, $($arg),*)> for F
         where
             for<'world, 'state> F: Fn($($arg),*) + Fn($(ArgItem<'world,'state, $arg>),*) + Send + Sync + 'static,
         {
 
-            fn configs(self) -> SystemConfigs {
+            type In = A;
+
+            fn config(self) -> SystemConfig {
                 let name = std::any::type_name::<F>();
 
                 let init = |system: &mut super::SystemInit| {
@@ -264,17 +289,10 @@ macro_rules! impl_into_system_configs {
                     $($arg::apply($arg, world);)*
                 };
 
-                let access = |state: &Box<dyn Any + Send + Sync>| {
-                    let ($($arg,)*) = state.downcast_ref::<($($arg::State,)*)>().unwrap();
-                    let mut access = Vec::new();
-                    $(access.extend($arg::access($arg));)*
-                    access
-                };
-
                 let send = ($($arg::send() &&)* true);
                 let exclusive = ($($arg::exclusive() ||)* false);
 
-                SystemConfigs::Config(SystemConfig {
+                SystemConfig {
                     id: SystemId::new(),
                     name: Some(name.into()),
                     exclusive,
@@ -283,33 +301,7 @@ macro_rules! impl_into_system_configs {
                     init,
                     run: Box::new(execute),
                     apply: Box::new(apply),
-                    access
-                })
-            }
-
-            fn before<Marker>(self, configs: impl IntoSystemConfigs<Marker>) -> SystemConfigs {
-                let before = self.configs().single();
-                let after_configs = configs.configs();
-
-                match after_configs {
-                    SystemConfigs::Config(mut config) => {
-                        config.dependencies.insert(before.id);
-                        SystemConfigs::Configs(vec![before, config])
-                    }
-                    SystemConfigs::Configs(mut configs) => {
-                        configs.iter_mut().for_each(|config| {
-                            config.dependencies.insert(before.id);
-                        });
-
-                        configs.insert(0, before);
-                        SystemConfigs::Configs(configs)
-                    }
                 }
-            }
-
-            fn after<Marker>(self, configs: impl IntoSystemConfigs<Marker>) -> SystemConfigs {
-                let configs = configs.configs();
-                configs.before(self)
             }
         }
 

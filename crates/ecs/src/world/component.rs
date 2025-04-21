@@ -74,7 +74,11 @@ impl Components {
     }
 
     pub fn get_id<C: Component>(&self) -> Option<ComponentId> {
-        self.map.get(&TypeId::of::<C>()).copied()
+        self.get_type_id(TypeId::of::<C>())
+    }
+
+    pub fn get_type_id(&self, id: TypeId) -> Option<ComponentId> {
+        self.map.get(&id).copied()
     }
 
     pub unsafe fn get_id_unchecked<C: Component>(&self) -> ComponentId {

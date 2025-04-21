@@ -1,7 +1,7 @@
 use super::{Command, Component, Entity, World};
 use crate::{
-    ArchetypeQuery, BaseFilter, BaseQuery, Column, ComponentId, EntityMut, QueryState, SparseIndex,
-    SystemInit, WorldCell,
+    ArchetypeQuery, BaseFilter, BaseQuery, Column, ComponentId, EntityCommands, EntityMut,
+    QueryState, SparseIndex, SystemInit, WorldCell,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,6 +152,33 @@ impl Command for RemoveAllChildren {
         if let Some((_, children)) = world.remove_component::<Children>(self.0) {
             for child in children.0 {
                 world.remove_component::<Parent>(child);
+            }
+        }
+    }
+}
+
+pub struct SetParent {
+    pub parent: Entity,
+    pub entity: Entity,
+}
+
+impl Command for SetParent {
+    fn execute(self, world: &mut World) {
+        AddChild {
+            parent: self.parent,
+            child: self.entity,
+        }
+        .execute(world);
+    }
+}
+
+pub struct RemoveParent(Entity);
+
+impl Command for RemoveParent {
+    fn execute(self, world: &mut World) {
+        if let Some((_, parent)) = world.remove_component::<Parent>(self.0) {
+            if let Some(children) = world.get_component_mut::<Children>(*parent) {
+                children.0.retain(|child| *child != self.0);
             }
         }
     }
@@ -381,6 +408,59 @@ impl<Q: BaseQuery, F: BaseFilter> BaseQuery for Children<Q, F> {
                 }
             })
             .collect()
+    }
+}
+
+impl EntityCommands<'_> {
+    pub fn set_parent(&mut self, parent: Entity) {
+        self.commands.add(AddChild {
+            parent,
+            child: self.entity,
+        });
+    }
+
+    pub fn remove_parent(&mut self) {
+        self.commands.add(RemoveParent(self.entity));
+    }
+
+    pub fn add_child(&mut self, child: Entity) {
+        self.commands.add(AddChild {
+            parent: self.entity,
+            child,
+        });
+    }
+
+    pub fn add_children(&mut self, children: Vec<Entity>) {
+        self.commands.add(AddChildren {
+            parent: self.entity,
+            children,
+        });
+    }
+
+    pub fn insert_children(&mut self, index: usize, children: Vec<Entity>) {
+        self.commands.add(InsertChildren {
+            parent: self.entity,
+            index,
+            children,
+        });
+    }
+
+    pub fn remove_child(&mut self, child: Entity) {
+        self.commands.add(RemoveChild {
+            parent: self.entity,
+            child,
+        });
+    }
+
+    pub fn remove_children(&mut self, children: Vec<Entity>) {
+        self.commands.add(RemoveChildren {
+            parent: self.entity,
+            children,
+        });
+    }
+
+    pub fn remove_all_children(&mut self) {
+        self.commands.add(RemoveAllChildren(self.entity));
     }
 }
 
