@@ -1,7 +1,6 @@
 use super::{IntoSystemConfig, SystemConfig, SystemId, SystemInit, SystemMeta};
 use crate::{
     CommandBuffer, Commands,
-    system::{Access, SystemAccess},
     world::{Entities, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell},
 };
 use std::any::Any;
@@ -34,10 +33,6 @@ pub unsafe trait SystemArg: Sized {
     }
 
     fn apply(state: &mut Self::State, world: &mut World) {}
-
-    fn access(state: &Self::State) -> Vec<SystemAccess> {
-        vec![]
-    }
 }
 
 pub type ArgItem<'world, 'state, A> = <A as SystemArg>::Item<'world, 'state>;
@@ -138,10 +133,6 @@ unsafe impl<R: Resource + Send> SystemArg for &R {
     ) -> Self::Item<'world, 'state> {
         unsafe { world.get().resource() }
     }
-
-    fn access(state: &Self::State) -> Vec<SystemAccess> {
-        vec![SystemAccess::resource(*state, Access::Read)]
-    }
 }
 
 unsafe impl<R: Resource + Send> SystemArg for &mut R {
@@ -159,10 +150,6 @@ unsafe impl<R: Resource + Send> SystemArg for &mut R {
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
         unsafe { world.get_mut().resource_mut() }
-    }
-
-    fn access(state: &Self::State) -> Vec<SystemAccess> {
-        vec![SystemAccess::resource(*state, Access::Write)]
     }
 }
 
@@ -188,10 +175,6 @@ unsafe impl<R: Resource> SystemArg for NonSend<'_, R> {
     fn send() -> bool {
         false
     }
-
-    fn access(state: &Self::State) -> Vec<SystemAccess> {
-        vec![SystemAccess::resource(*state, Access::Read)]
-    }
 }
 
 unsafe impl<R: Resource> SystemArg for NonSendMut<'_, R> {
@@ -215,10 +198,6 @@ unsafe impl<R: Resource> SystemArg for NonSendMut<'_, R> {
 
     fn send() -> bool {
         false
-    }
-
-    fn access(state: &Self::State) -> Vec<SystemAccess> {
-        vec![SystemAccess::resource(*state, Access::Write)]
     }
 }
 
@@ -251,10 +230,6 @@ unsafe impl<A: SystemArg> SystemArg for Option<A> {
 
     fn send() -> bool {
         A::send()
-    }
-
-    fn access(state: &Self::State) -> Vec<SystemAccess> {
-        A::access(state)
     }
 }
 
@@ -332,13 +307,6 @@ macro_rules! impl_into_system_configs {
             fn apply(state: &mut Self::State, world: &mut World) {
                 let ($($arg,)*) = state;
                 $($arg::apply($arg, world);)*
-            }
-
-            fn access(state: &Self::State) -> Vec<SystemAccess> {
-                let ($($arg,)*) = state;
-                let mut access = Vec::new();
-                $(access.extend($arg::access($arg));)*
-                access
             }
         }
     };

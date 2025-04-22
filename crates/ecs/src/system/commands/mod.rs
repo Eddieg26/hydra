@@ -146,26 +146,6 @@ impl<'a> EntityCommands<'a> {
     pub fn remove_component<C: Component>(&mut self) {
         self.commands.add(RemoveComponent::<C>::new(self.entity));
     }
-
-    pub fn despawn(self) {
-        self.commands.add(Despawn(self.entity));
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Spawn;
-impl Command for Spawn {
-    fn execute(self, world: &mut World) {
-        world.spawn();
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Despawn(pub Entity);
-impl Command for Despawn {
-    fn execute(self, world: &mut World) {
-        world.despawn(self.0);
-    }
 }
 
 pub struct AddComponent<C: Component> {

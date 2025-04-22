@@ -1,3 +1,4 @@
+use super::Command;
 use crate::{Component, Entity, Row, SystemArg, SystemInit, World, WorldCell};
 
 pub struct Spawner<'world, 'state> {
@@ -70,5 +71,13 @@ impl<'world, 'state, 'spawner> Spawned<'world, 'state, 'spawner> {
         let id = self.id;
         self.spawner.entities.push((id, self.components));
         id
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Spawn;
+impl Command for Spawn {
+    fn execute(self, world: &mut World) {
+        world.spawn();
     }
 }

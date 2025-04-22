@@ -101,7 +101,7 @@ impl<'a> Iterator for AccessBitsetIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.index < self.bits.len() {
             let value = self.bits.get(self.index);
-            self.index += 1;
+            self.index += 2;
             Some(value)
         } else {
             None

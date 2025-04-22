@@ -1,7 +1,6 @@
 use super::{Command, Component, Entity, World};
 use crate::{
-    ArchetypeQuery, BaseFilter, BaseQuery, Column, ComponentId, EntityCommands, EntityMut,
-    QueryState, SparseIndex, SystemInit, WorldCell,
+    BaseFilter, BaseQuery, ComponentQuery, EntityCommands, EntityMut, SparseIndex, SubQueryState,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -272,48 +271,30 @@ impl<'w> EntityMut<'w> {
     }
 }
 
-pub struct SubQuery<'w, Q: BaseQuery, F: BaseFilter = ()> {
-    query: &'w ArchetypeQuery,
-    world: WorldCell<'w>,
-    column: &'w Column,
-    state: Q::State<'w>,
-    filter: F::State<'w>,
-}
+impl<Q: BaseQuery, F: BaseFilter> ComponentQuery for Parent<Q, F> {
+    type Component = Parent;
+    type Query = Q;
+    type Filter = F;
 
-impl<Q: BaseQuery, F: BaseFilter> BaseQuery for Parent<Q, F> {
     type Item<'w> = Option<Q::Item<'w>>;
 
-    type State<'w> = Option<SubQuery<'w, Q, F>>;
-
-    type Data = (QueryState<Q, F>, ComponentId);
-
-    fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
-        <Children<Q, F> as BaseQuery>::init(system, query)
-    }
-
-    fn state<'w>(
-        data: &'w Self::Data,
-        world: WorldCell<'w>,
-        archetype: &'w crate::Archetype,
-        current_frame: crate::Frame,
-        system_frame: crate::Frame,
-    ) -> Self::State<'w> {
-        <Children<Q, F> as BaseQuery>::state(data, world, archetype, current_frame, system_frame)
-    }
-
-    fn get<'w>(state: &mut Self::State<'w>, _: Entity, row: crate::RowIndex) -> Self::Item<'w> {
-        let Some(SubQuery {
+    fn get<'w>(
+        state: &mut crate::SubQueryState<'w, Self::Query, Self::Filter>,
+        _: Entity,
+        row: crate::RowIndex,
+    ) -> Self::Item<'w> {
+        let SubQueryState {
             query,
             world,
             column,
             state,
             filter,
-        }) = state
-        else {
-            return None;
-        };
+        } = state;
 
-        let Some(parent) = column.get::<Parent>(row.to_usize()).copied() else {
+        let Some(parent) = column
+            .and_then(|c| c.get::<Parent>(row.to_usize()))
+            .copied()
+        else {
             return None;
         };
 
@@ -329,67 +310,27 @@ impl<Q: BaseQuery, F: BaseFilter> BaseQuery for Parent<Q, F> {
     }
 }
 
-impl<Q: BaseQuery, F: BaseFilter> BaseQuery for Children<Q, F> {
+impl<Q: BaseQuery, F: BaseFilter> ComponentQuery for Children<Q, F> {
+    type Component = Children;
+    type Query = Q;
+    type Filter = F;
+
     type Item<'w> = Vec<Q::Item<'w>>;
 
-    type State<'w> = Option<SubQuery<'w, Q, F>>;
-
-    type Data = (QueryState<Q, F>, ComponentId);
-
-    fn init(system: &mut SystemInit, _: &mut super::ArchetypeQuery) -> Self::Data {
-        let mut child_query = ArchetypeQuery::default();
-        let data = Q::init(system, &mut child_query);
-        let filter = F::init(system, &mut child_query);
-        let id = system.world().register::<Children>();
-
-        let state = QueryState {
-            query: child_query,
-            data,
-            filter,
-        };
-
-        (state, id)
-    }
-
-    fn state<'w>(
-        data: &'w Self::Data,
-        world: WorldCell<'w>,
-        archetype: &'w super::Archetype,
-        current_frame: crate::Frame,
-        system_frame: crate::Frame,
-    ) -> Self::State<'w> {
-        let column = archetype.table().get_column(data.1)?;
-        let state = Q::state(&data.0.data, world, archetype, current_frame, system_frame);
-        let filter = F::state(
-            &data.0.filter,
-            world,
-            archetype,
-            current_frame,
-            system_frame,
-        );
-
-        Some(SubQuery {
-            query: &data.0.query,
-            world,
-            column,
-            state,
-            filter,
-        })
-    }
-
-    fn get<'w>(state: &mut Self::State<'w>, _: Entity, row: super::RowIndex) -> Self::Item<'w> {
-        let Some(SubQuery {
+    fn get<'w>(
+        state: &mut crate::SubQueryState<'w, Self::Query, Self::Filter>,
+        _: Entity,
+        row: crate::RowIndex,
+    ) -> Self::Item<'w> {
+        let SubQueryState {
             query,
             world,
             column,
             state,
             filter,
-        }) = state
-        else {
-            return vec![];
-        };
+        } = state;
 
-        let Some(children) = column.get::<Children>(row.to_usize()) else {
+        let Some(children) = column.and_then(|c| c.get::<Children>(row.to_usize())) else {
             return vec![];
         };
 
@@ -464,6 +405,38 @@ impl EntityCommands<'_> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Despawn(pub Entity);
+
+impl Command for Despawn {
+    fn execute(self, world: &mut World) {
+        let id = world.components().get_id::<Children>().unwrap();
+        let parent = world.get_component::<Parent>(self.0).copied();
+
+        let mut stack = vec![self.0];
+        while let Some(entity) = stack.pop() {
+            let Some((_, row)) = world.despawn(entity) else {
+                continue;
+            };
+
+            let Some(children) = row.get::<Children>(id) else {
+                continue;
+            };
+
+            for child in &children.0 {
+                stack.push(*child);
+            }
+        }
+
+        if let Some(children) =
+            parent.and_then(|parent| world.get_component_mut::<Children>(*parent))
+        {
+            children.0.retain(|child| *child != self.0);
+        }
+    }
+}
+
+#[allow(unused_imports)]
 mod tests {
     use super::{
         AddChild, AddChildren, Children, Parent, RemoveAllChildren, RemoveChild, RemoveChildren,

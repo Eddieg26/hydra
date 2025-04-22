@@ -1,5 +1,6 @@
+use super::arg::SystemArg;
+use super::{Access, SystemInit, SystemName};
 use crate::core::{Frame, ObjectStatus, blob::Ptr, sparse::SparseIndex};
-use crate::system::Access;
 use crate::world::{
     Component, ComponentId, Entity, World,
     archetype::{
@@ -8,10 +9,68 @@ use crate::world::{
     },
     cell::WorldCell,
 };
-use crate::{EntityEvents, Event, EventId, Events};
+use crate::{AccessBitset, EntityEvents, Event, Events};
 
-use super::arg::SystemArg;
-use super::{SystemAccess, SystemInit};
+pub struct QueryBuilder<'a> {
+    system: Option<&'a SystemName>,
+    world: &'a mut World,
+    access: &'a mut AccessBitset,
+    query: &'a mut ArchetypeQuery,
+}
+
+impl<'a> QueryBuilder<'a> {
+    pub fn world(&mut self) -> &mut World {
+        self.world
+    }
+
+    pub fn include<C: Component>(&mut self, access: Access) -> ComponentId {
+        let id = match access {
+            Access::Read => self.read::<C>(),
+            Access::Write => self.write::<C>(),
+        };
+
+        self.query.include(id)
+    }
+
+    pub fn exclude<C: Component>(&mut self) -> ComponentId {
+        let id = self.world.register::<C>();
+
+        self.access.set(id.to_usize(), false);
+        self.access.set(id.to_usize() + 1, false);
+
+        self.query.exclude(id)
+    }
+
+    pub fn any<C: Component>(&mut self) -> ComponentId {
+        let id = self.world.register::<C>();
+
+        self.query.any(id)
+    }
+
+    pub fn read<C: Component>(&mut self) -> ComponentId {
+        let id = self.world.register::<C>();
+
+        if !self.access.read(id.to_usize()) {
+            let meta = self.world.components().get_by_id(id).unwrap();
+
+            panic!("{:?}: Invalid read access: {}", self.system, meta.name());
+        }
+
+        id
+    }
+
+    pub fn write<C: Component>(&mut self) -> ComponentId {
+        let id = self.world.register::<C>();
+
+        if !self.access.write(id.to_usize()) {
+            let meta = self.world.components().get_by_id(id).unwrap();
+
+            panic!("{:?}: Invalid write access: {}", self.system, meta.name());
+        }
+
+        id
+    }
+}
 
 pub trait BaseQuery {
     type Item<'w>;
@@ -21,7 +80,7 @@ pub trait BaseQuery {
     /// This is used to create the query state when the query is first created.
     type Data: Send + Sync + Sized;
 
-    fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data;
+    fn init(builder: &mut QueryBuilder) -> Self::Data;
 
     fn state<'w>(
         data: &'w Self::Data,
@@ -32,9 +91,116 @@ pub trait BaseQuery {
     ) -> Self::State<'w>;
 
     fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w>;
+}
 
-    fn access(_: &Self::Data) -> Vec<SystemAccess> {
-        vec![]
+pub trait ComponentQuery {
+    type Component: Component;
+    type Query: BaseQuery;
+    type Filter: BaseFilter;
+
+    type Item<'w>: IntoIterator<Item = <Self::Query as BaseQuery>::Item<'w>>;
+
+    fn get<'w>(
+        state: &mut SubQueryState<'w, Self::Query, Self::Filter>,
+        entity: Entity,
+        row: RowIndex,
+    ) -> Self::Item<'w>;
+}
+
+pub struct SubQuery<C: ComponentQuery>(std::marker::PhantomData<C>);
+
+pub struct SubQueryState<'w, Q: BaseQuery, F: BaseFilter = ()> {
+    pub query: &'w ArchetypeQuery,
+    pub world: WorldCell<'w>,
+    pub column: Option<&'w Column>,
+    pub state: Q::State<'w>,
+    pub filter: F::State<'w>,
+}
+
+impl<C: ComponentQuery> BaseQuery for SubQuery<C> {
+    type Item<'w> = C::Item<'w>;
+
+    type State<'w> = SubQueryState<'w, C::Query, C::Filter>;
+
+    type Data = (QueryState<C::Query, C::Filter>, ComponentId);
+
+    fn init(builder: &mut QueryBuilder) -> Self::Data {
+        let mut sub_query = ArchetypeQuery::default();
+        let mut access = AccessBitset::new();
+
+        let mut sub_query_builder = QueryBuilder {
+            system: builder.system.clone(),
+            world: builder.world,
+            access: &mut access,
+            query: &mut sub_query,
+        };
+
+        let data = C::Query::init(&mut sub_query_builder);
+        let filter = C::Filter::init(&mut sub_query_builder);
+        let id = sub_query_builder.world.register::<C::Component>();
+
+        for (index, (read, write)) in sub_query_builder.access.iter().enumerate() {
+            let valid = if write {
+                builder.access.write(id.to_usize())
+            } else if read {
+                builder.access.read(id.to_usize())
+            } else {
+                true
+            };
+
+            if !valid {
+                let component = builder
+                    .world
+                    .components()
+                    .get_by_id(ComponentId(index as u32))
+                    .unwrap();
+                let system = builder.system;
+
+                panic!(
+                    "Invalid subquery access for component: {} at system: {:?}",
+                    component.name(),
+                    system
+                );
+            }
+        }
+
+        let state = QueryState {
+            query: sub_query,
+            data,
+            filter,
+        };
+
+        (state, id)
+    }
+
+    fn state<'w>(
+        data: &'w Self::Data,
+        world: WorldCell<'w>,
+        archetype: &'w Archetype,
+        current_frame: Frame,
+        system_frame: Frame,
+    ) -> Self::State<'w> {
+        let column = archetype.table().get_column(data.1);
+        let state = C::Query::state(&data.0.data, world, archetype, current_frame, system_frame);
+        let filter = C::Filter::state(
+            &data.0.filter,
+            world,
+            archetype,
+            current_frame,
+            system_frame,
+        );
+
+        SubQueryState {
+            query: &data.0.query,
+            world,
+            column,
+            state,
+            filter,
+        }
+    }
+
+    fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w> {
+        C::get(state, entity, row)
     }
 }
 
@@ -45,7 +211,7 @@ impl BaseQuery for () {
 
     type Data = ();
 
-    fn init(_: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
+    fn init(_: &mut QueryBuilder) -> Self::Data {
         ()
     }
 
@@ -68,7 +234,7 @@ pub trait BaseFilter {
     type State<'w>;
     type Data: Send + Sync + Sized;
 
-    fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data;
+    fn init(builder: &mut QueryBuilder) -> Self::Data;
 
     fn state<'w>(
         data: &Self::Data,
@@ -85,7 +251,7 @@ impl BaseFilter for () {
     type State<'w> = ();
     type Data = ();
 
-    fn init(_: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
+    fn init(_: &mut QueryBuilder) -> Self::Data {
         ()
     }
 
@@ -110,8 +276,8 @@ impl<C: Component> BaseFilter for Not<Added<C>> {
 
     type Data = <Added<C> as BaseFilter>::Data;
 
-    fn init(system: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
-        system.world.register::<C>()
+    fn init(builder: &mut QueryBuilder) -> Self::Data {
+        builder.world().register::<C>()
     }
 
     fn state<'w>(
@@ -134,8 +300,8 @@ impl<C: Component> BaseFilter for Not<Modified<C>> {
 
     type Data = <Modified<C> as BaseFilter>::Data;
 
-    fn init(system: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
-        system.world.register::<C>()
+    fn init(builder: &mut QueryBuilder) -> Self::Data {
+        builder.world().register::<C>()
     }
 
     fn state<'w>(
@@ -158,10 +324,8 @@ impl<C: Component> BaseFilter for With<'_, C> {
     type State<'w> = bool;
     type Data = ComponentId;
 
-    fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
-        let id = system.world.register::<C>();
-
-        query.any(id)
+    fn init(builder: &mut QueryBuilder) -> Self::Data {
+        builder.include::<C>(Access::Read)
     }
 
     fn state<'w>(
@@ -184,10 +348,8 @@ impl<C: Component> BaseFilter for Without<C> {
     type State<'w> = bool;
     type Data = ComponentId;
 
-    fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
-        let id = system.world.register::<C>();
-
-        query.exclude(id)
+    fn init(builder: &mut QueryBuilder) -> Self::Data {
+        builder.exclude::<C>()
     }
 
     fn state<'w>(
@@ -216,8 +378,8 @@ impl<C: Component> BaseFilter for Added<C> {
     type State<'w> = AddedComponent<'w, C>;
     type Data = ComponentId;
 
-    fn init(system: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
-        system.world.register::<C>()
+    fn init(builder: &mut QueryBuilder) -> Self::Data {
+        builder.any::<C>()
     }
 
     fn state<'w>(
@@ -257,10 +419,8 @@ impl<C: Component> BaseFilter for Modified<C> {
     type State<'w> = ModifiedComponent<'w, C>;
     type Data = ComponentId;
 
-    fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
-        let id = system.world.register::<C>();
-
-        query.any(id)
+    fn init(builder: &mut QueryBuilder) -> Self::Data {
+        builder.any::<C>()
     }
 
     fn state<'w>(
@@ -312,10 +472,8 @@ impl<C: Component> BaseQuery for &C {
 
     type Data = ComponentId;
 
-    fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
-        let id = system.world.register::<C>();
-
-        query.include(id)
+    fn init(builder: &mut QueryBuilder) -> Self::Data {
+        builder.include::<C>(Access::Read)
     }
 
     fn state<'w>(
@@ -338,13 +496,6 @@ impl<C: Component> BaseQuery for &C {
             .components
             .get(row.to_usize())
             .expect(&format!("Component not found for entity: {:?}", entity))
-    }
-
-    fn access(data: &Self::Data) -> Vec<SystemAccess> {
-        vec![SystemAccess::Component {
-            id: *data,
-            access: Access::Read,
-        }]
     }
 }
 
@@ -377,8 +528,8 @@ impl<C: Component> BaseQuery for &mut C {
 
     type Data = ComponentId;
 
-    fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
-        <&C as BaseQuery>::init(system, query)
+    fn init(builder: &mut QueryBuilder) -> Self::Data {
+        builder.include::<C>(Access::Write)
     }
 
     fn state<'w>(
@@ -414,13 +565,6 @@ impl<C: Component> BaseQuery for &mut C {
 
         component
     }
-
-    fn access(data: &Self::Data) -> Vec<SystemAccess> {
-        vec![SystemAccess::Component {
-            id: *data,
-            access: Access::Write,
-        }]
-    }
 }
 
 impl<C: Component> BaseQuery for Option<&C> {
@@ -430,10 +574,8 @@ impl<C: Component> BaseQuery for Option<&C> {
 
     type Data = ComponentId;
 
-    fn init(system: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
-        let id = system.world.register::<C>();
-
-        id
+    fn init(builder: &mut QueryBuilder) -> Self::Data {
+        builder.read::<C>()
     }
 
     fn state<'w>(
@@ -455,10 +597,6 @@ impl<C: Component> BaseQuery for Option<&C> {
             None => None,
         }
     }
-
-    fn access(data: &Self::Data) -> Vec<SystemAccess> {
-        <&C as BaseQuery>::access(data)
-    }
 }
 
 impl<C: Component> BaseQuery for Option<&mut C> {
@@ -468,10 +606,8 @@ impl<C: Component> BaseQuery for Option<&mut C> {
 
     type Data = ComponentId;
 
-    fn init(system: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
-        let id = system.world.register::<C>();
-
-        id
+    fn init(builder: &mut QueryBuilder) -> Self::Data {
+        builder.write::<C>()
     }
 
     fn state<'w>(
@@ -493,10 +629,6 @@ impl<C: Component> BaseQuery for Option<&mut C> {
             None => None,
         }
     }
-
-    fn access(data: &Self::Data) -> Vec<SystemAccess> {
-        <&mut C as BaseQuery>::access(data)
-    }
 }
 
 impl BaseQuery for Entity {
@@ -506,7 +638,7 @@ impl BaseQuery for Entity {
 
     type Data = ();
 
-    fn init(_: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
+    fn init(_: &mut QueryBuilder) -> Self::Data {
         ()
     }
 
@@ -532,8 +664,8 @@ impl<E: Event> BaseQuery for Events<E> {
 
     type Data = ();
 
-    fn init(system: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
-        system.world.register_event::<E>();
+    fn init(builder: &mut QueryBuilder) -> Self::Data {
+        builder.world.register_event::<E>();
     }
 
     fn state<'w>(
@@ -556,8 +688,8 @@ impl<E: Event> BaseFilter for E {
 
     type Data = ();
 
-    fn init(system: &mut SystemInit, _: &mut ArchetypeQuery) -> Self::Data {
-        system.world.register_event::<E>();
+    fn init(builder: &mut QueryBuilder) -> Self::Data {
+        builder.world.register_event::<E>();
     }
 
     fn state<'w>(
@@ -589,8 +721,17 @@ pub struct QueryState<Q: BaseQuery, F: BaseFilter = ()> {
 impl<Q: BaseQuery, F: BaseFilter> QueryState<Q, F> {
     pub fn new(system: &mut SystemInit) -> Self {
         let mut query = ArchetypeQuery::default();
-        let data = Q::init(system, &mut query);
-        let filter = F::init(system, &mut query);
+        let world = unsafe { system.world.cell().get_mut() };
+
+        let mut builder = QueryBuilder {
+            system: system.name.as_ref(),
+            world,
+            access: &mut system.components,
+            query: &mut query,
+        };
+
+        let data = Q::init(&mut builder);
+        let filter = F::init(&mut builder);
 
         QueryState {
             query,
@@ -667,10 +808,6 @@ unsafe impl<Q: BaseQuery + 'static, F: BaseFilter + 'static> SystemArg for Query
         system: &super::SystemMeta,
     ) -> Self::Item<'world, 'state> {
         unsafe { Query::with_frame(world.get(), state, system.frame) }
-    }
-
-    fn access(state: &Self::State) -> Vec<super::SystemAccess> {
-        Q::access(&state.data)
     }
 }
 
@@ -788,8 +925,8 @@ macro_rules! impl_base_query_for_tuples {
 
                 type Data = ($($name::Data), +);
 
-                fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
-                    ($($name::init(system, query),)*)
+                fn init(builder: &mut QueryBuilder) -> Self::Data {
+                    ($($name::init(builder),)*)
                 }
 
                 fn state<'w>(data: &'w Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
@@ -804,15 +941,6 @@ macro_rules! impl_base_query_for_tuples {
                         $name::get($name, entity, row),
                     )*)
                 }
-
-                fn access(data: &Self::Data) -> Vec<SystemAccess> {
-                    let ($($name,)*) = data;
-                    let mut access = vec![];
-                    $(
-                        access.extend($name::access($name));
-                    )*
-                    access
-                }
             }
 
             #[allow(non_snake_case)]
@@ -821,8 +949,8 @@ macro_rules! impl_base_query_for_tuples {
 
                 type Data = ($($name::Data), +);
 
-                fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
-                    ($($name::init(system, query),)*)
+                fn init(builder: &mut QueryBuilder) -> Self::Data {
+                    ($($name::init(builder),)*)
                 }
 
                 fn state<'w>(data: &Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
@@ -848,8 +976,8 @@ macro_rules! impl_base_query_for_tuples {
 
                 type Data = ($($name::Data), +);
 
-                fn init(system: &mut SystemInit, query: &mut ArchetypeQuery) -> Self::Data {
-                    ($($name::init(system, query),)*)
+                fn init(builder: &mut QueryBuilder) -> Self::Data {
+                    ($($name::init(builder),)*)
                 }
 
                 fn state<'w>(data: &Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {

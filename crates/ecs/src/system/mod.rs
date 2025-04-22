@@ -181,9 +181,9 @@ pub struct SystemConfig {
     exclusive: bool,
     send: bool,
     dependencies: HashSet<SystemId>,
-    init: fn(&mut SystemInit) -> Box<dyn Any + Send + Sync>,
-    run: SystemRun,
-    apply: SystemApply,
+    init: SystemInitFn,
+    run: SystemRunFn,
+    apply: SystemApplyFn,
 }
 
 impl SystemConfig {
@@ -374,19 +374,25 @@ impl<F: Fn() + Send + Sync + 'static> IntoSystemConfig<()> for F {
 }
 
 pub type SystemState = Box<dyn Any + Send + Sync>;
-pub type SystemRun =
+pub type SystemInitFn = fn(&mut SystemInit) -> Box<dyn Any + Send + Sync>;
+pub type SystemRunFn =
     Box<dyn Fn(&mut Box<dyn Any + Send + Sync>, WorldCell, &SystemMeta) + Send + Sync>;
-pub type SystemApply = Box<dyn Fn(&mut Box<dyn Any + Send + Sync>, &mut World) + Send + Sync>;
+pub type SystemApplyFn = Box<dyn Fn(&mut Box<dyn Any + Send + Sync>, &mut World) + Send + Sync>;
 
 pub struct System {
     meta: SystemMeta,
     state: SystemState,
-    run: SystemRun,
-    apply: SystemApply,
+    run: SystemRunFn,
+    apply: SystemApplyFn,
 }
 
 impl System {
-    pub fn new(meta: SystemMeta, state: SystemState, run: SystemRun, apply: SystemApply) -> Self {
+    pub fn new(
+        meta: SystemMeta,
+        state: SystemState,
+        run: SystemRunFn,
+        apply: SystemApplyFn,
+    ) -> Self {
         Self {
             meta,
             state,
