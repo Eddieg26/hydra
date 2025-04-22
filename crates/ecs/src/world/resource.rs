@@ -83,6 +83,20 @@ impl ResourceMeta {
     }
 }
 
+pub struct ResourceIndex<R: Resource>(usize, std::marker::PhantomData<R>);
+impl<R: Resource> ResourceIndex<R> {
+    pub fn get(&self) -> usize {
+        self.0
+    }
+}
+
+impl<R: Resource> Clone for ResourceIndex<R> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), Default::default())
+    }
+}
+impl<R: Resource> Copy for ResourceIndex<R> {}
+
 pub struct Resources {
     data: Vec<u8>,
     meta: Vec<ResourceMeta>,
@@ -290,13 +304,13 @@ impl<'a, R: Resource> AsMut<R> for NonSendMut<'a, R> {
     }
 }
 
-pub struct Cloned<R: Resource>(R);
-impl<R: Resource> Cloned<R> {
+pub struct Cloned<R: Resource + Clone>(R);
+impl<R: Resource + Clone> Cloned<R> {
     pub fn new(resource: R) -> Self {
         Self(resource)
     }
 }
-impl<R: Resource> std::ops::Deref for Cloned<R> {
+impl<R: Resource + Clone> std::ops::Deref for Cloned<R> {
     type Target = R;
 
     fn deref(&self) -> &Self::Target {
@@ -304,19 +318,19 @@ impl<R: Resource> std::ops::Deref for Cloned<R> {
     }
 }
 
-impl<R: Resource> AsRef<R> for Cloned<R> {
+impl<R: Resource + Clone> AsRef<R> for Cloned<R> {
     fn as_ref(&self) -> &R {
         &self.0
     }
 }
 
-impl<R: Resource> std::ops::DerefMut for Cloned<R> {
+impl<R: Resource + Clone> std::ops::DerefMut for Cloned<R> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<R: Resource> AsMut<R> for Cloned<R> {
+impl<R: Resource + Clone> AsMut<R> for Cloned<R> {
     fn as_mut(&mut self) -> &mut R {
         &mut self.0
     }

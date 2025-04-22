@@ -3,6 +3,8 @@ use crate::{
     BaseFilter, BaseQuery, ComponentQuery, EntityCommands, EntityMut, SparseIndex, SubQueryState,
 };
 
+pub mod spawner;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Parent<Q: BaseQuery = (), F: BaseFilter = ()>(Entity, std::marker::PhantomData<(Q, F)>);
 impl Parent {
@@ -405,36 +407,6 @@ impl EntityCommands<'_> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Despawn(pub Entity);
-
-impl Command for Despawn {
-    fn execute(self, world: &mut World) {
-        let id = world.components().get_id::<Children>().unwrap();
-        let parent = world.get_component::<Parent>(self.0).copied();
-
-        let mut stack = vec![self.0];
-        while let Some(entity) = stack.pop() {
-            let Some((_, row)) = world.despawn(entity) else {
-                continue;
-            };
-
-            let Some(children) = row.get::<Children>(id) else {
-                continue;
-            };
-
-            for child in &children.0 {
-                stack.push(*child);
-            }
-        }
-
-        if let Some(children) =
-            parent.and_then(|parent| world.get_component_mut::<Children>(*parent))
-        {
-            children.0.retain(|child| *child != self.0);
-        }
-    }
-}
 
 #[allow(unused_imports)]
 mod tests {

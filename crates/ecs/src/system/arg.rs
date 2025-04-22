@@ -1,6 +1,6 @@
 use super::{IntoSystemConfig, SystemConfig, SystemId, SystemInit, SystemMeta};
 use crate::{
-    CommandBuffer, Commands,
+    Cloned, CommandBuffer, Commands,
     world::{Entities, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell},
 };
 use std::any::Any;
@@ -123,15 +123,15 @@ unsafe impl<R: Resource + Send> SystemArg for &R {
     type State = ResourceId;
 
     fn init(system: &mut SystemInit) -> Self::State {
-        system.world.register_resource::<R>()
+        system.read_resource::<R>()
     }
 
     unsafe fn get<'world, 'state>(
-        _state: &'state mut Self::State,
+        state: &'state mut Self::State,
         world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
-        unsafe { world.get().resource() }
+        unsafe { world.get() }.resources().get::<R>(*state).unwrap()
     }
 }
 
@@ -141,15 +141,18 @@ unsafe impl<R: Resource + Send> SystemArg for &mut R {
     type State = ResourceId;
 
     fn init(system: &mut SystemInit) -> Self::State {
-        system.world.register_resource::<R>()
+        system.write_resource::<R>()
     }
 
     unsafe fn get<'world, 'state>(
-        _state: &'state mut Self::State,
+        state: &'state mut Self::State,
         mut world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
-        unsafe { world.get_mut().resource_mut() }
+        unsafe { world.get_mut() }
+            .resources_mut()
+            .get_mut::<R>(*state)
+            .unwrap()
     }
 }
 
@@ -159,15 +162,15 @@ unsafe impl<R: Resource> SystemArg for NonSend<'_, R> {
     type State = ResourceId;
 
     fn init(system: &mut SystemInit) -> Self::State {
-        system.world.register_non_send_resource::<R>()
+        system.read_non_send_resource::<R>()
     }
 
     unsafe fn get<'world, 'state>(
-        _state: &'state mut Self::State,
+        state: &'state mut Self::State,
         world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
-        let resource = unsafe { world.get().non_send_resource::<R>() };
+        let resource = unsafe { world.get() }.resources().get::<R>(*state).unwrap();
 
         NonSend::new(resource)
     }
@@ -183,21 +186,48 @@ unsafe impl<R: Resource> SystemArg for NonSendMut<'_, R> {
     type State = ResourceId;
 
     fn init(system: &mut SystemInit) -> Self::State {
-        system.world.register_non_send_resource::<R>()
+        system.write_non_send_resource::<R>()
     }
 
     unsafe fn get<'world, 'state>(
-        _state: &'state mut Self::State,
+        state: &'state mut Self::State,
         mut world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
-        let resource = unsafe { world.get_mut().non_send_resource_mut::<R>() };
+        let resource = unsafe { world.get_mut() }
+            .resources_mut()
+            .get_mut::<R>(*state)
+            .unwrap();
 
         NonSendMut::new(resource)
     }
 
     fn send() -> bool {
         false
+    }
+}
+
+unsafe impl<R: Resource + Send + Clone> SystemArg for Cloned<R> {
+    type Item<'world, 'state> = Cloned<R>;
+
+    type State = ResourceId;
+
+    fn init(system: &mut SystemInit) -> Self::State {
+        system.world.register_resource::<R>()
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        world: WorldCell<'world>,
+        _: &SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        let resource = unsafe { world.get() }
+            .resources()
+            .get::<R>(*state)
+            .cloned()
+            .unwrap();
+
+        Cloned::new(resource)
     }
 }
 

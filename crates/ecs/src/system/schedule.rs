@@ -279,7 +279,7 @@ impl Systems {
     }
 }
 
-#[allow(unused_imports)]
+#[allow(unused_imports, dead_code)]
 mod tests {
     use crate::{
         system::{

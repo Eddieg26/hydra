@@ -1,7 +1,5 @@
 use crate::{Component, Entity, World};
 
-pub mod spawner;
-
 pub trait Command: Sized + Send + 'static {
     fn execute(self, world: &mut World);
 }

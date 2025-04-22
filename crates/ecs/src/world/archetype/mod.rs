@@ -358,6 +358,7 @@ impl EntityIndex {
     }
 }
 
+#[allow(unused_imports, dead_code)]
 mod tests {
     use crate::{
         core::Frame,

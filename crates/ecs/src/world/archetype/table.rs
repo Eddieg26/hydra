@@ -416,7 +416,7 @@ impl Table {
     }
 }
 
-#[allow(unused_imports)]
+#[allow(unused_imports, dead_code)]
 mod tests {
     use super::{Row, Table, TableBuilder};
     use crate::{

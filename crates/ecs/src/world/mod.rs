@@ -80,6 +80,10 @@ impl World {
         &self.entities
     }
 
+    pub fn entities_mut(&mut self) -> &mut Entities {
+        &mut self.entities
+    }
+
     pub fn events(&self) -> &EventRegistry {
         &self.events
     }
