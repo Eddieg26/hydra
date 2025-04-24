@@ -69,13 +69,18 @@ impl<'scope, 'env> Scope<'scope, 'env> {
         }
     }
 
-    fn finish(&self) {
+    fn pop_task(&self) -> Option<Box<dyn FnOnce() + Send + 'scope>> {
         let mut tasks = self.task_queue.lock().unwrap();
+
+        tasks.pop_front()
+    }
+
+    fn finish(&self) {
         self.running_count.fetch_sub(1, Ordering::SeqCst);
 
-        if let Some(task) = tasks.pop_front() {
+        if let Some(task) = self.pop_task() {
             self.running_count.fetch_add(1, Ordering::SeqCst);
-            self.scope.spawn(task);
+            task();
         }
     }
 }
@@ -102,6 +107,7 @@ where
     })
 }
 
+#[allow(unused_imports)]
 mod tests {
     use std::sync::{Arc, Mutex};
 
