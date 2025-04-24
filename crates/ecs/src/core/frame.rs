@@ -77,30 +77,6 @@ impl std::ops::SubAssign<u32> for Frame {
     }
 }
 
-pub struct AtomicFrame {
-    frame: std::sync::atomic::AtomicU32,
-}
-
-impl AtomicFrame {
-    pub fn new() -> Self {
-        Self {
-            frame: std::sync::atomic::AtomicU32::new(0),
-        }
-    }
-
-    pub fn get(&self) -> Frame {
-        Frame(self.frame.load(std::sync::atomic::Ordering::SeqCst))
-    }
-
-    pub fn set(&self, value: u32) {
-        self.frame.store(value, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    pub fn increment(&self) -> Frame {
-        Frame(self.frame.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ObjectStatus {
     pub added: Frame,
