@@ -2,15 +2,13 @@ use super::SystemExecutor;
 use crate::{
     core::{ImmutableIndexDag, IndexDag},
     system::SystemCell,
+    task::{self, Scope, available_parallelism},
     world::WorldCell,
 };
 use fixedbitset::FixedBitSet;
-use std::{
-    sync::{
-        Arc, Mutex, MutexGuard,
-        mpsc::{Sender, channel},
-    },
-    thread::Scope,
+use std::sync::{
+    Arc, Mutex, MutexGuard,
+    mpsc::{Sender, channel},
 };
 
 pub struct ParallelExecutor {
@@ -52,8 +50,9 @@ impl ParallelExecutor {
 impl SystemExecutor for ParallelExecutor {
     fn execute(&self, mut world: WorldCell) {
         let (sender, receiver) = channel::<ExecutionResult>();
+        let max_task_count = available_parallelism();
 
-        std::thread::scope(|scope| {
+        task::scope(max_task_count, |scope| {
             let ctx = Arc::new(ExecutionContext::new(
                 world,
                 &self.systems,
@@ -108,7 +107,7 @@ pub enum ExecutionResult {
 pub struct ExecutionContext<'scope, 'env: 'scope> {
     world: WorldCell<'scope>,
     systems: &'scope ImmutableIndexDag<SystemCell>,
-    scope: &'scope Scope<'scope, 'env>,
+    scope: Scope<'scope, 'env>,
     sender: &'env Sender<ExecutionResult>,
     state: Arc<Mutex<ExecutionState>>,
 }
@@ -117,7 +116,7 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
     pub fn new(
         world: WorldCell<'scope>,
         systems: &'scope ImmutableIndexDag<SystemCell>,
-        scope: &'scope Scope<'scope, 'env>,
+        scope: Scope<'scope, 'env>,
         sender: &'env Sender<ExecutionResult>,
         state: Arc<Mutex<ExecutionState>>,
     ) -> Self {
@@ -133,7 +132,7 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
     fn scoped(&self) -> Self {
         let world = self.world;
         let systems = self.systems;
-        let scope = self.scope;
+        let scope = self.scope.clone();
         let sender = self.sender;
         let state = self.state.clone();
 
@@ -148,7 +147,7 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
 
     fn spawn(&self, index: usize) {
         let scoped = self.scoped();
-        scoped.scope.spawn(move || scoped.run_system(index));
+        self.scope.spawn(move || scoped.run_system(index));
     }
 
     fn spawn_non_send(&self, index: usize) {
