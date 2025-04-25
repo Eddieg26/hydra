@@ -1,4 +1,4 @@
-use crate::core::Frame;
+use crate::{SparseIndex, core::Frame};
 
 pub mod archetype;
 pub mod cell;
@@ -191,6 +191,17 @@ impl World {
     pub fn despawn(&mut self, entity: Entity) -> Option<(ArchetypeId, Row)> {
         self.entities.despawn(entity);
         self.archetypes.remove_entity(entity)
+    }
+
+    pub fn has_component<C: Component>(&self, entity: Entity) -> bool {
+        let Some(component) = self.archetypes.components().get_id::<C>() else {
+            return false;
+        };
+
+        self.archetypes
+            .entity_archetype(entity)
+            .map(|a| a.has_component(component.to_usize()))
+            .unwrap_or(false)
     }
 
     pub fn get_component<C: Component>(&self, entity: Entity) -> Option<&C> {

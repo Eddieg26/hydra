@@ -55,6 +55,12 @@ impl<'world, 'state, 'spawner> Spawned<'world, 'state, 'spawner> {
         self
     }
 
+    pub fn with_component<C: Component>(mut self, component: C) -> Self {
+        let id = unsafe { self.spawner.world.components().get_id_unchecked::<C>() };
+        self.components.insert(id, component);
+        self
+    }
+
     pub fn add_child(&mut self) -> Spawned<'world, 'state, '_> {
         let child = self.spawner.spawn_with_parent(self.id);
         self.children.push(child.id);
@@ -159,5 +165,87 @@ impl Command for Despawn {
 impl EntityCommands<'_> {
     pub fn despawn(self) {
         self.commands.add(Despawn(self.entity));
+    }
+}
+
+#[allow(unused_imports, dead_code)]
+mod tests {
+    use super::Spawner;
+    use crate::{Children, Command, Component, Parent, SystemArg, World, spawner::Despawn};
+
+    struct Age(u32);
+    impl Component for Age {}
+
+    #[test]
+    fn test_spawn() {
+        let mut world = World::new();
+        world.register::<Age>();
+
+        let entity = {
+            let mut entities = vec![];
+            let mut spawner = Spawner::new(&mut world, &mut entities);
+            let entity = spawner.spawn().with_component(Age(0)).finish();
+
+            Spawner::apply(&mut entities, &mut world);
+
+            entity
+        };
+
+        assert!(world.has_component::<Age>(entity))
+    }
+
+    #[test]
+    fn test_spawn_with_parent() {
+        let mut world = World::new();
+        world.register::<Parent>();
+        world.register::<Children>();
+
+        let (parent, child) = {
+            let mut entities = vec![];
+            let mut spawner = Spawner::new(&mut world, &mut entities);
+            let mut parent = spawner.spawn();
+            let child = parent.add_child().finish();
+            let parent = parent.finish();
+
+            Spawner::apply(&mut entities, &mut world);
+
+            (parent, child)
+        };
+
+        let parent_component = world.get_component::<Parent>(child).unwrap();
+        assert_eq!(parent_component, &Parent::new(parent));
+
+        let children = world.get_component::<Children>(parent).unwrap();
+        assert!(children.iter().any(|c| *c == child));
+    }
+
+    #[test]
+    fn test_despawn() {
+        let mut world = World::new();
+        world.register::<Parent>();
+        world.register::<Children>();
+
+        let (parent, child) = {
+            let mut entities = vec![];
+            let mut spawner = Spawner::new(&mut world, &mut entities);
+            let mut parent = spawner.spawn();
+            let child = parent.add_child().finish();
+            let parent = parent.finish();
+
+            Spawner::apply(&mut entities, &mut world);
+
+            (parent, child)
+        };
+
+        let parent_component = world.get_component::<Parent>(child).unwrap();
+        assert_eq!(parent_component, &Parent::new(parent));
+
+        let children = world.get_component::<Children>(parent).unwrap();
+        assert!(children.iter().any(|c| *c == child));
+
+        Despawn(parent).execute(&mut world);
+
+        assert!(world.archetypes.get_entity(parent).is_none());
+        assert!(world.archetypes.get_entity(child).is_none());
     }
 }
