@@ -21,7 +21,7 @@ impl<'world, 'state> Spawner<'world, 'state> {
     }
 
     pub fn spawn(&mut self) -> Spawned<'world, 'state, '_> {
-        let id = self.world.entities_mut().spawn();
+        let id = self.world.entities.spawn();
         Spawned {
             id,
             parent: None,
@@ -32,7 +32,7 @@ impl<'world, 'state> Spawner<'world, 'state> {
     }
 
     pub fn spawn_with_parent(&mut self, parent: Entity) -> Spawned<'world, 'state, '_> {
-        let id = self.world.entities_mut().spawn();
+        let id = self.world.entities.spawn();
 
         Spawned {
             id,

@@ -93,6 +93,8 @@ pub trait BaseQuery {
     fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w>;
 }
 
+pub unsafe trait ReadQuery: BaseQuery {}
+
 pub trait ComponentQuery {
     type Component: Component;
     type Query: BaseQuery;
@@ -229,6 +231,8 @@ impl BaseQuery for () {
         ()
     }
 }
+
+unsafe impl ReadQuery for () {}
 
 pub trait BaseFilter {
     type State<'w>;
@@ -369,7 +373,7 @@ impl<C: Component> BaseFilter for Without<C> {
 
 pub struct Added<T: 'static>(std::marker::PhantomData<T>);
 pub struct AddedComponent<'w, C: Component> {
-    reader: Option<ReadQuery<'w, C>>,
+    reader: Option<ReadPtr<'w, C>>,
     current_frame: Frame,
     system_frame: Frame,
 }
@@ -391,7 +395,7 @@ impl<C: Component> BaseFilter for Added<C> {
     ) -> Self::State<'w> {
         let components = archetype.table().get_column(*data);
         AddedComponent {
-            reader: components.map(|components| ReadQuery::from(components)),
+            reader: components.map(|components| ReadPtr::from(components)),
             current_frame,
             system_frame,
         }
@@ -410,7 +414,7 @@ impl<C: Component> BaseFilter for Added<C> {
 
 pub struct Modified<T: 'static>(std::marker::PhantomData<T>);
 pub struct ModifiedComponent<'w, C: Component> {
-    reader: Option<ReadQuery<'w, C>>,
+    reader: Option<ReadPtr<'w, C>>,
     current_frame: Frame,
     system_frame: Frame,
 }
@@ -432,7 +436,7 @@ impl<C: Component> BaseFilter for Modified<C> {
     ) -> Self::State<'w> {
         let components = archetype.table().get_column(*data);
         ModifiedComponent {
-            reader: components.map(|components| ReadQuery::from(components)),
+            reader: components.map(|components| ReadPtr::from(components)),
             current_frame,
             system_frame,
         }
@@ -451,12 +455,12 @@ impl<C: Component> BaseFilter for Modified<C> {
 
 pub struct Or<'w, F: BaseFilter>(std::marker::PhantomData<&'w F>);
 
-pub struct ReadQuery<'a, C: Component> {
+pub struct ReadPtr<'a, C: Component> {
     components: &'a Column,
     _marker: std::marker::PhantomData<C>,
 }
 
-impl<'a, C: Component> From<&'a Column> for ReadQuery<'a, C> {
+impl<'a, C: Component> From<&'a Column> for ReadPtr<'a, C> {
     fn from(components: &'a Column) -> Self {
         Self {
             components,
@@ -468,7 +472,7 @@ impl<'a, C: Component> From<&'a Column> for ReadQuery<'a, C> {
 impl<C: Component> BaseQuery for &C {
     type Item<'w> = &'w C;
 
-    type State<'w> = ReadQuery<'w, C>;
+    type State<'w> = ReadPtr<'w, C>;
 
     type Data = ComponentId;
 
@@ -488,7 +492,7 @@ impl<C: Component> BaseQuery for &C {
             std::any::type_name::<C>()
         ));
 
-        ReadQuery::from(components)
+        ReadPtr::from(components)
     }
 
     fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w> {
@@ -499,14 +503,16 @@ impl<C: Component> BaseQuery for &C {
     }
 }
 
-pub struct WriteQuery<'a, C: Component> {
+unsafe impl<C: Component> ReadQuery for &C {}
+
+pub struct WritePtr<'a, C: Component> {
     components: Ptr<'a, C>,
     frames: Ptr<'a, ObjectStatus>,
     current_frame: Frame,
     _marker: std::marker::PhantomData<C>,
 }
 
-impl<'a, C: Component> WriteQuery<'a, C> {
+impl<'a, C: Component> WritePtr<'a, C> {
     pub fn new(
         components: Ptr<'a, C>,
         frames: Ptr<'a, ObjectStatus>,
@@ -524,7 +530,7 @@ impl<'a, C: Component> WriteQuery<'a, C> {
 impl<C: Component> BaseQuery for &mut C {
     type Item<'w> = &'w mut C;
 
-    type State<'w> = WriteQuery<'w, C>;
+    type State<'w> = WritePtr<'w, C>;
 
     type Data = ComponentId;
 
@@ -550,7 +556,7 @@ impl<C: Component> BaseQuery for &mut C {
                 .get_ptr()
         };
 
-        WriteQuery::new(components, frames, current_frame)
+        WritePtr::new(components, frames, current_frame)
     }
 
     fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w> {
@@ -570,7 +576,7 @@ impl<C: Component> BaseQuery for &mut C {
 impl<C: Component> BaseQuery for Option<&C> {
     type Item<'w> = Option<&'w C>;
 
-    type State<'w> = Option<ReadQuery<'w, C>>;
+    type State<'w> = Option<ReadPtr<'w, C>>;
 
     type Data = ComponentId;
 
@@ -588,7 +594,7 @@ impl<C: Component> BaseQuery for Option<&C> {
         archetype
             .table()
             .get_column(*data)
-            .map(|column| ReadQuery::from(column))
+            .map(|column| ReadPtr::from(column))
     }
 
     fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w> {
@@ -599,10 +605,12 @@ impl<C: Component> BaseQuery for Option<&C> {
     }
 }
 
+unsafe impl<C: Component> ReadQuery for Option<&C> {}
+
 impl<C: Component> BaseQuery for Option<&mut C> {
     type Item<'w> = Option<&'w mut C>;
 
-    type State<'w> = Option<WriteQuery<'w, C>>;
+    type State<'w> = Option<WritePtr<'w, C>>;
 
     type Data = ComponentId;
 
@@ -619,7 +627,7 @@ impl<C: Component> BaseQuery for Option<&mut C> {
     ) -> Self::State<'w> {
         archetype.table().get_column(*data).map(|column| {
             let (components, frames) = unsafe { column.get_ptr() };
-            WriteQuery::new(components, frames, current_frame)
+            WritePtr::new(components, frames, current_frame)
         })
     }
 
@@ -657,6 +665,8 @@ impl BaseQuery for Entity {
     }
 }
 
+unsafe impl ReadQuery for Entity {}
+
 impl<E: Event> BaseQuery for Events<E> {
     type Item<'w> = EntityEvents<'w, E>;
 
@@ -682,6 +692,8 @@ impl<E: Event> BaseQuery for Events<E> {
         EntityEvents::new(&state, state.entity(entity))
     }
 }
+
+unsafe impl<E: Event> ReadQuery for Events<E> {}
 
 impl<E: Event> BaseFilter for E {
     type State<'w> = &'w Events<E>;
@@ -996,6 +1008,8 @@ macro_rules! impl_base_query_for_tuples {
                     filter
                 }
             }
+
+            unsafe impl<$($name: ReadQuery),+> ReadQuery for ($($name),+) {}
         )+
     };
 }
