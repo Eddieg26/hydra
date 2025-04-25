@@ -1,9 +1,8 @@
-use super::{Command, Component, Entity, World};
+use super::{Component, Entity, World};
 use crate::{
-    BaseFilter, BaseQuery, ComponentQuery, EntityCommands, EntityMut, SparseIndex, SubQueryState,
+    BaseFilter, BaseQuery, Command, ComponentQuery, EntityCommands, EntityMut, SparseIndex,
+    SubQueryState,
 };
-
-pub mod spawner;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Parent<Q: BaseQuery = (), F: BaseFilter = ()>(Entity, std::marker::PhantomData<(Q, F)>);
@@ -28,7 +27,7 @@ impl std::ops::Deref for Parent {
 impl Component for Parent {}
 
 pub struct Children<Q: BaseQuery = (), F: BaseFilter = ()>(
-    Vec<Entity>,
+    pub(crate) Vec<Entity>,
     std::marker::PhantomData<(Q, F)>,
 );
 impl Children {
@@ -406,7 +405,6 @@ impl EntityCommands<'_> {
         self.commands.add(RemoveAllChildren(self.entity));
     }
 }
-
 
 #[allow(unused_imports)]
 mod tests {

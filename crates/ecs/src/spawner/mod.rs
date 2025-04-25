@@ -1,5 +1,9 @@
-use super::{Children, Command, Parent};
-use crate::{Component, Entity, EntityCommands, Row, SystemArg, SystemInit, World, WorldCell};
+use crate::{
+    Command, Component, Entity, EntityCommands, Row, SystemArg, SystemInit, World, WorldCell,
+};
+use hierarchy::{Children, Parent};
+
+pub mod hierarchy;
 
 pub struct Spawner<'world, 'state> {
     world: &'world mut World,
@@ -73,8 +77,7 @@ impl<'world, 'state, 'spawner> Spawned<'world, 'state, 'spawner> {
 
         if let Some(parent) = self.parent {
             let id = unsafe { self.spawner.world.components().get_id_unchecked::<Parent>() };
-            self.components
-                .insert(id, Parent(parent, Default::default()));
+            self.components.insert(id, Parent::new(parent));
         }
 
         if !self.children.is_empty() {
@@ -85,8 +88,7 @@ impl<'world, 'state, 'spawner> Spawned<'world, 'state, 'spawner> {
                     .get_id_unchecked::<Children>()
             };
 
-            self.components
-                .insert(id, Children(self.children, Default::default()));
+            self.components.insert(id, Children::from(self.children));
         }
 
         self.spawner.entities.push((entity, self.components));
@@ -171,7 +173,7 @@ impl EntityCommands<'_> {
 #[allow(unused_imports, dead_code)]
 mod tests {
     use super::Spawner;
-    use crate::{Children, Command, Component, Parent, SystemArg, World, spawner::Despawn};
+    use crate::{hierarchy::{Children, Parent}, spawner::Despawn, Command, Component, SystemArg, World};
 
     struct Age(u32);
     impl Component for Age {}
