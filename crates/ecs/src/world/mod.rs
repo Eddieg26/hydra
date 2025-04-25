@@ -28,12 +28,12 @@ impl WorldId {
 }
 
 pub struct World {
-    id: WorldId,
-    archetypes: Archetypes,
-    resources: Resources,
-    entities: Entities,
-    events: EventRegistry,
-    frame: Frame,
+    pub(crate) id: WorldId,
+    pub(crate) archetypes: Archetypes,
+    pub(crate) resources: Resources,
+    pub(crate) entities: Entities,
+    pub(crate) events: EventRegistry,
+    pub(crate) frame: Frame,
 }
 
 impl World {
@@ -56,24 +56,12 @@ impl World {
         self.archetypes.components()
     }
 
-    pub fn components_mut(&mut self) -> &mut Components {
-        self.archetypes.components_mut()
-    }
-
     pub fn archetypes(&self) -> &Archetypes {
         &self.archetypes
     }
 
-    pub fn archetypes_mut(&mut self) -> &mut Archetypes {
-        &mut self.archetypes
-    }
-
     pub fn resources(&self) -> &Resources {
         &self.resources
-    }
-
-    pub fn resources_mut(&mut self) -> &mut Resources {
-        &mut self.resources
     }
 
     pub fn entities(&self) -> &Entities {

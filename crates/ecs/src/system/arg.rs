@@ -150,7 +150,7 @@ unsafe impl<R: Resource + Send> SystemArg for &mut R {
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
         unsafe { world.get_mut() }
-            .resources_mut()
+            .resources
             .get_mut::<R>(*state)
             .unwrap()
     }
@@ -195,7 +195,7 @@ unsafe impl<R: Resource> SystemArg for NonSendMut<'_, R> {
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
         let resource = unsafe { world.get_mut() }
-            .resources_mut()
+            .resources
             .get_mut::<R>(*state)
             .unwrap();
 
