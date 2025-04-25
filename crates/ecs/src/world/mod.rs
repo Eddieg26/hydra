@@ -219,13 +219,11 @@ impl World {
     }
 
     pub fn entity_mut(&mut self, entity: Entity) -> EntityMut {
-        // TODO: Add tracked error detection
         let index = self.archetypes.get_entity(entity).unwrap();
         EntityMut::new(self, entity, index)
     }
 
     pub fn entity_ref(&self, entity: Entity) -> EntityWorldRef {
-        // TODO: Add tracked error detection
         let index = self.archetypes.get_entity(entity).unwrap();
         EntityWorldRef::new(self, entity, index)
     }
@@ -233,6 +231,11 @@ impl World {
     pub fn update(&mut self) {
         self.frame += 1;
         self.events.update(unsafe { self.cell() });
+
+        if self.frame.get() % Frame::AGE_REFRESH_RATE == 0 {
+            self.archetypes.update(self.frame);
+            self.resources.update(self.frame);
+        }
     }
 }
 

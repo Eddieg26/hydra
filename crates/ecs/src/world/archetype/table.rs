@@ -354,21 +354,6 @@ impl Table {
         self.columns.get_mut(component)
     }
 
-    pub fn modify_component(&mut self, entity: Entity, component: ComponentId, frame: Frame) {
-        let Some(index) = self.entities.get_index_of(&entity) else {
-            return;
-        };
-
-        let Some(column) = self.columns.get_mut(component) else {
-            return;
-        };
-
-        column
-            .frames_mut()
-            .get_mut(index)
-            .and_then(|cell| Some(cell.modified = frame));
-    }
-
     pub fn get_component<C: Component>(
         &self,
         entity: Entity,
@@ -413,6 +398,14 @@ impl Table {
 
     pub fn has_component(&self, id: ComponentId) -> bool {
         self.columns.contains(id)
+    }
+
+    pub(crate) fn update(&mut self, frame: Frame) {
+        for column in self.columns.values_mut() {
+            for status in column.frames_mut() {
+                status.update(frame);
+            }
+        }
     }
 }
 

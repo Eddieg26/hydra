@@ -4,6 +4,10 @@ pub struct Frame(pub u32);
 impl Frame {
     pub const ZERO: Self = Self(0);
 
+    pub const AGE_REFRESH_RATE: u32 = 518_400_000;
+
+    pub const MAX_AGE: u32 = u32::MAX - (2 * Self::AGE_REFRESH_RATE - 1);
+
     pub fn get(self) -> u32 {
         self.0
     }
@@ -88,6 +92,20 @@ impl ObjectStatus {
         Self {
             added: Frame::ZERO,
             modified: Frame::ZERO,
+        }
+    }
+
+    pub fn update(&mut self, frame: Frame) {
+        let added = frame.0.wrapping_sub(self.added.0);
+
+        if added > Frame::MAX_AGE {
+            self.added.0 = added + Frame::AGE_REFRESH_RATE;
+        }
+
+        let modified = frame.0.wrapping_sub(self.modified.0);
+
+        if modified > Frame::MAX_AGE {
+            self.modified.0 = modified + Frame::AGE_REFRESH_RATE;
         }
     }
 }

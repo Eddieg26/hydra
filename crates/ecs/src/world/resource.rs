@@ -1,4 +1,5 @@
 use crate::{
+    ObjectStatus,
     core::{Frame, sparse::SparseIndex},
     ext,
 };
@@ -20,8 +21,7 @@ impl SparseIndex for ResourceId {
 
 pub struct ResourceMeta {
     name: &'static str,
-    added: Frame,
-    modified: Frame,
+    status: ObjectStatus,
     exists: bool,
     send: bool,
     offset: usize,
@@ -34,8 +34,7 @@ impl ResourceMeta {
     pub fn new<const SEND: bool, R: Resource>(offset: usize) -> Self {
         Self {
             name: ext::short_type_name::<R>(),
-            added: Frame::ZERO,
-            modified: Frame::ZERO,
+            status: ObjectStatus::new(),
             exists: false,
             send: SEND,
             offset,
@@ -54,11 +53,11 @@ impl ResourceMeta {
     }
 
     pub fn added(&self) -> Frame {
-        self.added
+        self.status.added
     }
 
     pub fn modified(&self) -> Frame {
-        self.modified
+        self.status.modified
     }
 
     pub fn send(&self) -> bool {
@@ -152,7 +151,7 @@ impl Resources {
 
         let (offset, size) = {
             let meta = &mut self.meta[id.to_usize()];
-            meta.added = frame;
+            meta.status.added = frame;
             meta.exists = true;
             (meta.offset, meta.size)
         };
@@ -217,7 +216,7 @@ impl Resources {
         let id = id.to_usize();
         if let Some(meta) = self.meta.get_mut(id) {
             if meta.exists && meta.has_access() {
-                meta.modified = frame;
+                meta.status.modified = frame;
             }
         }
     }
@@ -235,6 +234,12 @@ impl Resources {
 
     pub fn len(&self) -> usize {
         self.meta.len()
+    }
+
+    pub(crate) fn update(&mut self, frame: Frame) {
+        for meta in &mut self.meta {
+            meta.status.update(frame);
+        }
     }
 }
 

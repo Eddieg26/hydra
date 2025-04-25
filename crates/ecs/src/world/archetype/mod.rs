@@ -72,8 +72,8 @@ impl Archetype {
         self.table.remove_entity(entity)
     }
 
-    pub fn modify_component(&mut self, entity: Entity, id: ComponentId, frame: Frame) {
-        self.table.modify_component(entity, id, frame);
+    pub(crate) fn update(&mut self, frame: Frame) {
+        self.table.update(frame);
     }
 }
 
@@ -301,6 +301,12 @@ impl Archetypes {
 
                 EntityIndex::new(archetype_id, RowIndex(0))
             }
+        }
+    }
+
+    pub(crate) fn update(&mut self, frame: Frame) {
+        for archetype in &mut self.archetypes {
+            archetype.update(frame);
         }
     }
 }

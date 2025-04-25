@@ -318,6 +318,10 @@ impl<V, I> ImmutableSparseSet<V, I> {
         &self.values
     }
 
+    pub fn values_mut(&mut self) -> &mut [V] {
+        &mut self.values
+    }
+
     pub fn indices(&self) -> &[I] {
         &self.indices
     }
