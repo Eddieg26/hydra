@@ -182,7 +182,10 @@ impl<C: ComponentQuery> BaseQuery for SubQuery<C> {
         current_frame: Frame,
         system_frame: Frame,
     ) -> Self::State<'w> {
-        let column = archetype.table().get_column(data.1);
+        let column = match archetype.matches(&data.0.query) {
+            true => None,
+            false => archetype.table().get_column(data.1),
+        };
         let state = C::Query::state(&data.0.data, world, archetype, current_frame, system_frame);
         let filter = C::Filter::state(
             &data.0.filter,
