@@ -374,35 +374,16 @@ impl<C: Component> BaseFilter for Without<C> {
     }
 }
 
-pub struct Added<T>(Option<T>, std::marker::PhantomData<T>);
-impl<T> Added<T> {
-    pub fn new(value: Option<T>) -> Self {
-        Self(value, Default::default())
-    }
-}
-
-impl<T> std::ops::Deref for Added<T> {
-    type Target = Option<T>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<T> std::ops::DerefMut for Added<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-pub struct AddedComponent<'w, C: Component> {
+pub struct ReadFramePtr<'w, C: Component> {
     reader: Option<ReadPtr<'w, C>>,
     current_frame: Frame,
     system_frame: Frame,
 }
 
+pub struct Added<T>(std::marker::PhantomData<T>);
+
 impl<C: Component> BaseFilter for Added<C> {
-    type State<'w> = AddedComponent<'w, C>;
+    type State<'w> = ReadFramePtr<'w, C>;
     type Data = ComponentId;
 
     fn init(builder: &mut QueryBuilder) -> Self::Data {
@@ -417,7 +398,7 @@ impl<C: Component> BaseFilter for Added<C> {
         system_frame: Frame,
     ) -> Self::State<'w> {
         let components = archetype.table().get_column(*data);
-        AddedComponent {
+        ReadFramePtr {
             reader: components.map(|components| ReadPtr::from(components)),
             current_frame,
             system_frame,
@@ -435,35 +416,10 @@ impl<C: Component> BaseFilter for Added<C> {
     }
 }
 
-pub struct Modified<T>(pub(crate) Option<T>, std::marker::PhantomData<T>);
-impl<T> Modified<T> {
-    pub fn new(value: Option<T>) -> Self {
-        Self(value, Default::default())
-    }
-}
-
-impl<T> std::ops::Deref for Modified<T> {
-    type Target = Option<T>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<T> std::ops::DerefMut for Modified<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-pub struct ModifiedComponent<'w, C: Component> {
-    reader: Option<ReadPtr<'w, C>>,
-    current_frame: Frame,
-    system_frame: Frame,
-}
+pub struct Modified<T>(std::marker::PhantomData<T>);
 
 impl<C: Component> BaseFilter for Modified<C> {
-    type State<'w> = ModifiedComponent<'w, C>;
+    type State<'w> = ReadFramePtr<'w, C>;
     type Data = ComponentId;
 
     fn init(builder: &mut QueryBuilder) -> Self::Data {
@@ -478,7 +434,7 @@ impl<C: Component> BaseFilter for Modified<C> {
         system_frame: Frame,
     ) -> Self::State<'w> {
         let components = archetype.table().get_column(*data);
-        ModifiedComponent {
+        ReadFramePtr {
             reader: components.map(|components| ReadPtr::from(components)),
             current_frame,
             system_frame,
