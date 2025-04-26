@@ -374,7 +374,27 @@ impl<C: Component> BaseFilter for Without<C> {
     }
 }
 
-pub struct Added<T: 'static>(std::marker::PhantomData<T>);
+pub struct Added<T>(Option<T>, std::marker::PhantomData<T>);
+impl<T> Added<T> {
+    pub fn new(value: Option<T>) -> Self {
+        Self(value, Default::default())
+    }
+}
+
+impl<T> std::ops::Deref for Added<T> {
+    type Target = Option<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> std::ops::DerefMut for Added<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 pub struct AddedComponent<'w, C: Component> {
     reader: Option<ReadPtr<'w, C>>,
     current_frame: Frame,
@@ -415,7 +435,27 @@ impl<C: Component> BaseFilter for Added<C> {
     }
 }
 
-pub struct Modified<T: 'static>(std::marker::PhantomData<T>);
+pub struct Modified<T>(pub(crate) Option<T>, std::marker::PhantomData<T>);
+impl<T> Modified<T> {
+    pub fn new(value: Option<T>) -> Self {
+        Self(value, Default::default())
+    }
+}
+
+impl<T> std::ops::Deref for Modified<T> {
+    type Target = Option<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> std::ops::DerefMut for Modified<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 pub struct ModifiedComponent<'w, C: Component> {
     reader: Option<ReadPtr<'w, C>>,
     current_frame: Frame,

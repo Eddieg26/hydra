@@ -212,15 +212,6 @@ impl Resources {
         return Some(resource);
     }
 
-    pub fn modify(&mut self, id: ResourceId, frame: Frame) {
-        let id = id.to_usize();
-        if let Some(meta) = self.meta.get_mut(id) {
-            if meta.exists && meta.has_access() {
-                meta.status.modified = frame;
-            }
-        }
-    }
-
     pub fn contains<R: Resource>(&self) -> bool {
         let ty = TypeId::of::<R>();
         let id = match self.index.get(&ty).copied() {

@@ -1,4 +1,4 @@
-use super::{IntoSystemConfig, SystemConfig, SystemId, SystemInit, SystemMeta};
+use super::{Added, IntoSystemConfig, Modified, SystemConfig, SystemId, SystemInit, SystemMeta};
 use crate::{
     Cloned, CommandBuffer, Commands,
     world::{Entities, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell},
@@ -260,6 +260,198 @@ unsafe impl<A: SystemArg> SystemArg for Option<A> {
 
     fn send() -> bool {
         A::send()
+    }
+}
+
+unsafe impl<R: Resource + Send> SystemArg for Modified<&R> {
+    type Item<'world, 'state> = Modified<&'world R>;
+
+    type State = ResourceId;
+
+    fn init(system: &mut SystemInit) -> Self::State {
+        system.world.register_resource::<R>()
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        world: WorldCell<'world>,
+        system: &SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        let world = unsafe { world.get() };
+        let meta = world.resources.get_meta(*state).unwrap();
+        let resource = match meta.modified().is_newer(world.frame, system.frame) {
+            true => None,
+            false => world.resources.get::<R>(*state),
+        };
+        Modified::new(resource)
+    }
+}
+
+unsafe impl<R: Resource + Send> SystemArg for Modified<&mut R> {
+    type Item<'world, 'state> = Modified<&'world mut R>;
+
+    type State = ResourceId;
+
+    fn init(system: &mut SystemInit) -> Self::State {
+        system.world.register_resource::<R>()
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        mut world: WorldCell<'world>,
+        system: &SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        let world = unsafe { world.get_mut() };
+        let meta = world.resources.get_meta(*state).unwrap();
+        let resource = match meta.modified().is_newer(world.frame, system.frame) {
+            true => None,
+            false => world.resources.get_mut::<R>(*state),
+        };
+        Modified::new(resource)
+    }
+}
+
+unsafe impl<R: Resource + Send> SystemArg for Added<&R> {
+    type Item<'world, 'state> = Added<&'world R>;
+
+    type State = ResourceId;
+
+    fn init(system: &mut SystemInit) -> Self::State {
+        system.world.register_resource::<R>()
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        world: WorldCell<'world>,
+        system: &SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        let world = unsafe { world.get() };
+        let meta = world.resources.get_meta(*state).unwrap();
+        let resource = match meta.added().is_newer(world.frame, system.frame) {
+            true => None,
+            false => world.resources.get::<R>(*state),
+        };
+        Added::new(resource)
+    }
+}
+
+unsafe impl<R: Resource + Send> SystemArg for Added<&mut R> {
+    type Item<'world, 'state> = Added<&'world mut R>;
+
+    type State = ResourceId;
+
+    fn init(system: &mut SystemInit) -> Self::State {
+        system.world.register_resource::<R>()
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        mut world: WorldCell<'world>,
+        system: &SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        let world = unsafe { world.get_mut() };
+        let meta = world.resources.get_meta(*state).unwrap();
+        let resource = match meta.added().is_newer(world.frame, system.frame) {
+            true => None,
+            false => world.resources.get_mut::<R>(*state),
+        };
+        Added::new(resource)
+    }
+}
+
+unsafe impl<R: Resource> SystemArg for Modified<NonSend<'_, R>> {
+    type Item<'world, 'state> = Modified<NonSend<'world, R>>;
+
+    type State = ResourceId;
+
+    fn init(system: &mut SystemInit) -> Self::State {
+        system.world.register_non_send_resource::<R>()
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        world: WorldCell<'world>,
+        system: &SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        let world = unsafe { world.get() };
+        let meta = world.resources.get_meta(*state).unwrap();
+        let resource = match meta.modified().is_newer(world.frame, system.frame) {
+            true => None,
+            false => world.resources.get::<R>(*state).map(NonSend::new),
+        };
+        Modified::new(resource)
+    }
+}
+
+unsafe impl<R: Resource + Send> SystemArg for Modified<NonSendMut<'_, R>> {
+    type Item<'world, 'state> = Modified<NonSendMut<'world, R>>;
+
+    type State = ResourceId;
+
+    fn init(system: &mut SystemInit) -> Self::State {
+        system.world.register_resource::<R>()
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        mut world: WorldCell<'world>,
+        system: &SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        let world = unsafe { world.get_mut() };
+        let meta = world.resources.get_meta(*state).unwrap();
+        let resource = match meta.modified().is_newer(world.frame, system.frame) {
+            true => None,
+            false => world.resources.get_mut::<R>(*state).map(NonSendMut::new),
+        };
+        Modified::new(resource)
+    }
+}
+
+unsafe impl<R: Resource> SystemArg for Added<NonSend<'_, R>> {
+    type Item<'world, 'state> = Added<NonSend<'world, R>>;
+
+    type State = ResourceId;
+
+    fn init(system: &mut SystemInit) -> Self::State {
+        system.world.register_non_send_resource::<R>()
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        world: WorldCell<'world>,
+        system: &SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        let world = unsafe { world.get() };
+        let meta = world.resources.get_meta(*state).unwrap();
+        let resource = match meta.added().is_newer(world.frame, system.frame) {
+            true => None,
+            false => world.resources.get::<R>(*state).map(NonSend::new),
+        };
+        Added::new(resource)
+    }
+}
+
+unsafe impl<R: Resource + Send> SystemArg for Added<NonSendMut<'_, R>> {
+    type Item<'world, 'state> = Added<NonSendMut<'world, R>>;
+
+    type State = ResourceId;
+
+    fn init(system: &mut SystemInit) -> Self::State {
+        system.world.register_resource::<R>()
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        mut world: WorldCell<'world>,
+        system: &SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        let world = unsafe { world.get_mut() };
+        let meta = world.resources.get_meta(*state).unwrap();
+        let resource = match meta.added().is_newer(world.frame, system.frame) {
+            true => None,
+            false => world.resources.get_mut::<R>(*state).map(NonSendMut::new),
+        };
+        Added::new(resource)
     }
 }
 
