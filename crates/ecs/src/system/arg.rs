@@ -73,7 +73,7 @@ unsafe impl SystemArg for &World {
     }
 
     fn exclusive() -> bool {
-        true
+        false
     }
 }
 

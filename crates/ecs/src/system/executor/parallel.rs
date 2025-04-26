@@ -30,6 +30,7 @@ impl ParallelExecutor {
             dependencies: systems.dependencies().to_vec(),
             queue: initial_systems.clone(),
             completed: FixedBitSet::with_capacity(systems.len()),
+            running: 0,
         };
 
         Self {
@@ -41,6 +42,7 @@ impl ParallelExecutor {
 
     fn reset(&self) {
         let mut state = self.state.lock().unwrap();
+        state.running = 0;
         state.completed.clear();
         state.queue = self.initial_systems.clone();
         state.dependencies = self.systems.dependencies().to_vec();
@@ -87,6 +89,7 @@ pub struct ExecutionState {
     dependencies: Vec<usize>,
     queue: FixedBitSet,
     completed: FixedBitSet,
+    running: usize,
 }
 
 impl Default for ExecutionState {
@@ -95,6 +98,7 @@ impl Default for ExecutionState {
             dependencies: Default::default(),
             queue: Default::default(),
             completed: Default::default(),
+            running: 0,
         }
     }
 }
@@ -166,11 +170,22 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
         }
 
         for index in state.queue.clone().into_ones() {
-            state.queue.set(index, false);
-            if self.systems.nodes()[index].get().meta.send {
+            let system = self.systems.nodes()[index].get();
+
+            if system.meta.send {
+                state.queue.set(index, false);
+                state.running += 1;
                 self.spawn(index);
-            } else {
+            } else if !system.meta.exclusive {
+                state.queue.set(index, false);
+                state.running += 1;
                 self.spawn_non_send(index);
+            } else {
+                if state.running == 0 {
+                    self.spawn_non_send(index);
+                }
+
+                break;
             }
         }
     }
@@ -183,6 +198,7 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
     fn system_done(&self, index: usize) {
         let mut state = self.state.lock().unwrap();
 
+        state.running -= 1;
         state.completed.set(index, true);
 
         for dependent in self.systems.dependents()[index].ones() {
