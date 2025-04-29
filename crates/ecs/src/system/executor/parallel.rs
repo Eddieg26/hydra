@@ -77,7 +77,7 @@ impl SystemExecutor for ParallelExecutor {
             unsafe {
                 self.systems.nodes()[*index]
                     .cast_mut()
-                    .apply(world.get_mut())
+                    .update(world.get_mut())
             };
         }
 

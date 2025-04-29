@@ -9,11 +9,13 @@ pub mod arg;
 pub mod commands;
 pub mod executor;
 pub mod query;
+pub mod query_v2;
 pub mod schedule;
 
 pub use arg::*;
 pub use commands::*;
 pub use executor::*;
+use fixedbitset::FixedBitSet;
 pub use query::*;
 pub use schedule::*;
 
@@ -32,35 +34,114 @@ impl SystemId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Access {
-    Read,
-    Write,
+#[derive(Clone)]
+pub struct Access<I: SparseIndex> {
+    pub(crate) read: FixedBitSet,
+    pub(crate) write: FixedBitSet,
+    pub(crate) include: FixedBitSet,
+    pub(crate) exclude: FixedBitSet,
+    _marker: std::marker::PhantomData<I>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SystemAccess {
-    Component { id: ComponentId, access: Access },
-    Resource { id: ResourceId, access: Access },
+impl<I: SparseIndex> Access<I> {
+    pub fn new() -> Self {
+        Self {
+            read: FixedBitSet::new(),
+            write: FixedBitSet::new(),
+            include: FixedBitSet::new(),
+            exclude: FixedBitSet::new(),
+            _marker: Default::default(),
+        }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            read: FixedBitSet::with_capacity(capacity),
+            write: FixedBitSet::with_capacity(capacity),
+            include: FixedBitSet::with_capacity(capacity),
+            exclude: FixedBitSet::with_capacity(capacity),
+            _marker: Default::default(),
+        }
+    }
+
+    pub fn read(&mut self, id: I) -> I {
+        self.read.grow(id.to_usize() + 1);
+        self.read.set(id.to_usize(), true);
+        id
+    }
+
+    pub fn write(&mut self, id: I) -> I {
+        self.write.grow(id.to_usize() + 1);
+        self.write.set(id.to_usize(), true);
+        id
+    }
+
+    pub fn include(&mut self, id: I) -> I {
+        self.include.grow(id.to_usize() + 1);
+        self.include.set(id.to_usize(), true);
+        id
+    }
+
+    pub fn exclude(&mut self, id: I) -> I {
+        self.include.grow(id.to_usize() + 1);
+        self.include.set(id.to_usize(), true);
+        id
+    }
+
+    pub fn depends(&self, id: I, writes: bool) -> bool {
+        if writes {
+            self.read.contains(id.to_usize())
+                || self.write.contains(id.to_usize())
+                || self.include.contains(id.to_usize())
+        } else {
+            self.write.contains(id.to_usize()) || self.include.contains(id.to_usize())
+        }
+    }
+
+    pub fn conflicts(&self, other: &Self) -> bool {
+        false
+    }
+}
+
+pub struct SystemAccess {
+    resources: Access<ResourceId>,
+    components: Access<ComponentId>,
 }
 
 impl SystemAccess {
-    pub fn resource(id: ResourceId, access: Access) -> Self {
-        SystemAccess::Resource { id, access }
+    pub fn new() -> Self {
+        Self {
+            resources: Access::new(),
+            components: Access::new(),
+        }
     }
 
-    pub fn component(id: ComponentId, access: Access) -> Self {
-        SystemAccess::Component { id, access }
+    pub fn resources(&self) -> &Access<ResourceId> {
+        &self.resources
     }
+
+    pub fn resources_mut(&mut self) -> &mut Access<ResourceId> {
+        &mut self.resources
+    }
+
+    pub fn components(&self) -> &Access<ComponentId> {
+        &self.components
+    }
+
+    pub fn components_mut(&mut self) -> &mut Access<ComponentId> {
+        &mut self.components
+    }
+
+    pub fn merge(&mut self, list: Vec<Self>) {}
 }
 
 pub struct SystemMeta {
     pub id: SystemId,
     pub name: Option<SystemName>,
     /// Components that the system accesses.
-    pub components: AccessBitset,
+    pub components: Access<ComponentId>,
     /// Resources that the system accesses.
-    pub resources: AccessBitset,
+    pub resources: Access<ResourceId>,
     /// The system contains only send resources.
     pub send: bool,
     /// The system should be ran exclusively in the given frame.
@@ -74,104 +155,12 @@ impl Default for SystemMeta {
         Self {
             id: SystemId::new(),
             name: None,
-            components: AccessBitset::new(),
-            resources: AccessBitset::new(),
+            components: Access::new(),
+            resources: Access::new(),
             send: true,
             exclusive: false,
             frame: Frame::ZERO,
         }
-    }
-}
-
-pub struct SystemInit<'w> {
-    world: &'w mut World,
-    name: Option<SystemName>,
-    components: AccessBitset,
-    resources: AccessBitset,
-}
-
-impl<'w> SystemInit<'w> {
-    pub fn new(world: &'w mut World, name: Option<SystemName>) -> Self {
-        Self {
-            name,
-            components: AccessBitset::with_capacity(world.components().len()),
-            resources: AccessBitset::with_capacity(world.components().len()),
-            world,
-        }
-    }
-
-    pub fn name(&self) -> Option<&SystemName> {
-        self.name.as_ref()
-    }
-
-    pub fn world(&mut self) -> &mut World {
-        self.world
-    }
-
-    pub fn read_component<C: Component>(&mut self) -> ComponentId {
-        let component = self.world.register::<C>();
-        self.components.grow(component.to_usize());
-        if !self.components.read(component.to_usize()) {
-            let meta = self.world.components().get_by_id(component).unwrap();
-            panic!("{:?}: Invalid read access: {}", self.name, meta.name());
-        }
-
-        component
-    }
-
-    pub fn read_resource<R: Resource + Send>(&mut self) -> ResourceId {
-        let resource = self.world.register_resource::<R>();
-        self.resources.grow(resource.to_usize());
-        if !self.resources.read(resource.to_usize()) {
-            let meta = self.world.resources().get_meta(resource).unwrap();
-            panic!("{:?}: Invalid write access: {}", self.name, meta.name());
-        }
-
-        resource
-    }
-
-    pub fn read_non_send_resource<R: Resource>(&mut self) -> ResourceId {
-        let resource = self.world.register_non_send_resource::<R>();
-        self.resources.grow(resource.to_usize());
-        if !self.resources.read(resource.to_usize()) {
-            let meta = self.world.resources().get_meta(resource).unwrap();
-            panic!("{:?}: Invalid write access: {}", self.name, meta.name());
-        }
-
-        resource
-    }
-
-    pub fn write_component<C: Component>(&mut self) -> ComponentId {
-        let component = self.world.register::<C>();
-        self.components.grow(component.to_usize());
-        if !self.components.write(component.to_usize()) {
-            let meta = self.world.components().get_by_id(component).unwrap();
-            panic!("{:?}: Invalid write access: {}", self.name, meta.name());
-        }
-
-        component
-    }
-
-    pub fn write_resource<R: Resource + Send>(&mut self) -> ResourceId {
-        let resource = self.world.register_resource::<R>();
-        self.resources.grow(resource.to_usize());
-        if !self.resources.write(resource.to_usize()) {
-            let meta = self.world.resources().get_meta(resource).unwrap();
-            panic!("{:?}: Invalid write access: {}", self.name, meta.name());
-        }
-
-        resource
-    }
-
-    pub fn write_non_send_resource<R: Resource>(&mut self) -> ResourceId {
-        let resource = self.world.register_non_send_resource::<R>();
-        self.resources.grow(resource.to_usize());
-        if !self.resources.write(resource.to_usize()) {
-            let meta = self.world.resources().get_meta(resource).unwrap();
-            panic!("{:?}: Invalid write access: {}", self.name, meta.name());
-        }
-
-        resource
     }
 }
 
@@ -183,32 +172,26 @@ pub struct SystemConfig {
     dependencies: HashSet<SystemId>,
     init: SystemInitFn,
     run: SystemRunFn,
-    apply: SystemApplyFn,
+    update: SystemUpdateFn,
 }
 
 impl SystemConfig {
     pub fn into_system_node(self, world: &mut World) -> SystemNode {
-        let mut init = SystemInit {
-            name: self.name,
-            components: AccessBitset::with_capacity(world.components().len()),
-            resources: AccessBitset::with_capacity(world.components().len()),
-            world,
-        };
-
-        let state = (self.init)(&mut init);
+        let mut access = SystemAccess::new();
+        let state = (self.init)(world, &mut access);
 
         let meta = SystemMeta {
             id: self.id,
-            name: init.name,
-            components: init.components,
-            resources: init.resources,
+            name: self.name,
+            components: access.components,
+            resources: access.resources,
             send: self.send,
             exclusive: self.exclusive,
             frame: Frame::ZERO,
         };
 
         SystemNode {
-            system: System::new(meta, state, self.run, self.apply),
+            system: System::new(meta, state, self.run, self.update),
             dependencies: self.dependencies,
         }
     }
@@ -364,26 +347,26 @@ impl<F: Fn() + Send + Sync + 'static> IntoSystemConfig<()> for F {
             exclusive: false,
             send: true,
             dependencies: HashSet::new(),
-            init: |_| Box::new(()),
+            init: |_, _| Box::new(()),
             run: Box::new(move |_, _, _| {
                 self();
             }),
-            apply: Box::new(|_, _| {}),
+            update: Box::new(|_, _| {}),
         }
     }
 }
 
 pub type SystemState = Box<dyn Any + Send + Sync>;
-pub type SystemInitFn = fn(&mut SystemInit) -> Box<dyn Any + Send + Sync>;
+pub type SystemInitFn = fn(&mut World, &mut SystemAccess) -> Box<dyn Any + Send + Sync>;
 pub type SystemRunFn =
     Box<dyn Fn(&mut Box<dyn Any + Send + Sync>, WorldCell, &SystemMeta) + Send + Sync>;
-pub type SystemApplyFn = Box<dyn Fn(&mut Box<dyn Any + Send + Sync>, &mut World) + Send + Sync>;
+pub type SystemUpdateFn = Box<dyn Fn(&mut Box<dyn Any + Send + Sync>, &mut World) + Send + Sync>;
 
 pub struct System {
     meta: SystemMeta,
     state: SystemState,
     run: SystemRunFn,
-    apply: SystemApplyFn,
+    update: SystemUpdateFn,
 }
 
 impl System {
@@ -391,13 +374,13 @@ impl System {
         meta: SystemMeta,
         state: SystemState,
         run: SystemRunFn,
-        apply: SystemApplyFn,
+        update: SystemUpdateFn,
     ) -> Self {
         Self {
             meta,
             state,
             run,
-            apply,
+            update,
         }
     }
 
@@ -406,8 +389,8 @@ impl System {
         self.meta.frame = unsafe { world.get().frame() }
     }
 
-    pub fn apply(&mut self, world: &mut World) {
-        (self.apply)(&mut self.state, world);
+    pub fn update(&mut self, world: &mut World) {
+        (self.update)(&mut self.state, world);
     }
 }
 

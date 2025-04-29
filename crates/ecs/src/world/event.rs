@@ -1,5 +1,5 @@
 use super::{Entity, World, WorldCell, resource::Resource};
-use crate::{SystemInit, system::arg::SystemArg};
+use crate::system::arg::SystemArg;
 use std::{any::TypeId, collections::HashMap};
 
 pub trait Event: Send + Sync + Sized + 'static {}
@@ -144,8 +144,8 @@ unsafe impl<E: Event> SystemArg for EventReader<'_, E> {
 
     type State = ();
 
-    fn init(system: &mut SystemInit) -> Self::State {
-        system.world().register_event::<E>();
+    fn init(world: &mut World, _: &mut crate::SystemAccess) -> Self::State {
+        world.register_event::<E>();
         ()
     }
 
@@ -210,8 +210,8 @@ unsafe impl<E: Event> SystemArg for EventWriter<'_, E> {
 
     type State = EventStorage<E>;
 
-    fn init(system: &mut SystemInit) -> Self::State {
-        system.world().register_event::<E>();
+    fn init(world: &mut World, _: &mut crate::SystemAccess) -> Self::State {
+        world.register_event::<E>();
         EventStorage::default()
     }
 
@@ -223,7 +223,7 @@ unsafe impl<E: Event> SystemArg for EventWriter<'_, E> {
         EventWriter::new(state)
     }
 
-    fn apply(state: &mut Self::State, world: &mut super::World) {
+    fn update(state: &mut Self::State, world: &mut super::World) {
         let events = world.resource_mut::<Events<E>>();
         let offset = events.write.events.len();
         events.write.events.append(&mut state.events);

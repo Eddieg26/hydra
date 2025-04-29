@@ -28,7 +28,7 @@ impl SystemExecutor for SequentialExecutor {
             let system = &self.systems[*index];
             unsafe {
                 system.cast_mut().run(world);
-                system.cast_mut().apply(world.get_mut())
+                system.cast_mut().update(world.get_mut())
             };
         }
     }

@@ -1,4 +1,4 @@
-use super::{IntoSystemConfig, SystemConfig, SystemId, SystemInit, SystemMeta};
+use super::{IntoSystemConfig, SystemAccess, SystemConfig, SystemId, SystemMeta};
 use crate::{
     Cloned, CommandBuffer, Commands,
     world::{Entities, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell},
@@ -11,7 +11,7 @@ pub unsafe trait SystemArg: Sized {
 
     type State: Send + Sync + 'static;
 
-    fn init(system: &mut SystemInit) -> Self::State;
+    fn init(world: &mut World, access: &mut SystemAccess) -> Self::State;
 
     /// Validates that the argument can be accessed by the system
     unsafe fn validate(state: &Self::State, world: WorldCell, system: &SystemMeta) -> bool {
@@ -32,7 +32,7 @@ pub unsafe trait SystemArg: Sized {
         true
     }
 
-    fn apply(state: &mut Self::State, world: &mut World) {}
+    fn update(state: &mut Self::State, world: &mut World) {}
 }
 
 pub type ArgItem<'world, 'state, A> = <A as SystemArg>::Item<'world, 'state>;
@@ -42,7 +42,7 @@ unsafe impl SystemArg for () {
 
     type State = ();
 
-    fn init(_: &mut SystemInit) -> Self::State {
+    fn init(_: &mut World, _: &mut SystemAccess) -> Self::State {
         ()
     }
 
@@ -60,7 +60,7 @@ unsafe impl SystemArg for &World {
 
     type State = ();
 
-    fn init(_: &mut SystemInit) -> Self::State {
+    fn init(_: &mut World, _: &mut SystemAccess) -> Self::State {
         ()
     }
 
@@ -82,7 +82,7 @@ unsafe impl SystemArg for &Entities {
 
     type State = ();
 
-    fn init(_: &mut SystemInit) -> Self::State {
+    fn init(_: &mut World, _: &mut SystemAccess) -> Self::State {
         ()
     }
 
@@ -100,11 +100,11 @@ unsafe impl SystemArg for Commands<'_, '_> {
 
     type State = CommandBuffer;
 
-    fn init(_: &mut SystemInit) -> Self::State {
+    fn init(_: &mut World, _: &mut SystemAccess) -> Self::State {
         CommandBuffer::new()
     }
 
-    fn apply(state: &mut Self::State, world: &mut World) {
+    fn update(state: &mut Self::State, world: &mut World) {
         CommandBuffer::execute(state, world);
     }
 
@@ -122,8 +122,10 @@ unsafe impl<R: Resource + Send> SystemArg for &R {
 
     type State = ResourceId;
 
-    fn init(system: &mut SystemInit) -> Self::State {
-        system.read_resource::<R>()
+    fn init(world: &mut World, access: &mut SystemAccess) -> Self::State {
+        let id = world.register_resource::<R>();
+        access.resources_mut().read(id);
+        id
     }
 
     unsafe fn get<'world, 'state>(
@@ -140,8 +142,10 @@ unsafe impl<R: Resource + Send> SystemArg for &mut R {
 
     type State = ResourceId;
 
-    fn init(system: &mut SystemInit) -> Self::State {
-        system.write_resource::<R>()
+    fn init(world: &mut World, access: &mut SystemAccess) -> Self::State {
+        let id = world.register_resource::<R>();
+        access.resources_mut().write(id);
+        id
     }
 
     unsafe fn get<'world, 'state>(
@@ -161,8 +165,10 @@ unsafe impl<R: Resource> SystemArg for NonSend<'_, R> {
 
     type State = ResourceId;
 
-    fn init(system: &mut SystemInit) -> Self::State {
-        system.read_non_send_resource::<R>()
+    fn init(world: &mut World, access: &mut SystemAccess) -> Self::State {
+        let id = world.register_non_send_resource::<R>();
+        access.resources_mut().read(id);
+        id
     }
 
     unsafe fn get<'world, 'state>(
@@ -185,8 +191,10 @@ unsafe impl<R: Resource> SystemArg for NonSendMut<'_, R> {
 
     type State = ResourceId;
 
-    fn init(system: &mut SystemInit) -> Self::State {
-        system.write_non_send_resource::<R>()
+    fn init(world: &mut World, access: &mut SystemAccess) -> Self::State {
+        let id = world.register_non_send_resource::<R>();
+        access.resources_mut().write(id);
+        id
     }
 
     unsafe fn get<'world, 'state>(
@@ -212,8 +220,8 @@ unsafe impl<R: Resource + Send + Clone> SystemArg for Cloned<R> {
 
     type State = ResourceId;
 
-    fn init(system: &mut SystemInit) -> Self::State {
-        system.world.register_resource::<R>()
+    fn init(world: &mut World, _: &mut SystemAccess) -> Self::State {
+        world.register_resource::<R>()
     }
 
     unsafe fn get<'world, 'state>(
@@ -236,8 +244,8 @@ unsafe impl<A: SystemArg> SystemArg for Option<A> {
 
     type State = A::State;
 
-    fn init(system: &mut SystemInit) -> Self::State {
-        A::init(system)
+    fn init(world: &mut World, access: &mut SystemAccess) -> Self::State {
+        A::init(world, access)
     }
 
     unsafe fn validate(state: &Self::State, world: WorldCell, system: &SystemMeta) -> bool {
@@ -276,8 +284,17 @@ macro_rules! impl_into_system_configs {
             fn config(self) -> SystemConfig {
                 let name = std::any::type_name::<F>();
 
-                let init = |system: &mut super::SystemInit| {
-                    let ($($arg,)*) = ($($arg::init(system),)*);
+                let init = |world: &mut World, access: &mut SystemAccess| {
+                    let mut access_list = Vec::new();
+                    let ($($arg,)*) = ($({
+                        let mut arg_access = SystemAccess::new(); // Create a new SystemAccess instance
+                        let arg_state = $arg::init(world, &mut arg_access); // Pass it into the arg's init function
+                        access_list.push(arg_access);
+                        arg_state
+                    },)*);
+
+                    access.merge(access_list);
+
                     let state = ($($arg,)*);
                     Box::new(state) as Box<dyn Any + Send + Sync>
                 };
@@ -289,9 +306,9 @@ macro_rules! impl_into_system_configs {
                     self($($arg,)*);
                 };
 
-                let apply = move |state: &mut Box<dyn Any + Send + Sync>, world: &mut World| {
+                let update = move |state: &mut Box<dyn Any + Send + Sync>, world: &mut World| {
                     let ($($arg,)*) = state.downcast_mut::<($($arg::State,)*)>().unwrap();
-                    $($arg::apply($arg, world);)*
+                    $($arg::update($arg, world);)*
                 };
 
                 let send = ($($arg::send() &&)* true);
@@ -305,7 +322,7 @@ macro_rules! impl_into_system_configs {
                     dependencies: std::collections::HashSet::new(),
                     init,
                     run: Box::new(execute),
-                    apply: Box::new(apply),
+                    update: Box::new(update),
                 }
             }
         }
@@ -315,8 +332,17 @@ macro_rules! impl_into_system_configs {
             type Item<'world, 'state> = ($($arg::Item<'world, 'state>,)*);
             type State = ($($arg::State,)*);
 
-            fn init(system: &mut SystemInit) -> Self::State {
-                let ($($arg,)*) = ($($arg::init(system),)*);
+            fn init(world: &mut World, access: &mut SystemAccess) -> Self::State {
+                let mut access_list = Vec::new();
+                let ($($arg,)*) = ($({
+                    let mut arg_access = SystemAccess::new(); // Create a new SystemAccess instance
+                    let arg_state = $arg::init(world, &mut arg_access); // Pass it into the arg's init function
+                    access_list.push(arg_access);
+                    arg_state
+                },)*);
+
+                access.merge(access_list);
+
                 ($($arg,)*)
             }
 
@@ -334,9 +360,9 @@ macro_rules! impl_into_system_configs {
                 ($($arg::send() &&)* true)
             }
 
-            fn apply(state: &mut Self::State, world: &mut World) {
+            fn update(state: &mut Self::State, world: &mut World) {
                 let ($($arg,)*) = state;
-                $($arg::apply($arg, world);)*
+                $($arg::update($arg, world);)*
             }
         }
     };

@@ -1,6 +1,4 @@
-use crate::{
-    Command, Component, Entity, EntityCommands, Row, SystemArg, SystemInit, World, WorldCell,
-};
+use crate::{Command, Component, Entity, EntityCommands, Row, SystemArg, World, WorldCell};
 use hierarchy::{Children, Parent};
 
 pub mod hierarchy;
@@ -102,7 +100,7 @@ unsafe impl SystemArg for Spawner<'_, '_> {
 
     type State = Vec<(Entity, Row)>;
 
-    fn init(_: &mut SystemInit) -> Self::State {
+    fn init(_: &mut World, _: &mut crate::SystemAccess) -> Self::State {
         vec![]
     }
 
@@ -118,7 +116,7 @@ unsafe impl SystemArg for Spawner<'_, '_> {
         true
     }
 
-    fn apply(state: &mut Self::State, world: &mut World) {
+    fn update(state: &mut Self::State, world: &mut World) {
         for (entity, components) in state.drain(..) {
             world.add_components(entity, components);
         }
@@ -173,7 +171,11 @@ impl EntityCommands<'_> {
 #[allow(unused_imports, dead_code)]
 mod tests {
     use super::Spawner;
-    use crate::{hierarchy::{Children, Parent}, spawner::Despawn, Command, Component, SystemArg, World};
+    use crate::{
+        Command, Component, SystemArg, World,
+        hierarchy::{Children, Parent},
+        spawner::Despawn,
+    };
 
     struct Age(u32);
     impl Component for Age {}
@@ -188,7 +190,7 @@ mod tests {
             let mut spawner = Spawner::new(&mut world, &mut entities);
             let entity = spawner.spawn().with_component(Age(0)).finish();
 
-            Spawner::apply(&mut entities, &mut world);
+            Spawner::update(&mut entities, &mut world);
 
             entity
         };
@@ -209,7 +211,7 @@ mod tests {
             let child = parent.add_child().finish();
             let parent = parent.finish();
 
-            Spawner::apply(&mut entities, &mut world);
+            Spawner::update(&mut entities, &mut world);
 
             (parent, child)
         };
@@ -234,7 +236,7 @@ mod tests {
             let child = parent.add_child().finish();
             let parent = parent.finish();
 
-            Spawner::apply(&mut entities, &mut world);
+            Spawner::update(&mut entities, &mut world);
 
             (parent, child)
         };
