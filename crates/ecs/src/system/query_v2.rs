@@ -3,7 +3,7 @@ use crate::{
     ObjectStatus, Ptr, RowIndex, SparseIndex, World, WorldCell,
 };
 
-use super::Access;
+use super::FullAccess;
 
 pub trait BaseQuery {
     type Item<'w>;
@@ -13,7 +13,7 @@ pub trait BaseQuery {
     /// This is used to create the query state when the query is first created.
     type Data: Send + Sync + Sized;
 
-    fn init(world: &mut World, access: &mut Access<ComponentId>) -> Self::Data;
+    fn init(world: &mut World, access: &mut FullAccess<ComponentId>) -> Self::Data;
 
     fn state<'w>(
         data: &'w Self::Data,
@@ -30,7 +30,7 @@ pub trait BaseFilter {
     type State<'w>;
     type Data: Send + Sync + Sized;
 
-    fn init(world: &mut World, access: &mut Access<ComponentId>) -> Self::Data;
+    fn init(world: &mut World, access: &mut FullAccess<ComponentId>) -> Self::Data;
 
     fn state<'w>(
         data: &'w Self::Data,
@@ -50,7 +50,7 @@ impl BaseQuery for () {
 
     type Data = ();
 
-    fn init(_: &mut World, _: &mut Access<ComponentId>) -> Self::Data {
+    fn init(_: &mut World, _: &mut FullAccess<ComponentId>) -> Self::Data {
         ()
     }
 
@@ -74,7 +74,7 @@ impl BaseFilter for () {
 
     type Data = ();
 
-    fn init(_: &mut World, _: &mut Access<ComponentId>) -> Self::Data {
+    fn init(_: &mut World, _: &mut FullAccess<ComponentId>) -> Self::Data {
         ()
     }
 
@@ -100,7 +100,7 @@ impl BaseQuery for Entity {
 
     type Data = ();
 
-    fn init(_: &mut World, _: &mut Access<ComponentId>) -> Self::Data {
+    fn init(_: &mut World, _: &mut FullAccess<ComponentId>) -> Self::Data {
         ()
     }
 
@@ -144,7 +144,7 @@ impl<C: Component> BaseQuery for &C {
 
     type Data = ComponentId;
 
-    fn init(world: &mut World, access: &mut Access<ComponentId>) -> Self::Data {
+    fn init(world: &mut World, access: &mut FullAccess<ComponentId>) -> Self::Data {
         access.read(world.register::<C>())
     }
 
@@ -199,7 +199,7 @@ impl<C: Component> BaseQuery for &mut C {
 
     type Data = ComponentId;
 
-    fn init(world: &mut World, access: &mut Access<ComponentId>) -> Self::Data {
+    fn init(world: &mut World, access: &mut FullAccess<ComponentId>) -> Self::Data {
         access.write(world.register::<C>())
     }
 
@@ -237,7 +237,7 @@ impl<C: Component> BaseQuery for Option<&C> {
 
     type Data = <&'static C as BaseQuery>::Data;
 
-    fn init(world: &mut World, access: &mut Access<ComponentId>) -> Self::Data {
+    fn init(world: &mut World, access: &mut FullAccess<ComponentId>) -> Self::Data {
         <&C as BaseQuery>::init(world, access)
     }
 
@@ -275,7 +275,7 @@ impl<C: Component> BaseQuery for Option<&mut C> {
 
     type Data = <&'static mut C as BaseQuery>::Data;
 
-    fn init(world: &mut World, access: &mut Access<ComponentId>) -> Self::Data {
+    fn init(world: &mut World, access: &mut FullAccess<ComponentId>) -> Self::Data {
         <&mut C as BaseQuery>::init(world, access)
     }
 
@@ -312,7 +312,7 @@ impl<C: Component> BaseFilter for With<C> {
 
     type Data = ComponentId;
 
-    fn init(world: &mut World, access: &mut Access<ComponentId>) -> Self::Data {
+    fn init(world: &mut World, access: &mut FullAccess<ComponentId>) -> Self::Data {
         access.include(world.register::<C>())
     }
 
@@ -337,7 +337,7 @@ impl<C: Component> BaseFilter for Without<C> {
 
     type Data = ComponentId;
 
-    fn init(world: &mut World, access: &mut Access<ComponentId>) -> Self::Data {
+    fn init(world: &mut World, access: &mut FullAccess<ComponentId>) -> Self::Data {
         access.exclude(world.register::<C>())
     }
 
@@ -362,7 +362,7 @@ impl<C: Component> BaseFilter for Added<C> {
 
     type Data = ComponentId;
 
-    fn init(world: &mut World, access: &mut Access<ComponentId>) -> Self::Data {
+    fn init(world: &mut World, access: &mut FullAccess<ComponentId>) -> Self::Data {
         let id = world.register::<C>();
         access.include(id)
     }
@@ -391,7 +391,7 @@ impl<C: Component> BaseFilter for Modified<C> {
 
     type Data = ComponentId;
 
-    fn init(world: &mut World, access: &mut Access<ComponentId>) -> Self::Data {
+    fn init(world: &mut World, access: &mut FullAccess<ComponentId>) -> Self::Data {
         let id = world.register::<C>();
         access.include(id)
     }

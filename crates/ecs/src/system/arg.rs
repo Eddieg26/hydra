@@ -285,15 +285,13 @@ macro_rules! impl_into_system_configs {
                 let name = std::any::type_name::<F>();
 
                 let init = |world: &mut World, access: &mut SystemAccess| {
-                    let mut access_list = Vec::new();
                     let ($($arg,)*) = ($({
                         let mut arg_access = SystemAccess::new(); // Create a new SystemAccess instance
                         let arg_state = $arg::init(world, &mut arg_access); // Pass it into the arg's init function
-                        access_list.push(arg_access);
+                        access.add_child(arg_access);
                         arg_state
                     },)*);
 
-                    access.merge(access_list);
 
                     let state = ($($arg,)*);
                     Box::new(state) as Box<dyn Any + Send + Sync>
@@ -333,15 +331,12 @@ macro_rules! impl_into_system_configs {
             type State = ($($arg::State,)*);
 
             fn init(world: &mut World, access: &mut SystemAccess) -> Self::State {
-                let mut access_list = Vec::new();
                 let ($($arg,)*) = ($({
                     let mut arg_access = SystemAccess::new(); // Create a new SystemAccess instance
                     let arg_state = $arg::init(world, &mut arg_access); // Pass it into the arg's init function
-                    access_list.push(arg_access);
+                    access.add_child(arg_access);
                     arg_state
                 },)*);
-
-                access.merge(access_list);
 
                 ($($arg,)*)
             }

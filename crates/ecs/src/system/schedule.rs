@@ -81,8 +81,7 @@ impl PhaseConfig {
                 .iter()
                 .map(|i| {
                     systems.nodes()[*i]
-                        .system
-                        .meta
+                        .config
                         .name
                         .clone()
                         .unwrap_or("unknown".into())
