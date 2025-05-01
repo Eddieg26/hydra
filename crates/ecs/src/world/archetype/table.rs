@@ -93,7 +93,7 @@ impl Column {
         self.data.get_mut::<T>(index)
     }
 
-    pub unsafe fn get_ptr<T: Component>(&self) -> (Ptr<'_, T>, Ptr<'_, ObjectStatus>) {
+    pub(crate) unsafe fn get_ptr<T: Component>(&self) -> (Ptr<'_, T>, Ptr<'_, ObjectStatus>) {
         let components = unsafe { self.data.ptr::<T>() };
         let frames = self.frames.as_ptr() as *mut ObjectStatus;
 

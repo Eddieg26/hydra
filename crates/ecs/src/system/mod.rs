@@ -1,15 +1,15 @@
 use crate::{
-    core::{Frame, SparseIndex},
-    world::{ComponentId, ResourceId, World, cell::WorldCell},
+    AccessError, WorldAccess,
+    core::Frame,
+    world::{World, cell::WorldCell},
 };
-use std::{any::Any, borrow::Cow, cell::UnsafeCell, collections::HashSet};
 use fixedbitset::FixedBitSet;
+use std::{any::Any, borrow::Cow, cell::UnsafeCell, collections::HashSet};
 
 pub mod arg;
 pub mod commands;
 pub mod executor;
 pub mod query;
-pub mod query_v2;
 pub mod schedule;
 
 pub use arg::*;
@@ -33,206 +33,13 @@ impl SystemId {
     }
 }
 
-#[derive(Clone)]
-pub struct FullAccess<I: SparseIndex> {
-    pub(crate) read: FixedBitSet,
-    pub(crate) write: FixedBitSet,
-    pub(crate) include: FixedBitSet,
-    pub(crate) exclude: FixedBitSet,
-    _marker: std::marker::PhantomData<I>,
-}
-
-impl<I: SparseIndex> FullAccess<I> {
-    pub fn new() -> Self {
-        Self {
-            read: FixedBitSet::new(),
-            write: FixedBitSet::new(),
-            include: FixedBitSet::new(),
-            exclude: FixedBitSet::new(),
-            _marker: Default::default(),
-        }
-    }
-
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self {
-            read: FixedBitSet::with_capacity(capacity),
-            write: FixedBitSet::with_capacity(capacity),
-            include: FixedBitSet::with_capacity(capacity),
-            exclude: FixedBitSet::with_capacity(capacity),
-            _marker: Default::default(),
-        }
-    }
-
-    pub fn read(&mut self, id: I) -> I {
-        self.read.grow(id.to_usize() + 1);
-        self.read.set(id.to_usize(), true);
-        id
-    }
-
-    pub fn write(&mut self, id: I) -> I {
-        self.write.grow(id.to_usize() + 1);
-        self.write.set(id.to_usize(), true);
-        id
-    }
-
-    pub fn include(&mut self, id: I) -> I {
-        self.include.grow(id.to_usize() + 1);
-        self.include.set(id.to_usize(), true);
-        id
-    }
-
-    pub fn exclude(&mut self, id: I) -> I {
-        self.include.grow(id.to_usize() + 1);
-        self.include.set(id.to_usize(), true);
-        id
-    }
-
-    pub fn conflicts(&self, other: &Self) -> Result<(), usize> {
-        if !self.exclude.is_disjoint(&other.read)
-            || !self.exclude.is_disjoint(&other.write)
-            || !self.exclude.is_disjoint(&other.include)
-        {
-            return Ok(());
-        }
-
-        if let Some(conflict) = self.read.intersection(&other.write).next() {
-            return Err(conflict);
-        }
-
-        if let Some(conflict) = self.write.intersection(&other.write).next() {
-            return Err(conflict);
-        }
-
-        if let Some(conflict) = self.write.intersection(&other.read).next() {
-            return Err(conflict);
-        }
-
-        Ok(())
-    }
-
-    pub fn validate(&self) -> Result<(), usize> {
-        if let Some(index) = self.read.intersection(&self.write).next() {
-            return Err(index);
-        }
-
-        if let Some(index) = self.read.intersection(&self.exclude).next() {
-            return Err(index);
-        }
-
-        if let Some(index) = self.write.intersection(&self.exclude).next() {
-            return Err(index);
-        }
-
-        Ok(())
-    }
-}
-
-pub struct Access<I: SparseIndex>(FixedBitSet, std::marker::PhantomData<I>);
-impl<I: SparseIndex> Access<I> {
-    pub fn new() -> Self {
-        Self(FixedBitSet::new(), Default::default())
-    }
-
-    pub fn merge(&mut self, other: &Self) {
-        self.0.intersect_with(&other.0);
-    }
-}
-
-impl<I: SparseIndex> From<FullAccess<I>> for Access<I> {
-    fn from(value: FullAccess<I>) -> Self {
-        let access = value
-            .read
-            .ones()
-            .chain(value.write.ones())
-            .collect::<FixedBitSet>();
-
-        Access(access, Default::default())
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum SystemAccessError {
-    Component(usize),
-    Resource(usize),
-}
-
-pub struct SystemAccess {
-    resources: FullAccess<ResourceId>,
-    components: FullAccess<ComponentId>,
-    children: Vec<SystemAccess>,
-}
-
-impl SystemAccess {
-    pub fn new() -> Self {
-        Self {
-            resources: FullAccess::new(),
-            components: FullAccess::new(),
-            children: Vec::new(),
-        }
-    }
-
-    pub fn resources(&self) -> &FullAccess<ResourceId> {
-        &self.resources
-    }
-
-    pub fn resources_mut(&mut self) -> &mut FullAccess<ResourceId> {
-        &mut self.resources
-    }
-
-    pub fn components(&self) -> &FullAccess<ComponentId> {
-        &self.components
-    }
-
-    pub fn components_mut(&mut self) -> &mut FullAccess<ComponentId> {
-        &mut self.components
-    }
-
-    pub(crate) fn add_child(&mut self, access: SystemAccess) {
-        self.children.push(access);
-    }
-
-    pub fn validate(&self) -> Result<(), SystemAccessError> {
-        let _ = self
-            .resources
-            .validate()
-            .map_err(SystemAccessError::Resource)?;
-
-        self.components
-            .validate()
-            .map_err(SystemAccessError::Component)
-    }
-
-    pub fn flatten(mut self) -> Result<Vec<SystemAccess>, SystemAccessError> {
-        let mut stack = std::mem::take(&mut self.children);
-        let mut accesses = vec![self];
-
-        while let Some(mut child) = stack.pop() {
-            let children = std::mem::take(&mut child.children);
-            for access in &accesses {
-                if let Err(conflict) = access.resources.conflicts(&child.resources) {
-                    return Err(SystemAccessError::Resource(conflict));
-                }
-
-                if let Err(conflict) = access.components.conflicts(&child.components) {
-                    return Err(SystemAccessError::Component(conflict));
-                }
-            }
-
-            accesses.push(child);
-            stack.extend(children);
-        }
-
-        Ok(accesses)
-    }
-}
-
 pub struct SystemMeta {
     pub id: SystemId,
     pub name: Option<SystemName>,
     /// Components that the system accesses.
-    pub components: Access<ComponentId>,
+    pub components: FixedBitSet,
     /// Resources that the system accesses.
-    pub resources: Access<ResourceId>,
+    pub resources: FixedBitSet,
     /// The system contains only send resources.
     pub send: bool,
     /// The system should be ran exclusively in the given frame.
@@ -246,8 +53,8 @@ impl Default for SystemMeta {
         Self {
             id: SystemId::new(),
             name: None,
-            components: Access::new(),
-            resources: Access::new(),
+            components: FixedBitSet::new(),
+            resources: FixedBitSet::new(),
             send: true,
             exclusive: false,
             frame: Frame::ZERO,
@@ -268,37 +75,29 @@ pub struct SystemConfig {
 
 impl SystemConfig {
     pub fn into_system_node(self, world: &mut World) -> SystemNode {
-        let mut access = SystemAccess::new();
+        let mut access = WorldAccess::new();
         let state = (self.init)(world, &mut access);
-        let access = match access.flatten() {
-            Ok(access) => access,
-            Err(error) => match error {
-                SystemAccessError::Component(id) => {
-                    let component = world
-                        .components()
-                        .get_by_id(ComponentId::from_usize(id))
-                        .unwrap();
 
+        if let Err(error) = access.validate() {
+            match error {
+                AccessError::Component(id) => {
+                    let component = world.components().get_by_id(id).unwrap();
                     panic!(
                         "Invalid component access: {} for system: {:?}",
                         component.name(),
                         self.name
                     );
                 }
-                SystemAccessError::Resource(id) => {
-                    let resource = world
-                        .resources()
-                        .get_meta(ResourceId::from_usize(id))
-                        .unwrap();
-
+                AccessError::Resource(id) => {
+                    let resource = world.resources().get_meta(id).unwrap();
                     panic!(
                         "Invalid resource access: {} for system: {:?}",
                         resource.name(),
                         self.name
                     );
                 }
-            },
-        };
+            }
+        }
 
         SystemNode {
             config: self,
@@ -311,7 +110,7 @@ impl SystemConfig {
 pub struct SystemNode {
     pub config: SystemConfig,
     pub state: SystemState,
-    pub access: Vec<SystemAccess>,
+    pub access: WorldAccess,
 }
 
 impl SystemNode {
@@ -320,12 +119,7 @@ impl SystemNode {
             return true;
         }
 
-        self.access.iter().any(|a| {
-            other.access.iter().any(|b| {
-                a.components.conflicts(&b.components).is_err()
-                    || a.resources.conflicts(&b.resources).is_err()
-            })
-        })
+        self.access.conflicts(&other.access).is_err()
     }
 }
 
@@ -468,7 +262,7 @@ impl<F: Fn() + Send + Sync + 'static> IntoSystemConfig<()> for F {
 }
 
 pub type SystemState = Box<dyn Any + Send + Sync>;
-pub type SystemInitFn = fn(&mut World, &mut SystemAccess) -> Box<dyn Any + Send + Sync>;
+pub type SystemInitFn = fn(&mut World, &mut WorldAccess) -> Box<dyn Any + Send + Sync>;
 pub type SystemRunFn =
     Box<dyn Fn(&mut Box<dyn Any + Send + Sync>, WorldCell, &SystemMeta) + Send + Sync>;
 pub type SystemUpdateFn = Box<dyn Fn(&mut Box<dyn Any + Send + Sync>, &mut World) + Send + Sync>;
@@ -507,11 +301,11 @@ impl System {
 
 impl From<SystemNode> for System {
     fn from(value: SystemNode) -> Self {
-        let mut components = Access::new();
-        let mut resources = Access::new();
-        for access in value.access {
-            components.merge(&Access::from(access.components));
-            resources.merge(&Access::from(access.resources));
+        let resources = value.access.resources.collect();
+        let mut components = value.access.components.collect();
+        for archetype in value.access.archetypes {
+            components.intersect_with(archetype.required().get_read());
+            components.intersect_with(archetype.required().get_write());
         }
 
         let meta = SystemMeta {

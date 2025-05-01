@@ -1,5 +1,6 @@
 use crate::{SparseIndex, core::Frame};
 
+pub mod access;
 pub mod archetype;
 pub mod cell;
 pub mod component;
@@ -7,6 +8,7 @@ pub mod entity;
 pub mod event;
 pub mod resource;
 
+pub use access::*;
 pub use archetype::*;
 pub use cell::*;
 pub use component::*;

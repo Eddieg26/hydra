@@ -144,7 +144,7 @@ unsafe impl<E: Event> SystemArg for EventReader<'_, E> {
 
     type State = ();
 
-    fn init(world: &mut World, _: &mut crate::SystemAccess) -> Self::State {
+    fn init(world: &mut World, _: &mut crate::WorldAccess) -> Self::State {
         world.register_event::<E>();
         ()
     }
@@ -210,7 +210,7 @@ unsafe impl<E: Event> SystemArg for EventWriter<'_, E> {
 
     type State = EventStorage<E>;
 
-    fn init(world: &mut World, _: &mut crate::SystemAccess) -> Self::State {
+    fn init(world: &mut World, _: &mut crate::WorldAccess) -> Self::State {
         world.register_event::<E>();
         EventStorage::default()
     }

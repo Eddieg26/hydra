@@ -1,4 +1,4 @@
-use super::{Component, ComponentId, Components, Entity};
+use super::{ArchetypeAccess, Component, ComponentId, Components, Entity};
 use crate::core::{Frame, bitset::FixedBitSet, sparse::SparseIndex};
 use std::{collections::HashMap, fmt::Debug};
 
@@ -11,6 +11,16 @@ pub struct ArchetypeId(pub u32);
 
 impl ArchetypeId {
     pub const EMPTY: Self = Self(0);
+}
+
+impl SparseIndex for ArchetypeId {
+    fn to_usize(self) -> usize {
+        self.0 as usize
+    }
+
+    fn from_usize(index: usize) -> Self {
+        Self(index as u32)
+    }
 }
 
 pub struct Archetype {
@@ -40,10 +50,10 @@ impl Archetype {
         self.table.contains(entity)
     }
 
-    pub fn matches(&self, query: &ArchetypeAccess) -> bool {
+    pub fn matches(&self, query: &ArchetypeQuery) -> bool {
         self.bitset.is_superset(&query.required)
-            && self.bitset.is_disjoint(&query.exclude)
-            && (query.include.is_clear() || !self.bitset.is_disjoint(&query.include))
+            && self.bitset.is_disjoint(&query.excluded)
+            && (query.included.is_clear() || !self.bitset.is_disjoint(&query.included))
     }
 
     pub fn has_components(&self, components: &FixedBitSet) -> bool {
@@ -142,7 +152,7 @@ impl Archetypes {
         &mut self.components
     }
 
-    pub fn query(&self, query: &ArchetypeAccess) -> Vec<&Archetype> {
+    pub fn query(&self, query: &ArchetypeQuery) -> Vec<&Archetype> {
         let mut archetypes = Vec::new();
         for archetype in &self.archetypes {
             if archetype.matches(query) {
@@ -292,10 +302,6 @@ impl Archetypes {
                 let mut bits = self.bitset.clone();
                 id.iter().for_each(|id| bits.set(id.to_usize(), true));
 
-                if id.len() > 1 {
-                    println!("Archetype with multiple components: {:?}", id);
-                }
-
                 let archetype_id = ArchetypeId(self.archetypes.len() as u32);
                 let archetype = Archetype::new(archetype_id, components.into_table(entity), bits);
 
@@ -329,33 +335,6 @@ impl std::ops::IndexMut<ArchetypeId> for Archetypes {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct ArchetypeAccess {
-    pub required: FixedBitSet,
-    pub exclude: FixedBitSet,
-    pub include: FixedBitSet,
-}
-
-impl ArchetypeAccess {
-    pub fn required(&mut self, id: ComponentId) -> ComponentId {
-        self.required.grow(id.to_usize() + 1);
-        self.required.set(id.to_usize(), true);
-        id
-    }
-
-    pub fn exclude(&mut self, id: ComponentId) -> ComponentId {
-        self.exclude.grow(id.to_usize() + 1);
-        self.exclude.set(id.to_usize(), true);
-        id
-    }
-
-    pub fn include(&mut self, id: ComponentId) -> ComponentId {
-        self.include.grow(id.to_usize() + 1);
-        self.include.set(id.to_usize(), true);
-        id
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EntityIndex {
     pub archetype: ArchetypeId,
@@ -368,14 +347,56 @@ impl EntityIndex {
     }
 }
 
+pub struct ArchetypeQuery {
+    pub required: FixedBitSet,
+    pub included: FixedBitSet,
+    pub excluded: FixedBitSet,
+}
+
+impl ArchetypeQuery {
+    pub fn new() -> Self {
+        Self {
+            required: FixedBitSet::new(),
+            included: FixedBitSet::new(),
+            excluded: FixedBitSet::new(),
+        }
+    }
+
+    pub fn require(&mut self, component: ComponentId) {
+        self.required.grow(component.to_usize() + 1);
+        self.required.set(component.to_usize(), true);
+    }
+
+    pub fn include(&mut self, component: ComponentId) {
+        self.included.grow(component.to_usize() + 1);
+        self.included.set(component.to_usize(), true);
+    }
+
+    pub fn exclude(&mut self, component: ComponentId) {
+        self.excluded.grow(component.to_usize() + 1);
+        self.excluded.set(component.to_usize(), true);
+    }
+}
+
+impl From<ArchetypeAccess> for ArchetypeQuery {
+    fn from(value: ArchetypeAccess) -> Self {
+        Self {
+            required: value.required.collect(),
+            included: value.includes,
+            excluded: value.excludes,
+        }
+    }
+}
+
 #[allow(unused_imports, dead_code)]
 mod tests {
     use crate::{
+        ArchetypeAccess, ArchetypeQuery,
         core::Frame,
         world::{Component, Entity, Row},
     };
 
-    use super::{ArchetypeAccess, Archetypes};
+    use super::Archetypes;
 
     #[derive(Debug, PartialEq, Eq)]
     struct Age(u32);
@@ -479,9 +500,9 @@ mod tests {
         archetypes.add_component(entity, Age(0), Frame::ZERO);
         archetypes.add_component(entity, Name("Bob"), Frame::ZERO);
 
-        let mut query = ArchetypeAccess::default();
-        query.required(age);
-        query.required(name);
+        let mut query = ArchetypeQuery::new();
+        query.require(age);
+        query.require(name);
 
         let result = archetypes.query(&query);
         let has_entity = result.iter().any(|archetype| archetype.contains(entity));
@@ -500,8 +521,8 @@ mod tests {
         archetypes.add_component(entity, Age(0), Frame::ZERO);
         archetypes.add_component(entity, Name("Bob"), Frame::ZERO);
 
-        let mut query = ArchetypeAccess::default();
-        query.required(age);
+        let mut query = ArchetypeQuery::new();
+        query.require(age);
         query.exclude(name);
 
         let result = archetypes.query(&query);
