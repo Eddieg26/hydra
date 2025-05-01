@@ -31,6 +31,16 @@ impl TableCell {
         }
     }
 
+    pub fn from_blob(data: BlobCell, frame: Frame) -> Self {
+        Self {
+            data,
+            frame: ObjectStatus {
+                added: frame,
+                modified: frame,
+            },
+        }
+    }
+
     pub fn cell(&self) -> &BlobCell {
         &self.data
     }
@@ -61,6 +71,11 @@ impl TableCell {
 
     pub fn modify(&mut self, frame: Frame) {
         self.frame.modified = frame;
+    }
+
+    pub fn replace_data(&mut self, mut data: BlobCell) -> BlobCell {
+        std::mem::swap(&mut self.data, &mut data);
+        data
     }
 
     pub fn into_value<T: 'static>(self) -> T {
