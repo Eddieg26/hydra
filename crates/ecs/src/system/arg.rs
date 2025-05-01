@@ -1,7 +1,6 @@
 use super::{IntoSystemConfig, SystemConfig, SystemId, SystemMeta};
 use crate::{
-    Cloned, CommandBuffer, Commands, WorldAccess,
-    world::{Entities, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell},
+    world::{Entities, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell}, Cloned, CommandBuffer, Commands, Event, EventReader, EventStorage, EventWriter, Events, WorldAccess
 };
 use std::any::Any;
 
@@ -268,6 +267,55 @@ unsafe impl<A: SystemArg> SystemArg for Option<A> {
 
     fn send() -> bool {
         A::send()
+    }
+}
+
+unsafe impl<E: Event> SystemArg for EventReader<'_, E> {
+    type Item<'world, 'state> = EventReader<'world, E>;
+
+    type State = ();
+
+    fn init(world: &mut World, _: &mut crate::WorldAccess) -> Self::State {
+        world.register_event::<E>();
+        ()
+    }
+
+    unsafe fn get<'world, 'state>(
+        _: &'state mut Self::State,
+        world: super::WorldCell<'world>,
+        _: &crate::system::SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        let events = unsafe { world.get().resource::<Events<E>>() };
+        EventReader::new(events)
+    }
+}
+
+unsafe impl<E: Event> SystemArg for EventWriter<'_, E> {
+    type Item<'world, 'state> = EventWriter<'state, E>;
+
+    type State = EventStorage<E>;
+
+    fn init(world: &mut World, _: &mut crate::WorldAccess) -> Self::State {
+        world.register_event::<E>();
+        EventStorage::default()
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        _: super::WorldCell<'world>,
+        _: &crate::system::SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        EventWriter::new(state)
+    }
+
+    fn update(state: &mut Self::State, world: &mut super::World) {
+        let events = world.resource_mut::<Events<E>>();
+        let offset = events.write.events.len();
+        events.write.events.append(&mut state.events);
+        for (entity, added) in state.entities.drain() {
+            let indices = events.write.entities.entry(entity).or_default();
+            indices.extend(added.iter().map(|i| *i + offset));
+        }
     }
 }
 
