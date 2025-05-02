@@ -88,7 +88,7 @@ impl TableCell {
 }
 
 pub struct Column {
-    data: Blob,
+    pub(crate) data: Blob,
     frames: Vec<ObjectStatus>,
 }
 
@@ -123,8 +123,12 @@ impl Column {
         &mut self.frames
     }
 
-    pub fn push<T: Component>(&mut self, value: T) {
+    pub fn push<T: Component>(&mut self, value: T, frame: Frame) {
         self.data.push(value);
+        self.frames.push(ObjectStatus {
+            added: frame,
+            modified: frame,
+        });
     }
 
     pub fn push_cell(&mut self, cell: TableCell) {
@@ -152,6 +156,16 @@ impl Column {
                 frame,
             })
         }
+    }
+
+    pub fn replace<C: Component>(&mut self, index: usize, component: C, frame: Frame) {
+        self.data.replace(index, component);
+        self.frames[index].modified = frame;
+    }
+
+    pub fn replace_raw(&mut self, index: usize, data: Vec<u8>, frame: Frame) {
+        unsafe { self.data.replace_raw(index, data) };
+        self.frames[index].modified = frame;
     }
 
     pub fn len(&self) -> usize {
@@ -195,8 +209,13 @@ impl Row {
         self.0.get(id)
     }
 
-    pub fn insert<T: Component>(&mut self, id: ComponentId, value: T) -> Option<TableCell> {
-        self.0.insert(id, TableCell::new(value))
+    pub fn insert<T: Component>(
+        &mut self,
+        id: ComponentId,
+        value: T,
+        frame: Frame,
+    ) -> Option<TableCell> {
+        self.0.insert(id, TableCell::with_frame(value, frame))
     }
 
     pub fn insert_cell(&mut self, id: ComponentId, cell: TableCell) -> Option<TableCell> {
@@ -297,13 +316,24 @@ impl TableBuilder {
         }
     }
 
-    pub fn with_column<T: Component>(mut self, component_id: ComponentId) -> Self {
-        self.add_column::<T>(component_id);
+    pub fn with_column<T: Component>(mut self, component: ComponentId) -> Self {
+        self.add_column::<T>(component);
         self
     }
 
-    pub fn add_column<T: Component>(&mut self, component_id: ComponentId) -> &mut Self {
-        self.columns.insert(component_id, Column::new::<T>());
+    pub fn add_column<T: Component>(&mut self, component: ComponentId) -> &mut Self {
+        self.columns.insert(component, Column::new::<T>());
+        self
+    }
+
+    pub fn add_raw_column(&mut self, component: ComponentId, meta: TypeMeta) -> &mut Self {
+        self.columns.insert(
+            component,
+            Column {
+                data: unsafe { Blob::from_raw(vec![], meta) },
+                frames: vec![],
+            },
+        );
         self
     }
 
@@ -321,6 +351,18 @@ pub struct Table {
 }
 
 impl Table {
+    pub fn entities(&self) -> indexmap::set::Iter<'_, Entity> {
+        self.entities.iter()
+    }
+
+    pub fn components(&self) -> impl Iterator<Item = (&ComponentId, &Column)> {
+        self.columns.iter()
+    }
+
+    pub fn components_mut(&mut self) -> impl Iterator<Item = (&ComponentId, &mut Column)> {
+        self.columns.iter_mut()
+    }
+
     pub fn add_entity(&mut self, entity: Entity, mut row: Row) -> RowIndex {
         self.entities.insert(entity);
 
@@ -351,14 +393,6 @@ impl Table {
     pub fn get_entity_row(&self, entity: Entity) -> Option<RowIndex> {
         let index = self.entities.get_index_of(&entity)?;
         Some(RowIndex(index as u32))
-    }
-
-    pub fn entities(&self) -> indexmap::set::Iter<'_, Entity> {
-        self.entities.iter()
-    }
-
-    pub fn components(&self) -> impl Iterator<Item = (&ComponentId, &Column)> {
-        self.columns.iter()
     }
 
     pub fn get_column(&self, component: ComponentId) -> Option<&Column> {
@@ -428,6 +462,7 @@ impl Table {
 mod tests {
     use super::{Row, Table, TableBuilder};
     use crate::{
+        Frame,
         core::TypeMeta,
         world::{Component, ComponentId, Entity},
     };
@@ -454,7 +489,7 @@ mod tests {
 
         let entity = Entity::root(0);
         let mut row = Row::new();
-        row.insert(id, Age(0));
+        row.insert(id, Age(0), Frame::ZERO);
 
         let mut table = TableBuilder::new().with_column::<Age>(id).build();
         table.add_entity(entity, row);
@@ -469,7 +504,7 @@ mod tests {
 
         let entity = Entity::root(0);
         let mut row = Row::new();
-        row.insert(id, Age(0));
+        row.insert(id, Age(0), Frame::ZERO);
 
         let mut table = TableBuilder::new().with_column::<Age>(id).build();
         table.add_entity(entity, row);

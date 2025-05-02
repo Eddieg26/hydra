@@ -186,7 +186,7 @@ impl World {
         entity
     }
 
-    pub fn despawn(&mut self, entity: Entity) -> Option<(ArchetypeId, Row)> {
+    pub fn despawn(&mut self, entity: Entity) -> Option<Row> {
         self.entities.despawn(entity);
         self.archetypes.remove_entity(entity)
     }
@@ -218,13 +218,13 @@ impl World {
         self.archetypes.remove_component::<C>(entity)
     }
 
-    pub fn add_components(&mut self, entity: Entity, components: Row) {
+    pub fn add_components<C: ComponentKit>(&mut self, entity: Entity, components: C) {
         self.archetypes
             .add_components(entity, components, self.frame);
     }
 
-    pub fn remove_components(&mut self, entity: Entity, components: Vec<ComponentId>) {
-        self.archetypes.remove_components(entity, components);
+    pub fn remove_components<C: ComponentKit>(&mut self, entity: Entity) {
+        self.archetypes.remove_components::<C>(entity);
     }
 
     pub fn entity_mut(&mut self, entity: Entity) -> EntityMut {

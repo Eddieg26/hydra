@@ -1,4 +1,4 @@
-use crate::{BlobCell, SparseIndex, TypeMeta};
+use crate::{SparseIndex, TypeMeta};
 use fixedbitset::FixedBitSet;
 use std::{alloc::Layout, any::TypeId, collections::HashMap};
 
@@ -7,6 +7,7 @@ pub trait Component: Send + Sync + 'static {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ComponentId(pub(crate) u32);
 
+#[derive(Clone, Debug)]
 pub struct ComponentMeta {
     id: ComponentId,
     meta: TypeMeta,
@@ -34,6 +35,10 @@ impl ComponentMeta {
 
     pub fn drop(&self) -> Option<fn(data: *mut u8)> {
         self.meta.drop
+    }
+
+    pub fn meta(&self) -> &TypeMeta {
+        &self.meta
     }
 }
 
@@ -133,75 +138,14 @@ impl Components {
     }
 }
 
-pub struct ComponentBuffer {
-    buffer: Vec<u8>,
-}
-
-impl ComponentBuffer {
-    pub fn new() -> Self {
-        Self { buffer: vec![] }
-    }
-
-    pub fn push<C: Component>(&mut self, component: C) -> &mut Self {
-        #[repr(C, packed)]
-        struct Packed<C: Component> {
-            push: fn(&[u8]) -> BlobCell,
-            component: C,
-        }
-
-        let packed = Packed {
-            push: |bytes| -> BlobCell {
-                let component = unsafe { std::ptr::read::<C>(bytes.as_ptr() as *const C) };
-                BlobCell::new(component)
-            },
-            component,
-        };
-
-        unsafe {
-            let offset = self.buffer.len();
-            self.buffer.reserve(std::mem::size_of::<Packed<C>>());
-
-            let ptr = self.buffer.as_mut_ptr().add(offset);
-
-            ptr.cast::<Packed<C>>().write_unaligned(packed);
-
-            self.buffer
-                .set_len(offset + std::mem::size_of::<Packed<C>>());
-        };
-
-        self
-    }
-}
-
-impl Iterator for ComponentBuffer {
-    type Item = BlobCell;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.buffer.len() > 0 {
-            const SIZE: usize = std::mem::size_of::<fn(&[u8]) -> BlobCell>();
-
-            let push = unsafe {
-                self.buffer[..SIZE]
-                    .as_ptr()
-                    .cast::<fn(&[u8]) -> BlobCell>()
-                    .as_ref()
-                    .unwrap_unchecked()
-            };
-
-            let cell = push(&self.buffer[SIZE..]);
-            self.buffer.drain(..SIZE + cell.meta().layout.size());
-
-            Some(cell)
-        } else {
-            None
-        }
-    }
+pub trait ComponentWriter<'a> {
+    fn write<C: Component>(&mut self, component: C);
 }
 
 pub trait ComponentKit: 'static {
     fn ids(components: &mut Components) -> Vec<ComponentId>;
 
-    fn get(self, buffer: &mut ComponentBuffer);
+    fn get<'a>(self, writer: impl ComponentWriter<'a>);
 }
 
 impl<C: Component> ComponentKit for C {
@@ -210,7 +154,7 @@ impl<C: Component> ComponentKit for C {
         vec![id]
     }
 
-    fn get(self, buffer: &mut ComponentBuffer) {
-        buffer.push(self);
+    fn get<'a>(self, mut writer: impl ComponentWriter<'a>) {
+        writer.write(self);
     }
 }

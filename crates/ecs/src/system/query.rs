@@ -230,8 +230,8 @@ impl<C: Component> BaseQuery for &mut C {
 
     fn get<'w>(state: &mut Self::State<'w>, _: Entity, row: RowIndex) -> Self::Item<'w> {
         unsafe {
-            state.frames.get_mut(row.to_usize()).unwrap().added = state.current_frame;
-            state.components.get_mut(row.to_usize()).unwrap()
+            state.frames.get_mut(row.to_usize()).added = state.current_frame;
+            state.components.get_mut(row.to_usize())
         }
     }
 }

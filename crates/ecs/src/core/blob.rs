@@ -114,6 +114,27 @@ impl Blob {
         }
     }
 
+    pub fn replace<T: 'static>(&mut self, index: usize, value: T) -> T {
+        assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
+
+        let offset = index * self.meta.layout.size();
+        let bounds = self.data.len() - self.meta.layout.size();
+        if offset > bounds {
+            panic!("Index out of bounds: {}", index);
+        }
+
+        unsafe {
+            let dst = self.data.as_ptr().add(offset) as *const T;
+            let old = ptr::read::<T>(dst);
+
+            ptr::copy_nonoverlapping(ptr::addr_of!(value), dst as *mut T, 1);
+
+            std::mem::forget(value);
+
+            old
+        }
+    }
+
     pub fn append<T: 'static>(&mut self, values: Vec<T>) {
         assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
 
@@ -230,6 +251,19 @@ impl Blob {
 
             bytes
         }
+    }
+
+    pub unsafe fn replace_raw(&mut self, index: usize, data: Vec<u8>) -> Vec<u8> {
+        let offset = index * self.meta.layout.size();
+        if self.data.is_empty() || offset > self.data.len() - self.meta.layout.size() {
+            panic!("Index out of bounds: {}", index);
+        }
+
+        let bytes = self
+            .data
+            .splice(offset..offset + self.meta.layout.size(), data);
+
+        bytes.collect()
     }
 
     pub unsafe fn ptr<T: 'static>(&self) -> Ptr<'_, T> {
@@ -383,20 +417,12 @@ impl<'a, T: 'static> Ptr<'a, T> {
         }
     }
 
-    pub unsafe fn get(&self, index: usize) -> Option<&'a T> {
-        if index < std::mem::size_of::<T>() {
-            Some(unsafe { &*self.data.add(index) })
-        } else {
-            None
-        }
+    pub unsafe fn get(&self, index: usize) -> &'a T {
+        unsafe { &*self.data.add(index) }
     }
 
-    pub unsafe fn get_mut(&mut self, index: usize) -> Option<&'a mut T> {
-        if index < std::mem::size_of::<T>() {
-            Some(unsafe { &mut *self.data.add(index) })
-        } else {
-            None
-        }
+    pub unsafe fn get_mut(&mut self, index: usize) -> &'a mut T {
+        unsafe { &mut *self.data.add(index) }
     }
 }
 

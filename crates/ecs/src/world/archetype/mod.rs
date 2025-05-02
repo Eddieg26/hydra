@@ -1,9 +1,9 @@
 use super::{ArchetypeAccess, Component, ComponentId, ComponentKit, Components, Entity};
 use crate::{
-    BlobCell, ComponentBuffer, TypeMeta,
+    ComponentWriter,
     core::{FixedBitSet, Frame, sparse::SparseIndex},
 };
-use std::{collections::HashMap, fmt::Debug, ptr::NonNull};
+use std::collections::HashMap;
 
 pub mod table;
 
@@ -30,11 +30,17 @@ pub struct Archetype {
     id: ArchetypeId,
     table: Table,
     bitset: FixedBitSet,
+    edges: Edges,
 }
 
 impl Archetype {
     pub fn new(id: ArchetypeId, table: Table, bitset: FixedBitSet) -> Self {
-        Self { id, table, bitset }
+        Self {
+            id,
+            table,
+            bitset,
+            edges: Edges::new(),
+        }
     }
 
     pub fn id(&self) -> ArchetypeId {
@@ -45,8 +51,16 @@ impl Archetype {
         &self.table
     }
 
-    pub(crate) fn table_mut(&mut self) -> &mut Table {
+    pub fn table_mut(&mut self) -> &mut Table {
         &mut self.table
+    }
+
+    pub fn edges(&self) -> &Edges {
+        &self.edges
+    }
+
+    pub fn edges_mut(&mut self) -> &mut Edges {
+        &mut self.edges
     }
 
     pub fn contains(&self, entity: Entity) -> bool {
@@ -77,8 +91,10 @@ impl Archetype {
             .map(|row| EntityIndex::new(self.id, row))
     }
 
-    pub fn add_entity(&mut self, entity: Entity, row: Row) {
-        self.table.add_entity(entity, row);
+    pub fn add_entity(&mut self, entity: Entity, row: Row) -> EntityIndex {
+        let row = self.table.add_entity(entity, row);
+
+        EntityIndex::new(self.id, row)
     }
 
     pub fn remove_entity(&mut self, entity: Entity) -> Option<Row> {
@@ -90,9 +106,57 @@ impl Archetype {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ArchetypeEdgeId {
+    Component(ComponentId),
+    Kit(ComponentId),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Edge {
+    Add,
+    Remove,
+}
+
+pub struct Edges {
+    pub add: HashMap<ArchetypeEdgeId, ArchetypeId>,
+    pub remove: HashMap<ArchetypeEdgeId, ArchetypeId>,
+}
+
+impl Edges {
+    pub fn new() -> Self {
+        Self {
+            add: HashMap::new(),
+            remove: HashMap::new(),
+        }
+    }
+
+    pub fn get(&self, id: ArchetypeEdgeId, edge: Edge) -> Option<ArchetypeId> {
+        match edge {
+            Edge::Add => self.added(id),
+            Edge::Remove => self.removed(id),
+        }
+    }
+
+    pub fn insert(&mut self, id: ArchetypeEdgeId, archetype: ArchetypeId, edge: Edge) {
+        match edge {
+            Edge::Add => self.add.insert(id, archetype),
+            Edge::Remove => self.remove.insert(id, archetype),
+        };
+    }
+
+    pub fn added(&self, id: ArchetypeEdgeId) -> Option<ArchetypeId> {
+        self.add.get(&id).copied()
+    }
+
+    pub fn removed(&self, id: ArchetypeEdgeId) -> Option<ArchetypeId> {
+        self.remove.get(&id).copied()
+    }
+}
+
 pub struct Archetypes {
     archetypes: Vec<Archetype>,
-    archetype_map: HashMap<Box<[ComponentId]>, ArchetypeId>,
+    archetype_map: HashMap<FixedBitSet, ArchetypeId>,
     entity_map: HashMap<Entity, ArchetypeId>,
     components: Components,
 }
@@ -105,8 +169,8 @@ impl Archetypes {
             FixedBitSet::new(),
         )];
 
-        let mut archetype_map: HashMap<Box<[ComponentId]>, ArchetypeId> = HashMap::new();
-        archetype_map.insert(Box::new([]), ArchetypeId::EMPTY);
+        let mut archetype_map = HashMap::new();
+        archetype_map.insert(FixedBitSet::new(), ArchetypeId::EMPTY);
 
         Self {
             archetypes,
@@ -180,18 +244,18 @@ impl Archetypes {
         }
     }
 
-    pub fn remove_entity(&mut self, entity: Entity) -> Option<(ArchetypeId, Row)> {
+    pub fn remove_entity(&mut self, entity: Entity) -> Option<Row> {
         let id = self.entity_map.remove(&entity)?;
         let archetype = &mut self.archetypes[id.0 as usize];
         let row = archetype.remove_entity(entity)?;
 
-        Some((id, row))
+        Some(row)
     }
 
     pub fn get_component<C: Component>(&self, entity: Entity) -> Option<&C> {
         let id = unsafe { self.components.get_id_unchecked::<C>() };
         let archetype_id = self.entity_map.get(&entity)?;
-        let archetype = &self.archetypes[archetype_id.0 as usize];
+        let archetype = &self.archetypes[archetype_id.to_usize()];
         archetype.table.get_component(entity, id)
     }
 
@@ -208,165 +272,245 @@ impl Archetypes {
         component: C,
         frame: Frame,
     ) -> EntityIndex {
-        let id = unsafe { self.components.get_id_unchecked::<C>() };
+        let id = self.components.register::<C>();
+        let archetype = self.get_or_insert_entity(entity);
+        let next = self.next_added_archetype(archetype, ArchetypeEdgeId::Component(id));
 
-        let (_, mut row) = match self.remove_entity(entity) {
-            Some((id, row)) => (id, row),
-            None => (ArchetypeId::EMPTY, Row::new()),
-        };
+        if archetype == next {
+            let table = &mut self.archetypes[archetype.to_usize()].table;
+            let index = table.get_entity_row(entity).unwrap();
+            let column = table.get_column_mut(id).unwrap();
 
-        let mut component = TableCell::new(component);
-        match row.contains(id) {
-            true => component.modify(frame),
-            false => component.add(frame),
+            column.replace(index.to_usize(), component, frame);
+
+            EntityIndex::new(archetype, index)
+        } else {
+            let mut row = self.remove_entity(entity).unwrap();
+            row.insert(id, component, frame);
+
+            self.entity_map.insert(entity, next);
+            self.archetypes[next.to_usize()].add_entity(entity, row)
         }
-
-        row.insert_cell(id, component);
-
-        self.add_entity_inner(entity, row)
     }
 
-    pub fn add_components(
-        &mut self,
-        entity: Entity,
-        mut components: Row,
-        frame: Frame,
-    ) -> EntityIndex {
-        let (_, mut row) = match self.remove_entity(entity) {
-            Some((id, row)) => (id, row),
-            None => (ArchetypeId::EMPTY, Row::new()),
-        };
-
-        while let Some((id, mut component)) = components.remove_at(0) {
-            match row.contains(id) {
-                true => component.modify(frame),
-                false => component.add(frame),
-            }
-
-            row.insert_cell(id, component);
-        }
-
-        self.add_entity_inner(entity, row)
-    }
-
-    pub fn add_component_kit<C: ComponentKit>(
+    pub fn add_components<C: ComponentKit>(
         &mut self,
         entity: Entity,
         components: C,
         frame: Frame,
     ) -> EntityIndex {
-        let (_, mut row) = match self.remove_entity(entity) {
-            Some((id, row)) => (id, row),
-            None => (ArchetypeId::EMPTY, Row::new()),
-        };
+        let kit = self.components.register_kit::<C>();
+        let archetype = self.get_or_insert_entity(entity);
+        let next = self.next_added_archetype(archetype, ArchetypeEdgeId::Kit(kit));
 
-        let mut buffer = ComponentBuffer::new();
-        components.get(&mut buffer);
+        if archetype == next {
+            let table = &mut self.archetypes[archetype.to_usize()].table;
+            let index = table.get_entity_row(entity).unwrap();
+            let bits = &self.components.kits()[kit.to_usize()];
 
-        let kit = self.register_kit::<C>();
-        let ids = self.components().kits()[kit.to_usize()].clone();
-        for id in ids.ones().map(ComponentId::from_usize) {
-            let component = buffer.next().unwrap();
-            let cell = match row.remove(id) {
-                Some(mut cell) => {
-                    cell.replace_data(component);
-                    cell.modify(frame);
-                    cell
+            pub struct ComponentModifier<'a> {
+                table: &'a mut Table,
+                components: fixedbitset::Ones<'a>,
+                index: RowIndex,
+                frame: Frame,
+            }
+
+            impl<'a> ComponentWriter<'a> for ComponentModifier<'a> {
+                fn write<C: Component>(&mut self, component: C) {
+                    let id = self.components.next().map(ComponentId::from_usize).unwrap();
+                    self.table.get_column_mut(id).unwrap().replace::<C>(
+                        self.index.to_usize(),
+                        component,
+                        self.frame,
+                    );
                 }
-                None => TableCell::from_blob(component, frame),
+            }
+
+            let writer = ComponentModifier {
+                table,
+                components: bits.ones(),
+                index,
+                frame,
             };
 
-            row.insert_cell(id, cell);
-        }
+            components.get(writer);
 
-        self.add_entity_inner(entity, row)
+            EntityIndex::new(archetype, index)
+        } else {
+            let mut row = self.remove_entity(entity).unwrap();
+            let table = &mut self.archetypes[next.to_usize()].table;
+            let bits = &self.components.kits()[kit.to_usize()];
+
+            pub struct ComponentAdder<'a> {
+                row: &'a mut Row,
+                components: fixedbitset::Ones<'a>,
+                frame: Frame,
+            }
+
+            impl<'a> ComponentWriter<'a> for ComponentAdder<'a> {
+                fn write<C: Component>(&mut self, component: C) {
+                    let id = self.components.next().map(ComponentId::from_usize).unwrap();
+                    self.row.insert(id, component, self.frame);
+                }
+            }
+
+            let writer = ComponentAdder {
+                row: &mut row,
+                components: bits.ones(),
+                frame,
+            };
+
+            components.get(writer);
+
+            let index = table.add_entity(entity, row);
+
+            self.entity_map.insert(entity, next);
+            EntityIndex::new(next, index)
+        }
     }
 
     pub fn remove_component<C: Component>(&mut self, entity: Entity) -> Option<(EntityIndex, C)> {
-        let id = unsafe { self.components.get_id_unchecked::<C>() };
+        let id = self.components.register::<C>();
+        let archetype = self.get_or_insert_entity(entity);
+        let next = self.next_removed_archetype(archetype, ArchetypeEdgeId::Component(id));
 
-        let (_, mut row) = match self.remove_entity(entity) {
-            Some(value) => value,
-            None => return None,
-        };
+        if archetype == next {
+            None
+        } else {
+            let mut row = self.remove_entity(entity).unwrap();
+            let component = row.remove(id)?.into_value::<C>();
+            let index = self.archetypes[next.to_usize()].add_entity(entity, row);
 
-        let component = row.remove(id);
-
-        let index = self.add_entity_inner(entity, row);
-
-        component.map(|c| (index, c.into_value()))
+            self.entity_map.insert(entity, next);
+            Some((index, component))
+        }
     }
 
-    pub fn remove_components(
+    pub fn remove_components<C: ComponentKit>(
         &mut self,
         entity: Entity,
-        components: Vec<ComponentId>,
     ) -> Option<(EntityIndex, Row)> {
-        let (_, mut row) = match self.remove_entity(entity) {
-            Some((id, row)) => (id, row),
-            None => return None,
-        };
+        let kit = self.components.register_kit::<C>();
+        let archetype = self.get_or_insert_entity(entity);
+        let next = self.next_removed_archetype(archetype, ArchetypeEdgeId::Kit(kit));
 
-        let mut removed = Row::new();
-        for id in components {
-            if let Some(value) = row.remove(id) {
-                removed.insert_cell(id, value);
+        if archetype == next {
+            None
+        } else {
+            let mut row = self.remove_entity(entity).unwrap();
+            let mut removed = Row::new();
+            for id in self.components.kits()[kit.to_usize()]
+                .ones()
+                .map(ComponentId::from_usize)
+            {
+                removed.insert_cell(id, row.remove(id).unwrap());
             }
+
+            let index = self.archetypes[next.to_usize()].add_entity(entity, row);
+
+            self.entity_map.insert(entity, next);
+            Some((index, removed))
         }
-
-        let index = self.add_entity_inner(entity, row);
-
-        Some((index, removed))
-    }
-
-    pub fn remove_component_kit<C: ComponentKit + Debug>(
-        &mut self,
-        entity: Entity,
-    ) -> (Option<(EntityIndex, Row)>) {
-        let (_, mut row) = match self.remove_entity(entity) {
-            Some((id, row)) => (id, row),
-            None => return None,
-        };
-
-        let mut removed = Row::new();
-        for id in C::ids(&mut self.components) {
-            if let Some(value) = row.remove(id) {
-                removed.insert_cell(id, value);
-            }
-        }
-
-        let index = self.add_entity_inner(entity, row);
-
-        Some((index, removed))
     }
 
     #[inline]
-    fn add_entity_inner(&mut self, entity: Entity, components: Row) -> EntityIndex {
-        let mut ids = components.ids().to_vec();
-        ids.sort();
-
-        let id = ids.into_boxed_slice();
-
-        match self.archetype_map.get(&id).copied() {
-            Some(id) => {
-                let archetype = &mut self.archetypes[id.0 as usize];
-                let row = archetype.table.add_entity(entity, components);
-                self.entity_map.insert(entity, id);
-
-                EntityIndex::new(id, row)
-            }
+    fn get_or_insert_entity(&mut self, entity: Entity) -> ArchetypeId {
+        match self.entity_map.get(&entity).copied() {
+            Some(id) => id,
             None => {
-                let mut bits = FixedBitSet::with_capacity(self.components.len());
-                id.iter().for_each(|id| bits.set(id.to_usize(), true));
+                self.entity_map.insert(entity, ArchetypeId::EMPTY);
+                self.archetypes[ArchetypeId::EMPTY.to_usize()].add_entity(entity, Row::new());
+                ArchetypeId::EMPTY
+            }
+        }
+    }
 
-                let archetype_id = ArchetypeId(self.archetypes.len() as u32);
-                let archetype = Archetype::new(archetype_id, components.into_table(entity), bits);
+    #[inline]
+    fn next_added_archetype(&mut self, current: ArchetypeId, edge: ArchetypeEdgeId) -> ArchetypeId {
+        match self.archetypes[current.to_usize()].edges.added(edge) {
+            Some(id) => id,
+            None => {
+                let mut bits = self.archetypes[current.to_usize()].bitset.clone();
+                match edge {
+                    ArchetypeEdgeId::Component(id) => {
+                        bits.grow(id.to_usize() + 1);
+                        bits.set(id.to_usize(), true);
+                    }
+                    ArchetypeEdgeId::Kit(id) => {
+                        bits.union_with(&self.components.kits()[id.to_usize()])
+                    }
+                }
+
+                if self.archetypes[current.to_usize()].bitset == bits {
+                    return current;
+                }
+
+                let mut table = TableBuilder::new();
+                for id in bits.ones().map(ComponentId::from_usize) {
+                    let component = self.components.get_by_id(id).unwrap();
+                    table.add_raw_column(id, *component.meta());
+                }
+
+                let next_id = ArchetypeId::from_usize(self.archetypes.len());
+                let mut archetype = Archetype::new(next_id, table.build(), bits.clone());
+
+                archetype.edges.remove.insert(edge, current);
+                self.archetypes[current.to_usize()]
+                    .edges
+                    .add
+                    .insert(edge, next_id);
 
                 self.archetypes.push(archetype);
-                self.entity_map.insert(entity, archetype_id);
-                self.archetype_map.insert(id, archetype_id);
+                self.archetype_map.insert(bits, next_id);
 
-                EntityIndex::new(archetype_id, RowIndex(0))
+                next_id
+            }
+        }
+    }
+
+    #[inline]
+    fn next_removed_archetype(
+        &mut self,
+        current: ArchetypeId,
+        edge: ArchetypeEdgeId,
+    ) -> ArchetypeId {
+        match self.archetypes[current.to_usize()].edges.added(edge) {
+            Some(id) => id,
+            None => {
+                let mut bits = self.archetypes[current.to_usize()].bitset.clone();
+                match edge {
+                    ArchetypeEdgeId::Component(id) => {
+                        bits.grow(id.to_usize() + 1);
+                        bits.set(id.to_usize(), false);
+                    }
+                    ArchetypeEdgeId::Kit(id) => {
+                        bits.difference_with(&self.components.kits()[id.to_usize()]);
+                    }
+                }
+
+                if self.archetypes[current.to_usize()].bitset == bits {
+                    return current;
+                }
+
+                let mut table = TableBuilder::new();
+                for id in bits.ones().map(ComponentId::from_usize) {
+                    let component = self.components.get_by_id(id).unwrap();
+                    table.add_raw_column(id, *component.meta());
+                }
+
+                let next_id = ArchetypeId::from_usize(self.archetypes.len());
+                let mut archetype = Archetype::new(next_id, table.build(), bits.clone());
+
+                archetype.edges.add.insert(edge, current);
+                self.archetypes[current.to_usize()]
+                    .edges
+                    .remove
+                    .insert(edge, next_id);
+
+                self.archetypes.push(archetype);
+                self.archetype_map.insert(bits, next_id);
+
+                next_id
             }
         }
     }
@@ -447,13 +591,15 @@ impl From<ArchetypeAccess> for ArchetypeQuery {
 
 #[allow(unused_imports, dead_code)]
 mod tests {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+
     use crate::{
-        ArchetypeAccess, ArchetypeQuery, ComponentKit,
+        ArchetypeAccess, ArchetypeQuery, ComponentId, ComponentKit, SparseIndex,
         core::Frame,
         world::{Component, Entity, Row},
     };
 
-    use super::Archetypes;
+    use super::{ArchetypeEdgeId, Archetypes};
 
     #[derive(Debug, PartialEq, Eq)]
     struct Age(u32);
@@ -483,14 +629,14 @@ mod tests {
             vec![components.register::<Age>(), components.register::<Name>()]
         }
 
-        fn get(self, buffer: &mut crate::ComponentBuffer) {
-            buffer.push(self.age);
-            buffer.push(self.name);
+        fn get<'a>(self, mut writer: impl crate::ComponentWriter<'a>) {
+            writer.write(self.age);
+            writer.write(self.name);
         }
     }
 
     #[test]
-    fn archetype_add_entity() {
+    fn add_entity() {
         let mut archetypes = Archetypes::new();
         let entity = Entity::root(0);
         let archetype = archetypes.add_entity(entity);
@@ -502,12 +648,11 @@ mod tests {
     }
 
     #[test]
-    fn archetype_add_component() {
+    fn add_component() {
         let mut archetypes = Archetypes::new();
         let entity = Entity::root(0);
 
         archetypes.register::<Age>();
-        archetypes.add_entity(entity);
         archetypes.add_component(entity, Age(0), Frame::ZERO);
 
         let age = archetypes.get_component::<Age>(entity);
@@ -515,18 +660,12 @@ mod tests {
     }
 
     #[test]
-    fn archetype_add_components() {
+    fn add_components() {
         let mut archetypes = Archetypes::new();
         let entity = Entity::root(0);
 
-        let age = archetypes.register::<Age>();
-        let name = archetypes.register::<Name>();
         archetypes.add_entity(entity);
-
-        let mut components = Row::new();
-        components.insert(age, Age(0));
-        components.insert(name, Name("Bob"));
-        archetypes.add_components(entity, components, Frame::ZERO);
+        archetypes.add_components(entity, Person::default(), Frame::ZERO);
 
         let age = archetypes.get_component::<Age>(entity);
         assert_eq!(age, Some(&Age(0)));
@@ -536,40 +675,7 @@ mod tests {
     }
 
     #[test]
-    fn add_component_kit() {
-        let mut archetypes = Archetypes::new();
-        let entity = Entity::root(0);
-
-        archetypes.add_entity(entity);
-        archetypes.add_component_kit(entity, Person::default(), Frame::ZERO);
-
-        let age = archetypes.get_component::<Age>(entity);
-        assert_eq!(age, Some(&Age(0)));
-
-        let name = archetypes.get_component::<Name>(entity);
-        assert_eq!(name, Some(&Name("Bob")));
-    }
-
-    #[test]
-    fn remove_component_kit() {
-        let mut archetypes = Archetypes::new();
-        let entity = Entity::root(0);
-
-        let age = archetypes.register::<Age>();
-        let name = archetypes.register::<Name>();
-        archetypes.add_entity(entity);
-        archetypes.add_component_kit(entity, Person::default(), Frame::ZERO);
-
-        let (_, components) = archetypes.remove_component_kit::<Person>(entity).unwrap();
-        let age = components.get::<Age>(age);
-        assert_eq!(age, Some(&Age(0)));
-
-        let name = components.get::<Name>(name);
-        assert_eq!(name, Some(&Name("Bob")));
-    }
-
-    #[test]
-    fn archetype_remove_component() {
+    fn remove_component() {
         let mut archetypes = Archetypes::new();
         let entity = Entity::root(0);
 
@@ -582,22 +688,16 @@ mod tests {
     }
 
     #[test]
-    fn archetype_remove_components() {
+    fn remove_components() {
         let mut archetypes = Archetypes::new();
         let entity = Entity::root(0);
 
         let age = archetypes.register::<Age>();
         let name = archetypes.register::<Name>();
         archetypes.add_entity(entity);
+        archetypes.add_components(entity, Person::default(), Frame::ZERO);
 
-        let mut components = Row::new();
-        components.insert(age, Age(0));
-        components.insert(name, Name("Bob"));
-        archetypes.add_components(entity, components, Frame::ZERO);
-
-        let components = vec![age, name];
-        let components = archetypes.remove_components(entity, components).unwrap().1;
-
+        let (_, components) = archetypes.remove_components::<Person>(entity).unwrap();
         let age = components.get::<Age>(age);
         assert_eq!(age, Some(&Age(0)));
 
