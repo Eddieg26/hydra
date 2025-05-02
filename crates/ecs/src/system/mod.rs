@@ -304,8 +304,8 @@ impl From<SystemNode> for System {
         let resources = value.access.resources.collect();
         let mut components = value.access.components.collect();
         for archetype in value.access.archetypes {
-            components.intersect_with(archetype.required().get_read());
-            components.intersect_with(archetype.required().get_write());
+            components.union_with(archetype.required().get_read());
+            components.union_with(archetype.required().get_write());
         }
 
         let meta = SystemMeta {

@@ -99,13 +99,13 @@ impl<I: SparseIndex> Access<I> {
     }
 
     pub fn collect(self) -> FixedBitSet {
-        self.read.intersection(&self.write).collect::<FixedBitSet>()
+        self.read.union(&self.write).collect::<FixedBitSet>()
     }
 }
 
 impl<I: SparseIndex> Into<FixedBitSet> for Access<I> {
     fn into(self) -> FixedBitSet {
-        self.read.intersection(&self.write).collect::<FixedBitSet>()
+        self.collect()
     }
 }
 
