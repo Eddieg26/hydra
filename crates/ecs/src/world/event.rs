@@ -11,6 +11,14 @@ pub struct EventStorage<E: Event> {
     pub(crate) entities: HashMap<Entity, Vec<EventIndex>>,
 }
 
+impl<E: Event> EventStorage<E> {
+    pub fn add_entity_event(&mut self, entity: Entity, event: E) {
+        let index = self.events.len();
+        self.events.push(event);
+        self.entities.entry(entity).or_default().push(index);
+    }
+}
+
 impl<E: Event> Default for EventStorage<E> {
     fn default() -> Self {
         Self {

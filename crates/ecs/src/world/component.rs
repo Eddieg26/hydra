@@ -142,10 +142,16 @@ pub trait ComponentWriter<'a> {
     fn write<C: Component>(&mut self, component: C);
 }
 
+pub trait ComponentRemover<'a> {
+    fn remove<C: Component>(&mut self);
+}
+
 pub trait ComponentKit: 'static {
     fn ids(components: &mut Components) -> Vec<ComponentId>;
 
     fn get<'a>(self, writer: impl ComponentWriter<'a>);
+
+    fn remove<'a>(remover: impl ComponentRemover<'a>);
 }
 
 impl<C: Component> ComponentKit for C {
@@ -156,5 +162,9 @@ impl<C: Component> ComponentKit for C {
 
     fn get<'a>(self, mut writer: impl ComponentWriter<'a>) {
         writer.write(self);
+    }
+
+    fn remove<'a>(mut remover: impl ComponentRemover<'a>) {
+        remover.remove::<Self>();
     }
 }

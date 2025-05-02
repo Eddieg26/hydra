@@ -214,8 +214,14 @@ impl World {
         self.archetypes.add_component(entity, component, self.frame)
     }
 
-    pub fn remove_component<C: Component>(&mut self, entity: Entity) -> Option<(EntityIndex, C)> {
-        self.archetypes.remove_component::<C>(entity)
+    pub fn remove_component<C: Component>(&mut self, entity: Entity) -> Option<EntityIndex> {
+        let (index, component) = self.archetypes.remove_component::<C>(entity)?;
+        let events = self.resource_mut::<Events<RemovedComponent<C>>>();
+        events
+            .write
+            .add_entity_event(entity, RemovedComponent::new(component));
+
+        Some(index)
     }
 
     pub fn add_components<C: ComponentKit>(&mut self, entity: Entity, components: C) {
@@ -223,8 +229,36 @@ impl World {
             .add_components(entity, components, self.frame);
     }
 
-    pub fn remove_components<C: ComponentKit>(&mut self, entity: Entity) {
-        self.archetypes.remove_components::<C>(entity);
+    pub fn remove_components<C: ComponentKit>(&mut self, entity: Entity) -> Option<EntityIndex> {
+        pub struct Remover<'a> {
+            world: &'a mut World,
+            entity: Entity,
+            components: Row,
+        }
+
+        impl<'a> ComponentRemover<'a> for Remover<'a> {
+            fn remove<C: Component>(&mut self) {
+                let id = unsafe { self.world.components().get_id_unchecked::<C>() };
+                if let Some(cell) = self.components.remove(id) {
+                    let events = self.world.resource_mut::<Events<RemovedComponent<C>>>();
+                    events
+                        .write
+                        .add_entity_event(self.entity, RemovedComponent::new(cell.into_value()));
+                }
+            }
+        }
+
+        let (index, components) = self.archetypes.remove_components::<C>(entity)?;
+
+        let remover = Remover {
+            world: self,
+            entity,
+            components,
+        };
+
+        C::remove(remover);
+
+        Some(index)
     }
 
     pub fn entity_mut(&mut self, entity: Entity) -> EntityMut {
@@ -276,10 +310,10 @@ impl<'w> EntityMut<'w> {
         self
     }
 
-    pub fn remove_component<C: Component>(&mut self) -> Option<C> {
-        let (index, component) = self.world.remove_component::<C>(self.entity)?;
-        self.index = index;
-        Some(component)
+    pub fn remove_component<C: Component>(&mut self) {
+        if let Some(index) = self.world.remove_component::<C>(self.entity) {
+            self.index = index;
+        }
     }
 
     pub fn get_component<C: Component>(&self) -> Option<&C> {

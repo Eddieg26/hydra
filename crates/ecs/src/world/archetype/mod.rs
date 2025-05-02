@@ -1,4 +1,4 @@
-use super::{ArchetypeAccess, Component, ComponentId, ComponentKit, Components, Entity};
+use super::{ArchetypeAccess, Component, ComponentId, ComponentKit, Components, Entity, Event};
 use crate::{
     ComponentWriter,
     core::{FixedBitSet, Frame, sparse::SparseIndex},
@@ -589,6 +589,22 @@ impl From<ArchetypeAccess> for ArchetypeQuery {
     }
 }
 
+pub struct RemovedComponent<C: Component> {
+    component: C,
+}
+
+impl<C: Component> RemovedComponent<C> {
+    pub fn new(component: C) -> Self {
+        Self { component }
+    }
+
+    pub fn take(self) -> C {
+        self.component
+    }
+}
+
+impl<C: Component> Event for RemovedComponent<C> {}
+
 #[allow(unused_imports, dead_code)]
 mod tests {
     use std::hash::{DefaultHasher, Hash, Hasher};
@@ -632,6 +648,11 @@ mod tests {
         fn get<'a>(self, mut writer: impl crate::ComponentWriter<'a>) {
             writer.write(self.age);
             writer.write(self.name);
+        }
+
+        fn remove<'a>(mut remover: impl crate::ComponentRemover<'a>) {
+            remover.remove::<Age>();
+            remover.remove::<Name>();
         }
     }
 
