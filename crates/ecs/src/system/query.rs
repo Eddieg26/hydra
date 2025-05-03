@@ -900,11 +900,11 @@ impl_base_query_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q))
 
 #[allow(unused_imports, dead_code)]
 mod tests {
+    use super::*;
     use crate::{
         ComponentKit, ComponentRemover, ComponentWriter, Components, WorldAccess,
         system::SystemMeta,
     };
-    use super::*;
 
     #[derive(Debug, Default, PartialEq, Eq)]
     struct Age(u32);
@@ -1092,5 +1092,31 @@ mod tests {
         assert!(query.contains(entity_a));
         assert!(query.contains(entity_b));
         assert!(!query.contains(entity_c));
+    }
+
+    #[test]
+    fn test_disjoint_query() {
+        let mut world = World::new();
+
+        let mut access = ArchetypeAccess::new();
+        QueryState::<&Age, With<Name>>::new(&mut world, &mut access);
+
+        let mut other = ArchetypeAccess::new();
+        QueryState::<&mut Age, Without<Name>>::new(&mut world, &mut other);
+
+        assert!(access.is_disjoint(&other))
+    }
+
+    #[test]
+    fn test_intersected_query() {
+        let mut world = World::new();
+
+        let mut access = ArchetypeAccess::new();
+        QueryState::<&Age, With<Name>>::new(&mut world, &mut access);
+
+        let mut other = ArchetypeAccess::new();
+        QueryState::<&mut Age, With<Name>>::new(&mut world, &mut other);
+
+        assert!(!access.is_disjoint(&other))
     }
 }
