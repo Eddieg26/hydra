@@ -28,9 +28,9 @@ impl RunMode {
 
 #[allow(unused_imports, dead_code)]
 mod tests {
-    use std::time::{Duration, Instant};
     use super::RunMode;
     use crate::{Phase, Resource, Schedule, World};
+    use std::time::{Duration, Instant};
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Value(u32);
@@ -60,19 +60,19 @@ mod tests {
 
         let mut schedule = Schedule::new(RunMode::Sequential);
         schedule.add_systems(Root, |value: &mut Value| {
-            assert_eq!(**value, 0);
+            assert_eq!(value.0, 0);
             value.0 = 1;
         });
 
         schedule.add_systems(Root, |value: &mut Value| {
-            assert_eq!(**value, 1);
+            assert_eq!(value.0, 1);
             value.0 = 2;
         });
 
         let systems = schedule.build(&mut world).unwrap();
         systems.run(Root, &mut world);
 
-        assert_eq!(**world.resource::<Value>(), 2);
+        assert_eq!(world.resource::<Value>().0, 2);
     }
 
     #[test]
@@ -105,25 +105,25 @@ mod tests {
 
         let mut schedule = Schedule::new(RunMode::Parallel);
         schedule.add_systems(Root, |value: &mut Value| {
-            assert_eq!(**value, 0);
+            assert_eq!(value.0, 0);
             value.0 += 1;
         });
 
         schedule.add_systems(Root, |world: &World| unsafe {
             let mut world = world.cell();
             let value = world.get_mut().resource_mut::<Value>();
-            assert_eq!(**value, 1);
+            assert_eq!(value.0, 1);
             value.0 += 1;
         });
 
         schedule.add_systems(Root, |value: &mut Value| {
-            assert_eq!(**value, 2);
+            assert_eq!(value.0, 2);
             value.0 += 1;
         });
 
         let systems = schedule.build(&mut world).unwrap();
         systems.run(Root, &mut world);
 
-        assert_eq!(**world.resource::<Value>(), 3);
+        assert_eq!(world.resource::<Value>().0, 3);
     }
 }
