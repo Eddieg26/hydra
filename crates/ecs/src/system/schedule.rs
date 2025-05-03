@@ -219,6 +219,7 @@ impl Schedule {
             }
         }
 
+
         let phases = phases.map(|config| config.build(world, mode));
 
         Ok(Systems {
@@ -261,7 +262,7 @@ impl Systems {
         self.mode
     }
 
-    pub fn run(&self, world: &mut World, phase: impl Phase) {
+    pub fn run(&self, phase: impl Phase, world: &mut World) {
         if let Some(index) = self.map.get(phase.name()).copied() {
             let world = unsafe { WorldCell::new_mut(world) };
 

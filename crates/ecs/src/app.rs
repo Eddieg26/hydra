@@ -120,7 +120,7 @@ impl App {
     }
 
     pub fn run(&mut self, phase: impl Phase) -> &mut Self {
-        self.systems.run(&mut self.world, phase);
+        self.systems.run(phase, &mut self.world);
         self.world.update();
         self
     }

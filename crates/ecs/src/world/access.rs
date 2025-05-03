@@ -68,9 +68,9 @@ impl<I: SparseIndex> Access<I> {
 
     pub fn write(&mut self, bit: I) -> bool {
         self.read.grow(bit.to_usize() + 1);
+        self.write.grow(bit.to_usize() + 1);
 
-        let prev = self.write[bit.to_usize()];
-        self.write.set(bit.to_usize(), true);
+        let prev = self.write.put(bit.to_usize());
 
         !prev && !self.read[bit.to_usize()] && self.write[bit.to_usize()]
     }

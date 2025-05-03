@@ -344,34 +344,50 @@ mod tests {
 
     use super::{Resource, Resources};
 
-    impl Resource for u32 {}
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Value(u32);
+    impl Resource for Value {}
+
+    impl std::ops::Deref for Value {
+        type Target = u32;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl std::ops::DerefMut for Value {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.0
+        }
+    }
 
     #[test]
     fn resources_add() {
         let mut resources = Resources::new();
-        let id = resources.add::<true, u32>(10);
+        let id = resources.add::<true, Value>(Value(10));
 
-        assert_eq!(resources.get(id), Some(&10));
+        assert_eq!(resources.get::<Value>(id), Some(&Value(10)));
     }
 
     #[test]
     fn resources_remove() {
         let mut resources = Resources::new();
-        resources.add::<true, u32>(10);
+        resources.add::<true, Value>(Value(10));
 
-        let resource = resources.remove::<u32>();
+        let resource = resources.remove::<Value>();
 
-        assert_eq!(resource, Some(10));
+        assert_eq!(resource, Some(Value(10)));
     }
 
     #[test]
     fn validate_resource_access() {
         let mut resources = Resources::new();
-        let id = resources.add::<false, u32>(10);
+        let id = resources.add::<false, Value>(Value(10));
 
         std::thread::scope(|scope| {
             scope.spawn(move || {
-                let resource = resources.get::<u32>(id);
+                let resource = resources.get::<Value>(id);
                 assert!(resource.is_none());
             });
         });
