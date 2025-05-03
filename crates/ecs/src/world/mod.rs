@@ -1,4 +1,4 @@
-use crate::{SparseIndex, core::Frame};
+use crate::{Removed, SparseIndex, core::Frame};
 
 pub mod access;
 pub mod archetype;
@@ -79,7 +79,11 @@ impl World {
     }
 
     pub fn register<C: Component>(&mut self) -> ComponentId {
-        self.archetypes.register::<C>()
+        let id = self.archetypes.register::<C>();
+
+        self.register_event::<Removed<C>>();
+
+        id
     }
 
     pub fn register_resource<R: Resource + Send>(&mut self) -> ResourceId {
@@ -98,12 +102,12 @@ impl World {
         self.events.register::<E>()
     }
 
-    pub fn add_resource<R: Resource + Send>(&mut self, resource: R) {
-        self.resources.add::<true, R>(resource);
+    pub fn add_resource<R: Resource + Send>(&mut self, resource: R) -> ResourceId {
+        self.resources.add::<true, R>(resource)
     }
 
-    pub fn add_non_send_resource<R: Resource>(&mut self, resource: R) {
-        self.resources.add::<false, R>(resource);
+    pub fn add_non_send_resource<R: Resource>(&mut self, resource: R) -> ResourceId {
+        self.resources.add::<false, R>(resource)
     }
 
     pub fn resource<R: Resource + Send>(&self) -> &R {
@@ -124,6 +128,32 @@ impl World {
                 "Resource not found: {}",
                 std::any::type_name::<R>()
             ))
+    }
+
+    pub fn get_or_insert_resource<R: Resource + Send>(&mut self, get: impl Fn() -> R) -> &mut R {
+        unsafe {
+            let mut world = self.cell();
+            if let Some(resource) = world.get_mut().try_resource_mut::<R>() {
+                resource
+            } else {
+                let world = world.get_mut();
+                let id = world.add_resource(get());
+                world.resources.get_mut(id).unwrap()
+            }
+        }
+    }
+
+    pub fn get_or_insert_non_send_resource<R: Resource>(&mut self, get: impl Fn() -> R) -> &mut R {
+        unsafe {
+            let mut world = self.cell();
+            if let Some(resource) = world.get_mut().try_non_send_resource_mut::<R>() {
+                resource
+            } else {
+                let world = world.get_mut();
+                let id = world.add_non_send_resource(get());
+                world.resources.get_mut(id).unwrap()
+            }
+        }
     }
 
     pub fn try_resource<R: Resource + Send>(&self) -> Option<&R> {
@@ -216,10 +246,10 @@ impl World {
 
     pub fn remove_component<C: Component>(&mut self, entity: Entity) -> Option<EntityIndex> {
         let (index, component) = self.archetypes.remove_component::<C>(entity)?;
-        let events = self.resource_mut::<Events<RemovedComponent<C>>>();
+        let events = self.get_or_insert_resource(|| Events::<Removed<C>>::new());
         events
             .write
-            .add_entity_event(entity, RemovedComponent::new(component));
+            .add_entity_event(entity, Removed::from(component));
 
         Some(index)
     }
@@ -240,10 +270,12 @@ impl World {
             fn remove<C: Component>(&mut self) {
                 let id = unsafe { self.world.components().get_id_unchecked::<C>() };
                 if let Some(cell) = self.components.remove(id) {
-                    let events = self.world.resource_mut::<Events<RemovedComponent<C>>>();
+                    let events = self
+                        .world
+                        .get_or_insert_resource(|| Events::<Removed<C>>::new());
                     events
                         .write
-                        .add_entity_event(self.entity, RemovedComponent::new(cell.into_value()));
+                        .add_entity_event(self.entity, Removed::from(cell.into_value::<C>()));
                 }
             }
         }

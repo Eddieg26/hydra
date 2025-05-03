@@ -530,6 +530,55 @@ impl<E: Event> BaseQuery for Events<E> {
 
 pub struct Or<'w, F: BaseFilter>(std::marker::PhantomData<&'w F>);
 
+pub struct Removed<C: Component>(C);
+impl<C: Component> From<C> for Removed<C> {
+    fn from(value: C) -> Self {
+        Self(value)
+    }
+}
+
+impl<C: Component> std::ops::Deref for Removed<C> {
+    type Target = C;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<C: Component> std::ops::DerefMut for Removed<C> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<C: Component> Event for Removed<C> {}
+
+impl<C: Component> BaseQuery for Removed<C> {
+    type Item<'w> = EntityEvents<'w, Self>;
+
+    type State<'w> = &'w Events<Self>;
+
+    type Data = ();
+
+    fn init(world: &mut World, _: &mut ArchetypeAccess) -> Self::Data {
+        world.register_event::<Self>();
+    }
+
+    fn state<'w>(
+        _: &Self::Data,
+        world: WorldCell<'w>,
+        _: &'w Archetype,
+        _: Frame,
+        _: Frame,
+    ) -> Self::State<'w> {
+        unsafe { world.get() }.resource::<Events<Self>>()
+    }
+
+    fn get<'w>(state: &mut Self::State<'w>, entity: Entity, _: RowIndex) -> Self::Item<'w> {
+        EntityEvents::new(&state, state.entity(entity))
+    }
+}
+
 pub struct QueryState<Q: BaseQuery, F: BaseFilter = ()> {
     access: ArchetypeQuery,
     archetypes: Vec<ArchetypeId>,
@@ -606,7 +655,6 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> Query<'w, 's, Q, F> {
         };
 
         if !self.state.archetypes.contains(&archetype.id()) {
-            println!("Archetypes: {:?}", self.state.archetypes);
             return false;
         }
 
@@ -852,18 +900,41 @@ impl_base_query_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q))
 
 #[allow(unused_imports, dead_code)]
 mod tests {
-
-    use crate::{WorldAccess, system::SystemMeta};
-
+    use crate::{
+        ComponentKit, ComponentRemover, ComponentWriter, Components, WorldAccess,
+        system::SystemMeta,
+    };
     use super::*;
 
-    #[derive(Debug, PartialEq, Eq)]
+    #[derive(Debug, Default, PartialEq, Eq)]
     struct Age(u32);
     impl Component for Age {}
 
-    #[derive(Debug, PartialEq, Eq)]
+    #[derive(Debug, Default, PartialEq, Eq)]
     struct Name(&'static str);
     impl Component for Name {}
+
+    #[derive(Debug, Default, PartialEq, Eq)]
+    struct Person {
+        age: Age,
+        name: Name,
+    }
+
+    impl ComponentKit for Person {
+        fn ids(components: &mut Components) -> Vec<super::ComponentId> {
+            vec![components.register::<Age>(), components.register::<Name>()]
+        }
+
+        fn get<'a>(self, mut writer: impl ComponentWriter<'a>) {
+            writer.write(self.age);
+            writer.write(self.name);
+        }
+
+        fn remove<'a>(mut remover: impl ComponentRemover<'a>) {
+            remover.remove::<Age>();
+            remover.remove::<Name>();
+        }
+    }
 
     #[test]
     fn test_query() {
@@ -930,6 +1001,57 @@ mod tests {
         let query = Query::new(unsafe { world.cell() }, &mut state);
 
         assert!(query.contains(entity));
+    }
+
+    #[test]
+    fn test_remove_component() {
+        let mut world = World::new();
+        world.register::<Age>();
+
+        let entity = world.spawn();
+        world.add_component(entity, Age(0));
+        world.remove_component::<Age>(entity);
+
+        world.update();
+
+        let mut state = QueryState::<(Entity, Removed<Age>), Removed<Age>>::new(
+            &mut world,
+            &mut ArchetypeAccess::new(),
+        );
+
+        let query = Query::new(unsafe { world.cell() }, &mut state);
+        let (entity, mut events) = query.iter().next().unwrap();
+        let event = events.next().unwrap();
+
+        assert!(query.contains(entity));
+        assert_eq!(**event, Age(0));
+    }
+
+    #[test]
+    fn test_remove_components() {
+        let mut world = World::new();
+        world.register::<Age>();
+        world.register::<Name>();
+
+        let entity = world.spawn();
+        world.add_components(entity, Person::default());
+        world.remove_components::<Person>(entity);
+
+        world.update();
+
+        let mut state = QueryState::<
+            (Entity, Removed<Age>, Removed<Name>),
+            (Removed<Age>, Removed<Name>),
+        >::new(&mut world, &mut ArchetypeAccess::new());
+
+        let query = Query::new(unsafe { world.cell() }, &mut state);
+        let (entity, mut age, mut name) = query.iter().next().unwrap();
+        let age = age.next().unwrap();
+        let name = name.next().unwrap();
+
+        assert!(query.contains(entity));
+        assert_eq!(**age, Age(0));
+        assert_eq!(**name, Name(""));
     }
 
     #[test]
