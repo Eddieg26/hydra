@@ -1,6 +1,6 @@
 use super::{IntoSystemConfig, SystemConfig, SystemMeta};
 use crate::{
-    Cloned, CommandBuffer, Commands, Event, EventReader, EventStorage, EventWriter, Events,
+    Cloned, CommandBuffer, Commands, Event, EventReader, EventStorage, EventWriter, Events, ModeId,
     WorldAccess,
     world::{Entities, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell},
 };
@@ -316,6 +316,24 @@ unsafe impl<E: Event> SystemArg for EventWriter<'_, E> {
             let indices = events.write.entities.entry(entity).or_default();
             indices.extend(added.iter().map(|i| *i + offset));
         }
+    }
+}
+
+unsafe impl SystemArg for Option<ModeId> {
+    type Item<'world, 'state> = Option<ModeId>;
+
+    type State = ();
+
+    fn init(_: &mut World, _: &mut WorldAccess) -> Self::State {
+        ()
+    }
+
+    unsafe fn get<'world, 'state>(
+        _: &'state mut Self::State,
+        world: WorldCell<'world>,
+        _: &SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        unsafe { world.get() }.modes.current()
     }
 }
 

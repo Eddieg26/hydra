@@ -1,4 +1,4 @@
-use crate::{Component, Entity, World};
+use crate::{Component, Entity, World, WorldMode};
 
 pub trait Command: Sized + Send + 'static {
     fn execute(self, world: &mut World);
@@ -177,5 +177,25 @@ impl<C: Component> RemoveComponent<C> {
 impl<C: Component> Command for RemoveComponent<C> {
     fn execute(self, world: &mut World) {
         world.remove_component::<C>(self.0);
+    }
+}
+
+pub struct EnterMode<M: WorldMode>(std::marker::PhantomData<M>);
+impl<M: WorldMode> Default for EnterMode<M> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<M: WorldMode> Command for EnterMode<M> {
+    fn execute(self, world: &mut World) {
+        world.enter::<M>();
+    }
+}
+
+pub struct ExitMode;
+impl Command for ExitMode {
+    fn execute(self, world: &mut World) {
+        world.exit();
     }
 }

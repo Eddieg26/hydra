@@ -2,7 +2,7 @@ use super::{
     System, SystemCell, SystemCondition, SystemId, SystemInit, SystemMeta, SystemName, SystemRun,
     SystemState, SystemUpdate,
 };
-use crate::{AccessError, Frame, Resource, World, WorldAccess};
+use crate::{AccessError, Frame, Resource, World, WorldAccess, WorldMode};
 use std::{cell::UnsafeCell, collections::HashSet};
 
 pub struct SystemConfig {
@@ -376,6 +376,35 @@ macro_rules! impl_tuple_condition {
     };
 }
 
+pub struct CurrentMode<M: WorldMode>(std::marker::PhantomData<M>);
+impl<M: WorldMode> Condition for CurrentMode<M> {
+    fn evaluate(world: &World, _: &SystemMeta) -> bool {
+        let id = world.modes.id::<M>();
+
+        world.modes.current() == id
+    }
+}
+
+pub struct Entered<M: WorldMode>(std::marker::PhantomData<M>);
+impl<M: WorldMode> Condition for Entered<M> {
+    fn evaluate(world: &World, system: &SystemMeta) -> bool {
+        world.modes.id::<M>().is_some_and(|id| {
+            let entered = world.modes[id].frame();
+            world.modes.current() == Some(id) && entered.is_newer(world.frame, system.frame)
+        })
+    }
+}
+
+pub struct Exited<M: WorldMode>(std::marker::PhantomData<M>);
+impl<M: WorldMode> Condition for Exited<M> {
+    fn evaluate(world: &World, system: &SystemMeta) -> bool {
+        world.modes.id::<M>().is_some_and(|id| {
+            let exited = world.modes[id].frame();
+            world.modes.current() != Some(id) && exited.is_newer(world.frame, system.frame)
+        })
+    }
+}
+
 pub struct Exists<R: Resource>(std::marker::PhantomData<R>);
 impl<R: Resource> Condition for Exists<R> {
     fn evaluate(world: &World, _: &SystemMeta) -> bool {
@@ -445,10 +474,9 @@ impl_tuple_condition! {
 
 #[allow(unused_imports, dead_code)]
 mod tests {
-    use super::{Condition, Exists};
+    use super::{Condition, CurrentMode, Exists};
     use crate::{
-        Added, IntoSystemConfig, Modified, Not, Or, Removed, Resource, System, SystemConfigs,
-        SystemMeta, World,
+        world, Added, Entered, Exited, IntoSystemConfig, Modified, Not, Or, Removed, Resource, System, SystemConfigs, SystemMeta, World, WorldMode
     };
 
     #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -457,6 +485,9 @@ mod tests {
 
     pub struct Ghost;
     impl Resource for Ghost {}
+
+    pub struct TestMode;
+    impl WorldMode for TestMode {}
 
     #[test]
     fn test_resource_exists() {
@@ -533,5 +564,39 @@ mod tests {
         }
 
         assert_eq!(world.resource::<Value>().0, 1);
+    }
+
+    #[test]
+    fn test_current_mode() {
+        let mut world = World::new();
+        world.add_mode::<TestMode>();
+
+        world.enter::<TestMode>();
+
+        let system = SystemMeta::default();
+        assert!(CurrentMode::<TestMode>::evaluate(&world, &system))
+    }
+
+    #[test]
+    fn test_enter_mode() {
+        let mut world = World::new();
+        world.add_mode::<TestMode>();
+
+        world.enter::<TestMode>();
+
+        let system = SystemMeta::default();
+        assert!(Entered::<TestMode>::evaluate(&world, &system))
+    }
+
+    #[test]
+    fn test_exit_mode() {
+        let mut world = World::new();
+        world.add_mode::<TestMode>();
+
+        world.enter::<TestMode>();
+        world.exit();
+
+        let system = SystemMeta::default();
+        assert!(Exited::<TestMode>::evaluate(&world, &system))
     }
 }

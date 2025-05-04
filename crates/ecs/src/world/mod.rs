@@ -6,6 +6,7 @@ pub mod cell;
 pub mod component;
 pub mod entity;
 pub mod event;
+pub mod mode;
 pub mod resource;
 
 pub use access::*;
@@ -14,6 +15,7 @@ pub use cell::*;
 pub use component::*;
 pub use entity::*;
 pub use event::*;
+pub use mode::*;
 pub use resource::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +37,7 @@ pub struct World {
     pub(crate) resources: Resources,
     pub(crate) entities: Entities,
     pub(crate) events: EventRegistry,
+    pub(crate) modes: WorldModes,
     pub(crate) frame: Frame,
 }
 
@@ -46,6 +49,7 @@ impl World {
             resources: Resources::new(),
             entities: Entities::new(),
             events: EventRegistry::new(),
+            modes: WorldModes::new(),
             frame: Frame(1),
         }
     }
@@ -100,6 +104,10 @@ impl World {
         }
 
         self.events.register::<E>()
+    }
+
+    pub fn add_mode<M: WorldMode>(&mut self) -> ModeId {
+        self.modes.add_mode::<M>()
     }
 
     pub fn add_resource<R: Resource + Send>(&mut self, resource: R) -> ResourceId {
@@ -305,6 +313,34 @@ impl World {
         EntityWorldRef::new(self, entity, index)
     }
 
+    pub fn enter<M: WorldMode>(&mut self) -> Option<ModeId> {
+        let current = self.modes.add_mode::<M>();
+
+        if self.modes.current != Some(current) {
+            if let Some(prev) = self.modes.current {
+                self.modes.get(prev).exit(self);
+                self.modes[prev].set_frame(self.frame);
+            }
+
+            self.modes.get(current).enter(self);
+            self.modes[current].set_frame(self.frame);
+            self.modes.current.replace(current)
+        } else {
+            None
+        }
+    }
+
+    pub fn exit(&mut self) -> bool {
+        if let Some(prev) = self.modes.current {
+            self.modes.get(prev).exit(self);
+            self.modes.current = None;
+            self.modes[prev].set_frame(self.frame);
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn update(&mut self) {
         self.frame += 1;
         self.events.update(unsafe { self.cell() });
@@ -312,6 +348,7 @@ impl World {
         if self.frame.get() % Frame::AGE_REFRESH_RATE == 0 {
             self.archetypes.update(self.frame);
             self.resources.update(self.frame);
+            self.modes.update(self.frame);
         }
     }
 }
