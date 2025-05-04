@@ -4,7 +4,7 @@ use crate::{
     WorldCell,
 };
 
-use super::SystemArg;
+use super::{Not, Or, ReadOnly, SystemArg};
 
 pub trait BaseQuery {
     type Item<'w>;
@@ -424,7 +424,6 @@ impl<C: Component> BaseFilter for Modified<C> {
     }
 }
 
-pub struct Not<Q: BaseFilter>(std::marker::PhantomData<Q>);
 impl<C: Component> BaseFilter for Not<Added<C>> {
     type State<'w> = <Added<C> as BaseFilter>::State<'w>;
 
@@ -527,8 +526,6 @@ impl<E: Event> BaseQuery for Events<E> {
         EntityEvents::new(&state, state.entity(entity))
     }
 }
-
-pub struct Or<'w, F: BaseFilter>(std::marker::PhantomData<&'w F>);
 
 pub struct Removed<C: Component>(C);
 impl<C: Component> From<C> for Removed<C> {
@@ -692,6 +689,8 @@ unsafe impl<Q: BaseQuery + 'static, F: BaseFilter + 'static> SystemArg for Query
     }
 }
 
+unsafe impl<Q: ReadQuery + 'static, F: BaseFilter + 'static> ReadOnly for Query<'_, '_, Q, F> {}
+
 pub struct QueryIterState<'a, Q: BaseQuery, F: BaseFilter = ()> {
     state: Q::State<'a>,
     filter: F::State<'a>,
@@ -850,7 +849,7 @@ macro_rules! impl_base_query_for_tuples {
             }
 
             #[allow(non_snake_case)]
-            impl<$($name: BaseFilter),+> BaseFilter for Or<'_, ($($name),+)> {
+            impl<$($name: BaseFilter),+> BaseFilter for Or<($($name),+)> {
                 type State<'w> = ($($name::State<'w>), +);
 
                 type Data = ($($name::Data), +);
@@ -877,6 +876,8 @@ macro_rules! impl_base_query_for_tuples {
             }
 
             unsafe impl<$($name: ReadQuery),+> ReadQuery for ($($name),+) {}
+
+            unsafe impl<$($name: ReadOnly),+> ReadOnly for ($($name),+) {}
         )+
     };
 }

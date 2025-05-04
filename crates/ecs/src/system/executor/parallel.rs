@@ -30,6 +30,7 @@ impl ParallelExecutor {
             dependencies: systems.dependencies().to_vec(),
             queue: initial_systems.clone(),
             completed: FixedBitSet::with_capacity(systems.len()),
+            skipped: FixedBitSet::with_capacity(systems.len()),
             running: 0,
         };
 
@@ -44,6 +45,7 @@ impl ParallelExecutor {
         let mut state = self.state.lock().unwrap();
         state.running = 0;
         state.completed.clear();
+        state.skipped.clear();
         state.queue = self.initial_systems.clone();
         state.dependencies = self.systems.dependencies().to_vec();
     }
@@ -73,7 +75,13 @@ impl SystemExecutor for ParallelExecutor {
             }
         });
 
-        for index in self.systems.topology() {
+        let state = self.state.lock().unwrap();
+        for index in self
+            .systems
+            .topology()
+            .iter()
+            .filter_map(|i| (!state.skipped[*i]).then_some(i))
+        {
             unsafe {
                 self.systems.nodes()[*index]
                     .cast_mut()
@@ -89,6 +97,7 @@ pub struct ExecutionState {
     dependencies: Vec<usize>,
     queue: FixedBitSet,
     completed: FixedBitSet,
+    skipped: FixedBitSet,
     running: usize,
 }
 
@@ -98,6 +107,7 @@ impl Default for ExecutionState {
             dependencies: Default::default(),
             queue: Default::default(),
             completed: Default::default(),
+            skipped: Default::default(),
             running: 0,
         }
     }
@@ -191,15 +201,16 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
     }
 
     fn run_system(&self, index: usize) {
-        unsafe { self.systems.nodes()[index].cast_mut().run(self.world) };
-        self.system_done(index);
+        let skipped = unsafe { self.systems.nodes()[index].cast_mut().run(self.world) };
+        self.system_done(index, skipped);
     }
 
-    fn system_done(&self, index: usize) {
+    fn system_done(&self, index: usize, skipped: bool) {
         let mut state = self.state.lock().unwrap();
 
         state.running -= 1;
         state.completed.set(index, true);
+        state.skipped.set(index, skipped);
 
         for dependent in self.systems.dependents()[index].ones() {
             state.dependencies[dependent] -= 1;

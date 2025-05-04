@@ -1,9 +1,12 @@
 use super::{Component, ComponentId, Entity, Frame};
-use crate::core::{
-    TypeMeta,
-    blob::{Blob, BlobCell, Ptr},
-    frame::ObjectStatus,
-    sparse::{ImmutableSparseSet, SparseIndex, SparseSet},
+use crate::{
+    core::{
+        TypeMeta,
+        blob::{Blob, BlobCell, Ptr},
+        frame::ObjectStatus,
+        sparse::{ImmutableSparseSet, SparseIndex, SparseSet},
+    },
+    impl_sparse_index_wrapper,
 };
 use indexmap::IndexSet;
 use std::alloc::Layout;
@@ -275,16 +278,6 @@ impl Row {
     }
 }
 
-impl SparseIndex for ComponentId {
-    fn to_usize(self) -> usize {
-        self.0 as usize
-    }
-
-    fn from_usize(index: usize) -> Self {
-        Self(index as u32)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RowIndex(pub u32);
 impl std::ops::Deref for RowIndex {
@@ -295,15 +288,7 @@ impl std::ops::Deref for RowIndex {
     }
 }
 
-impl SparseIndex for RowIndex {
-    fn to_usize(self) -> usize {
-        self.0 as usize
-    }
-
-    fn from_usize(index: usize) -> Self {
-        Self(index as u32)
-    }
-}
+impl_sparse_index_wrapper!(RowIndex);
 
 pub struct TableBuilder {
     columns: SparseSet<Column, ComponentId>,

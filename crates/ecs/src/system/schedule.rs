@@ -64,7 +64,7 @@ impl PhaseConfig {
     pub fn build(self, world: &mut World, mode: RunMode) -> PhaseNode {
         let mut systems = IndexDag::new();
         for config in self.configs {
-            systems.add_node(config.into_system_node(world));
+            systems.add_node(config.into_node(world));
         }
 
         for index in (0..systems.nodes().len()).rev() {
@@ -82,9 +82,9 @@ impl PhaseConfig {
                 .map(|i| {
                     systems.nodes()[*i]
                         .config
-                        .name
-                        .clone()
-                        .unwrap_or("unknown".into())
+                        .name()
+                        .cloned()
+                        .unwrap_or("anonymous".into())
                 })
                 .collect::<Vec<_>>();
 
@@ -218,7 +218,6 @@ impl Schedule {
                 hierarchy.entry(parent).or_insert(vec![]).push(*index);
             }
         }
-
 
         let phases = phases.map(|config| config.build(world, mode));
 

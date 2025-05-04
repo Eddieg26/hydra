@@ -1,4 +1,4 @@
-use crate::{SparseIndex, TypeMeta};
+use crate::{SparseIndex, TypeMeta, impl_sparse_index_wrapper};
 use fixedbitset::FixedBitSet;
 use std::{alloc::Layout, any::TypeId, collections::HashMap};
 
@@ -6,6 +6,7 @@ pub trait Component: Send + Sync + 'static {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ComponentId(pub(crate) u32);
+impl_sparse_index_wrapper!(ComponentId);
 
 #[derive(Clone, Debug)]
 pub struct ComponentMeta {

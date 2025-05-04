@@ -13,3 +13,4 @@ members = ["crates/*", "examples/ecs/*"]
 [workspace.dependencies]
 fixedbitset = "0.5.7"
 indexmap = "2.8.0"
+rayon = "1.10.0"

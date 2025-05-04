@@ -1,7 +1,7 @@
 use crate::{
     ObjectStatus,
     core::{Frame, sparse::SparseIndex},
-    ext,
+    ext, impl_sparse_index_wrapper,
 };
 use std::{any::TypeId, collections::HashMap, thread::ThreadId};
 
@@ -9,15 +9,7 @@ pub trait Resource: Sized + 'static {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ResourceId(u32);
-impl SparseIndex for ResourceId {
-    fn to_usize(self) -> usize {
-        self.0 as usize
-    }
-
-    fn from_usize(index: usize) -> Self {
-        Self(index as u32)
-    }
-}
+impl_sparse_index_wrapper!(ResourceId);
 
 pub struct ResourceMeta {
     name: &'static str,

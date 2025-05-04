@@ -1,6 +1,8 @@
-use super::{IntoSystemConfig, SystemConfig, SystemId, SystemMeta};
+use super::{IntoSystemConfig, SystemConfig, SystemMeta};
 use crate::{
-    world::{Entities, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell}, Cloned, CommandBuffer, Commands, Event, EventReader, EventStorage, EventWriter, Events, WorldAccess
+    Cloned, CommandBuffer, Commands, Event, EventReader, EventStorage, EventWriter, Events,
+    WorldAccess,
+    world::{Entities, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell},
 };
 use std::any::Any;
 
@@ -33,6 +35,8 @@ pub unsafe trait SystemArg: Sized {
 
     fn update(state: &mut Self::State, world: &mut World) {}
 }
+
+pub unsafe trait ReadOnly: SystemArg {}
 
 pub type ArgItem<'world, 'state, A> = <A as SystemArg>::Item<'world, 'state>;
 
@@ -322,13 +326,10 @@ unsafe impl<E: Event> SystemArg for EventWriter<'_, E> {
 macro_rules! impl_into_system_configs {
     ($($arg:ident),*) => {
     #[allow(non_snake_case)]
-    impl<F, $($arg: SystemArg),*> IntoSystemConfig<(F, $($arg),*)> for F
+    impl<O, F, $($arg: SystemArg),*> IntoSystemConfig<(F, $($arg),*)> for F
         where
-            for<'world, 'state> F: Fn($($arg),*) + Fn($(ArgItem<'world,'state, $arg>),*) + Send + Sync + 'static,
+            for<'world, 'state> F: Fn($($arg),*) + Fn($(ArgItem<'world,'state, $arg>),*) -> O + Send + Sync + 'static,
         {
-
-            type In = A;
-
             fn config(self) -> SystemConfig {
                 let name = std::any::type_name::<F>();
 
@@ -338,19 +339,18 @@ macro_rules! impl_into_system_configs {
                         arg_state
                     },)*);
 
-
                     let state = ($($arg,)*);
                     Box::new(state) as Box<dyn Any + Send + Sync>
                 };
 
-                let execute = move |state: &mut Box<dyn Any + Send + Sync>, world: WorldCell, system: &SystemMeta| {
+                let run = move |state: &mut Box<dyn Any + Send + Sync>, world: WorldCell, system: &SystemMeta| {
                     let ($($arg,)*) = state.downcast_mut::<($($arg::State,)*)>().unwrap();
                     let ($($arg,)*) = unsafe {($($arg::get($arg, world, system),)*)};
 
                     self($($arg,)*);
                 };
 
-                let update = move |state: &mut Box<dyn Any + Send + Sync>, world: &mut World| {
+                let update = |state: &mut Box<dyn Any + Send + Sync>, world: &mut World| {
                     let ($($arg,)*) = state.downcast_mut::<($($arg::State,)*)>().unwrap();
                     $($arg::update($arg, world);)*
                 };
@@ -358,16 +358,7 @@ macro_rules! impl_into_system_configs {
                 let send = ($($arg::send() &&)* true);
                 let exclusive = ($($arg::exclusive() ||)* false);
 
-                SystemConfig {
-                    id: SystemId::new(),
-                    name: Some(name.into()),
-                    exclusive,
-                    send,
-                    dependencies: std::collections::HashSet::new(),
-                    init,
-                    run: Box::new(execute),
-                    update: Box::new(update),
-                }
+                SystemConfig::new(Some(name), exclusive, send, init, update, Box::new(run), |_, _| true)
             }
         }
 
@@ -417,3 +408,65 @@ impl_into_system_configs!(A, B, C, D, E, F2, G);
 impl_into_system_configs!(A, B, C, D, E, F2, G, H);
 impl_into_system_configs!(A, B, C, D, E, F2, G, H, I);
 impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J);
+impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J, K);
+impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J, K, L);
+impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J, K, L, M);
+impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N);
+impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O2);
+impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O2, P);
+impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O2, P, Q);
+
+#[allow(type_alias_bounds)]
+pub mod unlifetime {
+    use super::{ArgItem, SystemArg};
+    use crate::{BaseFilter, BaseQuery, NonSend, NonSendMut, Query, Resource};
+
+    pub type Read<T> = &'static T;
+    pub type Write<T> = &'static mut T;
+    pub type NonSendRes<R: Resource> = NonSend<'static, R>;
+    pub type NonSendResMut<R: Resource> = NonSendMut<'static, R>;
+    pub type SQuery<Q: BaseQuery, F: BaseFilter> = Query<'static, 'static, Q, F>;
+
+    pub struct StaticArg<'w, 's, S: SystemArg>(ArgItem<'w, 's, S>);
+    impl<'w, 's, S: SystemArg> StaticArg<'w, 's, S> {
+        pub fn get(&self) -> &ArgItem<'w, 's, S> {
+            &self.0
+        }
+
+        pub fn get_mut(&mut self) -> &mut ArgItem<'w, 's, S> {
+            &mut self.0
+        }
+    }
+
+    impl<'w, 's, S: SystemArg> std::ops::Deref for StaticArg<'w, 's, S> {
+        type Target = ArgItem<'w, 's, S>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl<'w, 's, S: SystemArg> std::ops::DerefMut for StaticArg<'w, 's, S> {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.0
+        }
+    }
+
+    unsafe impl<S: SystemArg + 'static> SystemArg for StaticArg<'_, '_, S> {
+        type Item<'world, 'state> = StaticArg<'world, 'state, S>;
+
+        type State = S::State;
+
+        fn init(world: &mut crate::World, access: &mut crate::WorldAccess) -> Self::State {
+            S::init(world, access)
+        }
+
+        unsafe fn get<'world, 'state>(
+            state: &'state mut Self::State,
+            world: crate::WorldCell<'world>,
+            system: &crate::SystemMeta,
+        ) -> Self::Item<'world, 'state> {
+            unsafe { StaticArg(S::get(state, world, system)) }
+        }
+    }
+}

@@ -26,6 +26,23 @@ macro_rules! impl_sparse_index {
 
 impl_sparse_index!(u8, u16, u32, u64, usize);
 
+#[macro_export]
+macro_rules! impl_sparse_index_wrapper {
+    ($($ty:ty),+) => {
+        $(impl SparseIndex for $ty {
+            #[inline]
+            fn to_usize(self) -> usize {
+                self.0 as usize
+            }
+
+            #[inline]
+            fn from_usize(value: usize) -> Self {
+                Self(value as u32)
+            }
+        })*
+    };
+}
+
 pub struct SparseArray<V, I = V> {
     values: Vec<Option<V>>,
     _marker: std::marker::PhantomData<I>,

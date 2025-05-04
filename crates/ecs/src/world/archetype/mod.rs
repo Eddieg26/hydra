@@ -1,7 +1,6 @@
 use super::{ArchetypeAccess, Component, ComponentId, ComponentKit, Components, Entity};
 use crate::{
-    ComponentWriter,
-    core::{FixedBitSet, Frame, sparse::SparseIndex},
+    core::{sparse::SparseIndex, FixedBitSet, Frame}, impl_sparse_index_wrapper, ComponentWriter
 };
 use std::collections::HashMap;
 
@@ -16,15 +15,7 @@ impl ArchetypeId {
     pub const EMPTY: Self = Self(0);
 }
 
-impl SparseIndex for ArchetypeId {
-    fn to_usize(self) -> usize {
-        self.0 as usize
-    }
-
-    fn from_usize(index: usize) -> Self {
-        Self(index as u32)
-    }
-}
+impl_sparse_index_wrapper!(ArchetypeId);
 
 pub struct Archetype {
     id: ArchetypeId,

@@ -1,0 +1,367 @@
+use super::{
+    System, SystemCell, SystemCondition, SystemId, SystemInit, SystemMeta, SystemName, SystemRun,
+    SystemState, SystemUpdate,
+};
+use crate::{AccessError, Frame, World, WorldAccess};
+use std::{cell::UnsafeCell, collections::HashSet};
+
+pub struct SystemConfig {
+    id: SystemId,
+    name: Option<SystemName>,
+    exclusive: bool,
+    send: bool,
+    dependencies: HashSet<SystemId>,
+    init: SystemInit,
+    run: SystemRun,
+    update: SystemUpdate,
+    condition: SystemCondition,
+}
+
+impl SystemConfig {
+    pub fn new(
+        name: Option<impl Into<SystemName>>,
+        exclusive: bool,
+        send: bool,
+        init: SystemInit,
+        update: SystemUpdate,
+        run: SystemRun,
+        condition: SystemCondition,
+    ) -> Self {
+        Self {
+            id: SystemId::new(),
+            name: name.map(|name| name.into()),
+            exclusive,
+            send,
+            dependencies: HashSet::new(),
+            init,
+            run,
+            update,
+            condition,
+        }
+    }
+
+    pub fn id(&self) -> SystemId {
+        self.id
+    }
+
+    pub fn name(&self) -> Option<&SystemName> {
+        self.name.as_ref()
+    }
+
+    pub fn exclusive(&self) -> bool {
+        self.exclusive
+    }
+
+    pub fn send(&self) -> bool {
+        self.send
+    }
+
+    pub fn dependencies(&self) -> &HashSet<SystemId> {
+        &self.dependencies
+    }
+
+    pub fn into_node(self, world: &mut World) -> SystemNode {
+        let mut access = WorldAccess::new();
+        let state = (self.init)(world, &mut access);
+
+        if let Err(error) = access.validate() {
+            match error {
+                AccessError::Component(id) => {
+                    let component = world.components().get_by_id(id).unwrap();
+                    panic!(
+                        "Invalid component access: {} for system: {:?}",
+                        component.name(),
+                        self.name
+                    );
+                }
+                AccessError::Resource(id) => {
+                    let resource = world.resources().get_meta(id).unwrap();
+                    panic!(
+                        "Invalid resource access: {} for system: {:?}",
+                        resource.name(),
+                        self.name
+                    );
+                }
+            }
+        }
+
+        SystemNode {
+            config: self,
+            state,
+            access,
+        }
+    }
+}
+
+pub struct SystemNode {
+    pub config: SystemConfig,
+    pub state: SystemState,
+    pub access: WorldAccess,
+}
+
+impl SystemNode {
+    pub fn has_dependency(&self, other: &SystemNode) -> bool {
+        if self.config.dependencies.contains(&other.config.id) {
+            return true;
+        }
+
+        self.access.conflicts(&other.access).is_err()
+    }
+}
+
+pub enum SystemConfigs {
+    Config(SystemConfig),
+    Configs(Vec<SystemConfig>),
+}
+
+impl SystemConfigs {
+    pub fn single(self) -> SystemConfig {
+        match self {
+            SystemConfigs::Config(config) => config,
+            SystemConfigs::Configs(configs) => configs.into_iter().next().unwrap(),
+        }
+    }
+
+    pub fn flatten(self) -> Vec<SystemConfig> {
+        match self {
+            SystemConfigs::Config(config) => vec![config],
+            SystemConfigs::Configs(configs) => configs,
+        }
+    }
+}
+
+impl AsRef<SystemConfig> for SystemConfigs {
+    fn as_ref(&self) -> &SystemConfig {
+        match self {
+            SystemConfigs::Config(config) => config,
+            SystemConfigs::Configs(configs) => &configs[0],
+        }
+    }
+}
+
+impl AsMut<SystemConfig> for SystemConfigs {
+    fn as_mut(&mut self) -> &mut SystemConfig {
+        match self {
+            SystemConfigs::Config(config) => config,
+            SystemConfigs::Configs(configs) => &mut configs[0],
+        }
+    }
+}
+
+impl SystemConfigs {
+    pub fn new(config: SystemConfig) -> Self {
+        SystemConfigs::Config(config)
+    }
+
+    pub fn configs(configs: Vec<SystemConfig>) -> Self {
+        SystemConfigs::Configs(configs)
+    }
+
+    pub fn config(&self) -> &SystemConfig {
+        match self {
+            SystemConfigs::Config(config) => config,
+            SystemConfigs::Configs(configs) => &configs[0],
+        }
+    }
+}
+
+pub trait IntoSystemConfig<M>: Sized {
+    fn config(self) -> SystemConfig;
+
+    fn when<C: Condition>(self) -> SystemConfig {
+        let mut config = self.config();
+        config.condition = C::evaluate;
+        config
+    }
+}
+
+impl<M, I: IntoSystemConfig<M>> IntoSystemConfigs<M> for I {
+    fn configs(self) -> SystemConfigs {
+        SystemConfigs::Config(self.config())
+    }
+
+    fn before<Marker>(self, configs: impl IntoSystemConfigs<Marker>) -> SystemConfigs {
+        self.configs().before(configs)
+    }
+}
+
+pub trait IntoSystemConfigs<M> {
+    fn configs(self) -> SystemConfigs;
+    fn before<Marker>(self, configs: impl IntoSystemConfigs<Marker>) -> SystemConfigs;
+    fn after<Marker>(self, configs: impl IntoSystemConfigs<Marker>) -> SystemConfigs
+    where
+        Self: Sized,
+    {
+        configs.before(self)
+    }
+
+    fn when<C: Condition>(self) -> SystemConfigs
+    where
+        Self: Sized,
+    {
+        match self.configs() {
+            SystemConfigs::Config(mut config) => {
+                config.condition = C::evaluate;
+                SystemConfigs::Config(config)
+            }
+            SystemConfigs::Configs(mut configs) => {
+                configs.iter_mut().for_each(|c| c.condition = C::evaluate);
+                SystemConfigs::Configs(configs)
+            }
+        }
+    }
+}
+
+impl IntoSystemConfigs<()> for SystemConfigs {
+    fn configs(self) -> SystemConfigs {
+        self
+    }
+
+    fn before<Marker>(self, configs: impl IntoSystemConfigs<Marker>) -> SystemConfigs {
+        let configs = configs.configs();
+
+        match (self, configs) {
+            (SystemConfigs::Config(before), SystemConfigs::Config(mut after)) => {
+                after.dependencies.insert(before.id);
+                Self::Configs(vec![before, after])
+            }
+            (SystemConfigs::Config(before), SystemConfigs::Configs(mut after)) => {
+                after.iter_mut().for_each(|s| {
+                    s.dependencies.insert(before.id);
+                });
+                after.insert(0, before);
+                Self::Configs(after)
+            }
+            (SystemConfigs::Configs(mut before), SystemConfigs::Config(mut after)) => {
+                after.dependencies.extend(before.iter().map(|s| s.id));
+                before.push(after);
+                Self::Configs(before)
+            }
+            (SystemConfigs::Configs(mut before), SystemConfigs::Configs(mut after)) => {
+                after
+                    .iter_mut()
+                    .for_each(|s| s.dependencies.extend(before.iter().map(|s| s.id)));
+                before.extend(after);
+                Self::Configs(before)
+            }
+        }
+    }
+}
+
+impl<F: Fn() + Send + Sync + 'static> IntoSystemConfig<()> for F {
+    fn config(self) -> SystemConfig {
+        SystemConfig {
+            id: SystemId::new(),
+            name: None,
+            exclusive: false,
+            send: true,
+            dependencies: HashSet::new(),
+            init: |_, _| Box::new(()),
+            run: Box::new(move |_, _, _| {
+                self();
+            }),
+            update: |_, _| {},
+            condition: |_, _| true,
+        }
+    }
+}
+
+impl From<SystemNode> for System {
+    fn from(value: SystemNode) -> Self {
+        let resources = value.access.resources.collect();
+        let mut components = value.access.components.collect();
+        for archetype in value.access.archetypes {
+            components.union_with(archetype.required().get_read());
+            components.union_with(archetype.required().get_write());
+        }
+
+        let meta = SystemMeta {
+            id: value.config.id,
+            name: value.config.name,
+            components,
+            resources,
+            send: value.config.send,
+            exclusive: value.config.exclusive,
+            frame: Frame::ZERO,
+        };
+
+        System::new(
+            meta,
+            value.state,
+            value.config.run,
+            value.config.update,
+            value.config.condition,
+        )
+    }
+}
+
+impl From<SystemNode> for SystemCell {
+    fn from(node: SystemNode) -> Self {
+        Self(UnsafeCell::new(node.into()))
+    }
+}
+
+pub struct Not<T>(T);
+pub struct Or<T>(T);
+
+pub trait Condition: Sized + 'static {
+    fn evaluate(world: &World, meta: &SystemMeta) -> bool;
+
+    fn and(self, condition: impl Condition) -> impl Condition {
+        (self, condition)
+    }
+
+    fn or(self, condition: impl Condition) -> impl Condition {
+        Or((self, condition))
+    }
+
+    fn not(self) -> impl Condition {
+        Not(self)
+    }
+}
+
+impl<T: Condition> Condition for Not<T> {
+    fn evaluate(world: &World, meta: &SystemMeta) -> bool {
+        !T::evaluate(world, meta)
+    }
+}
+
+macro_rules! impl_tuple_condition {
+    ($(($($name:ident),*)),*)  => {
+        $(
+            #[allow(non_snake_case)]
+            impl<$($name: Condition),+> Condition for ($($name),+) {
+                fn evaluate(world: &World, meta: &SystemMeta) -> bool {
+                    let mut result = true;
+                    $(
+                        result = result && $name::evaluate(world, meta);
+                    )+
+                    result
+                }
+            }
+
+            #[allow(non_snake_case)]
+            impl<$($name: Condition),+> Condition for Or<($($name),+)> {
+                fn evaluate( world: &World, meta: &SystemMeta) -> bool {
+                    let mut result = false;
+                    $(
+                        result = result || $name::evaluate(world, meta);
+                    )+
+                    result
+                }
+            }
+        )+
+    };
+}
+
+impl_tuple_condition! {
+    (A, B),
+    (A, B, C),
+    (A, B, C, D),
+    (A, B, C, D, E),
+    (A, B, C, D, E, F),
+    (A, B, C, D, E, F, G),
+    (A, B, C, D, E, F, G, H),
+    (A, B, C, D, E, F, G, H, I),
+    (A, B, C, D, E, F, G, H, I, J)
+}

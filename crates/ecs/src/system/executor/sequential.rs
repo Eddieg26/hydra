@@ -27,8 +27,9 @@ impl SystemExecutor for SequentialExecutor {
         for index in &self.order {
             let system = &self.systems[*index];
             unsafe {
-                system.cast_mut().run(world);
-                system.cast_mut().update(world.get_mut())
+                if system.cast_mut().run(world) {
+                    system.cast_mut().update(world.get_mut())
+                }
             };
         }
     }
