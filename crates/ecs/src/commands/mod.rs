@@ -117,7 +117,7 @@ impl<'world, 'state> Commands<'world, 'state> {
     pub fn entity(&mut self, entity: Entity) -> EntityCommands {
         EntityCommands {
             entity,
-            commands: self.commands,
+            buffer: self.commands,
         }
     }
 }
@@ -144,16 +144,16 @@ impl Command for ExitMode {
 
 pub struct EntityCommands<'a> {
     pub(crate) entity: Entity,
-    pub(crate) commands: &'a mut CommandBuffer,
+    pub(crate) buffer: &'a mut CommandBuffer,
 }
 
 impl<'a> EntityCommands<'a> {
-    pub fn new(entity: Entity, commands: &'a mut CommandBuffer) -> Self {
-        Self { entity, commands }
+    pub fn new(entity: Entity, buffer: &'a mut CommandBuffer) -> Self {
+        Self { entity, buffer }
     }
 
     pub fn add(&mut self, command: impl EntityCommand) {
-        self.commands.add(command.with_entity(self.entity));
+        self.buffer.add(command.with_entity(self.entity));
     }
 
     pub fn entity(&self) -> Entity {
@@ -163,7 +163,11 @@ impl<'a> EntityCommands<'a> {
     pub fn get(&'a mut self, entity: Entity) -> Self {
         Self {
             entity,
-            commands: self.commands,
+            buffer: self.buffer,
         }
+    }
+
+    pub fn finish(self) -> Entity {
+        self.entity
     }
 }

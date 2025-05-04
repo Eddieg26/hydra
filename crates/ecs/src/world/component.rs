@@ -149,7 +149,7 @@ pub trait ComponentRemover<'a> {
     fn remove<C: Component>(&mut self);
 }
 
-pub trait ComponentKit: 'static {
+pub trait ComponentKit: Send + Sync + 'static {
     fn ids(components: &mut Components) -> Vec<ComponentId>;
 
     fn get<'a>(self, writer: impl ComponentWriter<'a>);
