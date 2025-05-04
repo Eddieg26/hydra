@@ -446,7 +446,10 @@ impl_tuple_condition! {
 #[allow(unused_imports, dead_code)]
 mod tests {
     use super::{Condition, Exists};
-    use crate::{Added, IntoSystemConfig, Modified, Not, Or, Removed, Resource, SystemMeta, World};
+    use crate::{
+        Added, IntoSystemConfig, Modified, Not, Or, Removed, Resource, System, SystemConfigs,
+        SystemMeta, World,
+    };
 
     #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Value(u32);
@@ -507,5 +510,28 @@ mod tests {
         assert!(Or::<(Exists<Value>, Exists<Ghost>)>::evaluate(
             &world, &system
         ));
+    }
+
+    #[test]
+    fn test_run_conditional_system() {
+        let mut world = World::new();
+        world.add_resource(Value(0));
+
+        let systems = vec![
+            (|value: &mut Value| {
+                value.0 = 1;
+            })
+            .when::<Exists<Value>>(),
+            (|_: &Ghost| {}).when::<Exists<Ghost>>(),
+        ]
+        .drain(..)
+        .map(|config| System::from(config.into_node(&mut world)))
+        .collect::<Vec<_>>();
+
+        for mut system in systems {
+            system.run(unsafe { world.cell() });
+        }
+
+        assert_eq!(world.resource::<Value>().0, 1);
     }
 }
