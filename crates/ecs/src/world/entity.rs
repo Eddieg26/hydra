@@ -34,6 +34,22 @@ impl std::fmt::Display for Entity {
     }
 }
 
+impl Ord for Entity {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap_or(std::cmp::Ordering::Equal)
+    }
+}
+
+impl PartialOrd for Entity {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match self.generation.partial_cmp(&other.generation) {
+            Some(core::cmp::Ordering::Equal) => {}
+            ord => return ord,
+        }
+        self.id.partial_cmp(&other.id)
+    }
+}
+
 pub struct Entities {
     current: u32,
     free: Vec<u32>,

@@ -1,6 +1,8 @@
 use crate::{SparseIndex, TypeMeta, impl_sparse_index_wrapper};
 use fixedbitset::FixedBitSet;
-use std::{alloc::Layout, any::TypeId, collections::HashMap};
+use std::{alloc::Layout, any::TypeId, collections::HashMap, ops::Index};
+
+use super::Entity;
 
 pub trait Component: Send + Sync + 'static {}
 
@@ -169,3 +171,111 @@ impl<C: Component> ComponentKit for C {
         remover.remove::<Self>();
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Parent(Entity);
+impl Parent {
+    pub(crate) fn set(&mut self, entity: Entity) -> Entity {
+        let old = self.0;
+        self.0 = entity;
+        old
+    }
+
+    pub fn get(&self) -> Entity {
+        self.0
+    }
+}
+
+impl From<Entity> for Parent {
+    fn from(value: Entity) -> Self {
+        Parent(value)
+    }
+}
+
+impl std::ops::Deref for Parent {
+    type Target = Entity;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Component for Parent {}
+
+#[derive(Debug, Clone, Hash)]
+pub struct Children(Vec<Entity>);
+
+impl Children {
+    pub fn as_slice(&self) -> &[Entity] {
+        self.0.as_slice()
+    }
+
+    pub fn get(&self, index: usize) -> Option<Entity> {
+        self.0.get(index).copied()
+    }
+
+    pub fn sort(&mut self) {
+        self.0.sort();
+    }
+
+    pub fn sort_by(&mut self, compare: impl FnMut(&Entity, &Entity) -> std::cmp::Ordering) {
+        self.0.sort_by(compare);
+    }
+
+    pub fn contains(&self, child: Entity) -> bool {
+        self.0.contains(&child)
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub(crate) fn push(&mut self, child: Entity) {
+        self.0.push(child);
+    }
+
+    pub(crate) fn insert(&mut self, index: usize, children: Vec<Entity>) {
+        self.0.splice(index..index, children);
+    }
+
+    pub(crate) fn remove(&mut self, child: Entity) -> bool {
+        self.0
+            .iter()
+            .position(|c| *c == child)
+            .map(|i| self.0.remove(i))
+            .is_some()
+    }
+
+    pub(crate) fn retain(&mut self, f: impl FnMut(&Entity) -> bool) {
+        self.0.retain(f);
+    }
+}
+
+impl Index<usize> for Children {
+    type Output = Entity;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl<I: IntoIterator<Item = Entity>> From<I> for Children {
+    fn from(value: I) -> Self {
+        let mut children = value.into_iter().collect::<Vec<_>>();
+        children.dedup();
+
+        Self(children)
+    }
+}
+
+impl From<Entity> for Children {
+    fn from(value: Entity) -> Self {
+        Self(vec![value])
+    }
+}
+
+impl Component for Children {}

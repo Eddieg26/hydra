@@ -1,4 +1,6 @@
-use crate::{Component, Entity, World, WorldMode};
+use crate::{Entity, World, WorldMode};
+
+pub mod entity;
 
 pub trait Command: Sized + Send + 'static {
     fn execute(self, world: &mut World);
@@ -120,66 +122,6 @@ impl<'world, 'state> Commands<'world, 'state> {
     }
 }
 
-pub struct EntityCommands<'a> {
-    pub(crate) entity: Entity,
-    pub(crate) commands: &'a mut CommandBuffer,
-}
-
-impl<'a> EntityCommands<'a> {
-    pub fn new(entity: Entity, commands: &'a mut CommandBuffer) -> Self {
-        Self { entity, commands }
-    }
-
-    pub fn add(&mut self, command: impl EntityCommand) {
-        self.commands.add(command.with_entity(self.entity));
-    }
-
-    pub fn add_component<C: Component>(&mut self, component: C) {
-        self.commands.add(AddComponent {
-            entity: self.entity,
-            component,
-        });
-    }
-
-    pub fn remove_component<C: Component>(&mut self) {
-        self.commands.add(RemoveComponent::<C>::new(self.entity));
-    }
-}
-
-pub struct AddComponent<C: Component> {
-    entity: Entity,
-    component: C,
-}
-
-impl<C: Component> AddComponent<C> {
-    pub fn new(entity: Entity, component: C) -> Self {
-        Self { entity, component }
-    }
-}
-
-impl<C: Component> Command for AddComponent<C> {
-    fn execute(self, world: &mut World) {
-        world.add_component(self.entity, self.component);
-    }
-}
-
-pub struct RemoveComponent<C: Component>(Entity, std::marker::PhantomData<C>);
-impl<C: Component> RemoveComponent<C> {
-    pub fn new(entity: Entity) -> Self {
-        Self(entity, Default::default())
-    }
-
-    pub fn entity(&self) -> Entity {
-        self.0
-    }
-}
-
-impl<C: Component> Command for RemoveComponent<C> {
-    fn execute(self, world: &mut World) {
-        world.remove_component::<C>(self.0);
-    }
-}
-
 pub struct EnterMode<M: WorldMode>(std::marker::PhantomData<M>);
 impl<M: WorldMode> Default for EnterMode<M> {
     fn default() -> Self {
@@ -197,5 +139,31 @@ pub struct ExitMode;
 impl Command for ExitMode {
     fn execute(self, world: &mut World) {
         world.exit();
+    }
+}
+
+pub struct EntityCommands<'a> {
+    pub(crate) entity: Entity,
+    pub(crate) commands: &'a mut CommandBuffer,
+}
+
+impl<'a> EntityCommands<'a> {
+    pub fn new(entity: Entity, commands: &'a mut CommandBuffer) -> Self {
+        Self { entity, commands }
+    }
+
+    pub fn add(&mut self, command: impl EntityCommand) {
+        self.commands.add(command.with_entity(self.entity));
+    }
+
+    pub fn entity(&self) -> Entity {
+        self.entity
+    }
+
+    pub fn get(&'a mut self, entity: Entity) -> Self {
+        Self {
+            entity,
+            commands: self.commands,
+        }
     }
 }
