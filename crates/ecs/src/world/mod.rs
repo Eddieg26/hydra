@@ -103,11 +103,13 @@ impl World {
     }
 
     pub fn add_resource<R: Resource + Send>(&mut self, resource: R) -> ResourceId {
-        self.resources.add::<true, R>(resource)
+        self.resources
+            .add_with_frame::<true, R>(resource, self.frame)
     }
 
     pub fn add_non_send_resource<R: Resource>(&mut self, resource: R) -> ResourceId {
-        self.resources.add::<false, R>(resource)
+        self.resources
+            .add_with_frame::<false, R>(resource, self.frame)
     }
 
     pub fn resource<R: Resource + Send>(&self) -> &R {
@@ -123,37 +125,11 @@ impl World {
     pub fn resource_mut<R: Resource + Send>(&mut self) -> &mut R {
         self.resources
             .get_id::<R>()
-            .and_then(|id| self.resources.get_mut::<R>(id))
+            .and_then(|id| self.resources.get_mut::<R>(id, self.frame))
             .expect(&format!(
                 "Resource not found: {}",
                 std::any::type_name::<R>()
             ))
-    }
-
-    pub fn get_or_insert_resource<R: Resource + Send>(&mut self, get: impl Fn() -> R) -> &mut R {
-        unsafe {
-            let mut world = self.cell();
-            if let Some(resource) = world.get_mut().try_resource_mut::<R>() {
-                resource
-            } else {
-                let world = world.get_mut();
-                let id = world.add_resource(get());
-                world.resources.get_mut(id).unwrap()
-            }
-        }
-    }
-
-    pub fn get_or_insert_non_send_resource<R: Resource>(&mut self, get: impl Fn() -> R) -> &mut R {
-        unsafe {
-            let mut world = self.cell();
-            if let Some(resource) = world.get_mut().try_non_send_resource_mut::<R>() {
-                resource
-            } else {
-                let world = world.get_mut();
-                let id = world.add_non_send_resource(get());
-                world.resources.get_mut(id).unwrap()
-            }
-        }
     }
 
     pub fn try_resource<R: Resource + Send>(&self) -> Option<&R> {
@@ -165,7 +141,7 @@ impl World {
     pub fn try_resource_mut<R: Resource + Send>(&mut self) -> Option<&mut R> {
         self.resources
             .get_id::<R>()
-            .and_then(|id| self.resources.get_mut::<R>(id))
+            .and_then(|id| self.resources.get_mut::<R>(id, self.frame))
     }
 
     pub fn non_send_resource<R: Resource>(&self) -> &R {
@@ -181,7 +157,7 @@ impl World {
     pub fn non_send_resource_mut<R: Resource>(&mut self) -> &mut R {
         self.resources
             .get_id::<R>()
-            .and_then(|id| self.resources.get_mut::<R>(id))
+            .and_then(|id| self.resources.get_mut::<R>(id, self.frame))
             .expect(&format!(
                 "Non Send Resource not found: {}",
                 std::any::type_name::<R>()
@@ -197,11 +173,37 @@ impl World {
     pub fn try_non_send_resource_mut<R: Resource>(&mut self) -> Option<&mut R> {
         self.resources
             .get_id::<R>()
-            .and_then(|id| self.resources.get_mut::<R>(id))
+            .and_then(|id| self.resources.get_mut::<R>(id, self.frame))
+    }
+
+    pub fn get_or_insert_resource<R: Resource + Send>(&mut self, get: impl Fn() -> R) -> &mut R {
+        unsafe {
+            let mut world = self.cell();
+            if let Some(resource) = world.get_mut().try_resource_mut::<R>() {
+                resource
+            } else {
+                let world = world.get_mut();
+                let id = world.add_resource(get());
+                world.resources.get_mut(id, self.frame).unwrap()
+            }
+        }
+    }
+
+    pub fn get_or_insert_non_send_resource<R: Resource>(&mut self, get: impl Fn() -> R) -> &mut R {
+        unsafe {
+            let mut world = self.cell();
+            if let Some(resource) = world.get_mut().try_non_send_resource_mut::<R>() {
+                resource
+            } else {
+                let world = world.get_mut();
+                let id = world.add_non_send_resource(get());
+                world.resources.get_mut(id, self.frame).unwrap()
+            }
+        }
     }
 
     pub fn remove_resource<R: Resource>(&mut self) -> Option<R> {
-        self.resources.remove::<R>()
+        self.resources.remove::<R>(self.frame)
     }
 
     pub unsafe fn cell(&self) -> WorldCell {

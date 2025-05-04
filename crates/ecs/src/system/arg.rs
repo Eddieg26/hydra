@@ -156,10 +156,8 @@ unsafe impl<R: Resource + Send> SystemArg for &mut R {
         mut world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
-        unsafe { world.get_mut() }
-            .resources
-            .get_mut::<R>(*state)
-            .unwrap()
+        let world = unsafe { world.get_mut() };
+        world.resources.get_mut::<R>(*state, world.frame).unwrap()
     }
 }
 
@@ -205,10 +203,8 @@ unsafe impl<R: Resource> SystemArg for NonSendMut<'_, R> {
         mut world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
-        let resource = unsafe { world.get_mut() }
-            .resources
-            .get_mut::<R>(*state)
-            .unwrap();
+        let world = unsafe { world.get_mut() };
+        let resource = world.resources.get_mut::<R>(*state, world.frame).unwrap();
 
         NonSendMut::new(resource)
     }

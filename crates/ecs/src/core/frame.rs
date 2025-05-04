@@ -27,6 +27,14 @@ impl Frame {
     pub fn previous(self) -> Self {
         Self(self.0.wrapping_sub(1))
     }
+
+    pub fn update(&mut self, current: Self) {
+        let age = current.0.wrapping_sub(self.0);
+
+        if age > Frame::MAX_AGE {
+            self.0 = age + Frame::AGE_REFRESH_RATE;
+        }
+    }
 }
 
 impl From<u32> for Frame {
@@ -95,17 +103,8 @@ impl ObjectStatus {
         }
     }
 
-    pub fn update(&mut self, frame: Frame) {
-        let added = frame.0.wrapping_sub(self.added.0);
-
-        if added > Frame::MAX_AGE {
-            self.added.0 = added + Frame::AGE_REFRESH_RATE;
-        }
-
-        let modified = frame.0.wrapping_sub(self.modified.0);
-
-        if modified > Frame::MAX_AGE {
-            self.modified.0 = modified + Frame::AGE_REFRESH_RATE;
-        }
+    pub fn update(&mut self, current: Frame) {
+        self.added.update(current);
+        self.modified.update(current);
     }
 }

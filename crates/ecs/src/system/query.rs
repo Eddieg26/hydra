@@ -1,10 +1,9 @@
+use super::{Added, Modified, Not, Or, Removed, ReadOnly,  SystemArg};
 use crate::{
     Archetype, ArchetypeAccess, ArchetypeId, ArchetypeQuery, Column, Component, ComponentId,
     Entity, EntityEvents, Event, Events, Frame, ObjectStatus, Ptr, RowIndex, SparseIndex, World,
     WorldCell,
 };
-
-use super::{Not, Or, ReadOnly, SystemArg};
 
 pub trait BaseQuery {
     type Item<'w>;
@@ -366,7 +365,6 @@ impl<C: Component> BaseFilter for Without<C> {
     }
 }
 
-pub struct Added<C: Component>(std::marker::PhantomData<C>);
 impl<C: Component> BaseFilter for Added<C> {
     type State<'w> = ReadPtr<'w, C>;
 
@@ -395,7 +393,6 @@ impl<C: Component> BaseFilter for Added<C> {
     }
 }
 
-pub struct Modified<C: Component>(std::marker::PhantomData<C>);
 impl<C: Component> BaseFilter for Modified<C> {
     type State<'w> = ReadPtr<'w, C>;
 
@@ -524,27 +521,6 @@ impl<E: Event> BaseQuery for Events<E> {
 
     fn get<'w>(state: &mut Self::State<'w>, entity: Entity, _: RowIndex) -> Self::Item<'w> {
         EntityEvents::new(&state, state.entity(entity))
-    }
-}
-
-pub struct Removed<C: Component>(C);
-impl<C: Component> From<C> for Removed<C> {
-    fn from(value: C) -> Self {
-        Self(value)
-    }
-}
-
-impl<C: Component> std::ops::Deref for Removed<C> {
-    type Target = C;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<C: Component> std::ops::DerefMut for Removed<C> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 

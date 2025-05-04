@@ -14,6 +14,7 @@ impl_sparse_index_wrapper!(ResourceId);
 pub struct ResourceMeta {
     name: &'static str,
     status: ObjectStatus,
+    removed: Frame,
     exists: bool,
     send: bool,
     offset: usize,
@@ -27,6 +28,7 @@ impl ResourceMeta {
         Self {
             name: ext::short_type_name::<R>(),
             status: ObjectStatus::new(),
+            removed: Frame::ZERO,
             exists: false,
             send: SEND,
             offset,
@@ -50,6 +52,10 @@ impl ResourceMeta {
 
     pub fn modified(&self) -> Frame {
         self.status.modified
+    }
+
+    pub fn removed(&self) -> Frame {
+        self.removed
     }
 
     pub fn send(&self) -> bool {
@@ -174,12 +180,14 @@ impl Resources {
         Some(unsafe { &*(data.as_ptr() as *const R) })
     }
 
-    pub fn get_mut<R: Resource>(&mut self, id: ResourceId) -> Option<&mut R> {
+    pub fn get_mut<R: Resource>(&mut self, id: ResourceId, frame: Frame) -> Option<&mut R> {
         let id = id.to_usize();
-        let meta = self.meta.get(id)?;
+        let meta = self.meta.get_mut(id)?;
         if !meta.exists || !meta.has_access() {
             return None;
         }
+
+        meta.status.modified = frame;
 
         let data = &mut self.data[meta.offset..meta.offset + meta.size];
         Some(unsafe { &mut *(data.as_mut_ptr() as *mut R) })
@@ -189,7 +197,7 @@ impl Resources {
         self.meta.get(id.to_usize())
     }
 
-    pub fn remove<R: Resource>(&mut self) -> Option<R> {
+    pub fn remove<R: Resource>(&mut self, frame: Frame) -> Option<R> {
         let id = TypeId::of::<R>();
         let id = self.index.get(&id).copied()?;
         let meta = self.meta.get_mut(id.to_usize())?;
@@ -197,6 +205,7 @@ impl Resources {
             return None;
         }
         meta.exists = false;
+        meta.removed = frame;
 
         let data = &mut self.data[meta.offset..meta.offset + meta.size];
         let resource = unsafe { std::ptr::read(data.as_mut_ptr() as *const R) };
@@ -222,6 +231,7 @@ impl Resources {
     pub(crate) fn update(&mut self, frame: Frame) {
         for meta in &mut self.meta {
             meta.status.update(frame);
+            meta.removed.update(frame);
         }
     }
 }
@@ -334,6 +344,8 @@ impl<R: Resource + Clone> Clone for Cloned<R> {
 mod tests {
     use std::rc::Rc;
 
+    use crate::Frame;
+
     use super::{Resource, Resources};
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -367,7 +379,7 @@ mod tests {
         let mut resources = Resources::new();
         resources.add::<true, Value>(Value(10));
 
-        let resource = resources.remove::<Value>();
+        let resource = resources.remove::<Value>(Frame::ZERO);
 
         assert_eq!(resource, Some(Value(10)));
     }

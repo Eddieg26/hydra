@@ -2,7 +2,7 @@ use super::{
     System, SystemCell, SystemCondition, SystemId, SystemInit, SystemMeta, SystemName, SystemRun,
     SystemState, SystemUpdate,
 };
-use crate::{AccessError, Frame, World, WorldAccess};
+use crate::{AccessError, Frame, Resource, World, WorldAccess};
 use std::{cell::UnsafeCell, collections::HashSet};
 
 pub struct SystemConfig {
@@ -303,9 +303,31 @@ impl From<SystemNode> for SystemCell {
 
 pub struct Not<T>(T);
 pub struct Or<T>(T);
+pub struct Modified<T>(std::marker::PhantomData<T>);
+pub struct Added<T>(std::marker::PhantomData<T>);
+pub struct Removed<T>(T);
+impl<T> From<T> for Removed<T> {
+    fn from(value: T) -> Self {
+        Self(value)
+    }
+}
+
+impl<T> std::ops::Deref for Removed<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> std::ops::DerefMut for Removed<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 pub trait Condition: Sized + 'static {
-    fn evaluate(world: &World, meta: &SystemMeta) -> bool;
+    fn evaluate(world: &World, system: &SystemMeta) -> bool;
 
     fn and(self, condition: impl Condition) -> impl Condition {
         (self, condition)
@@ -321,8 +343,8 @@ pub trait Condition: Sized + 'static {
 }
 
 impl<T: Condition> Condition for Not<T> {
-    fn evaluate(world: &World, meta: &SystemMeta) -> bool {
-        !T::evaluate(world, meta)
+    fn evaluate(world: &World, system: &SystemMeta) -> bool {
+        !T::evaluate(world, system)
     }
 }
 
@@ -354,6 +376,61 @@ macro_rules! impl_tuple_condition {
     };
 }
 
+pub struct Exists<R: Resource>(std::marker::PhantomData<R>);
+impl<R: Resource> Condition for Exists<R> {
+    fn evaluate(world: &World, _: &SystemMeta) -> bool {
+        let id = match world.resources.get_id::<R>() {
+            Some(id) => id,
+            None => return false,
+        };
+
+        world
+            .resources
+            .get_meta(id)
+            .is_some_and(|meta| meta.exists() && meta.has_access())
+    }
+}
+
+impl<R: Resource> Condition for Modified<R> {
+    fn evaluate(world: &World, system: &SystemMeta) -> bool {
+        let id = match world.resources.get_id::<R>() {
+            Some(id) => id,
+            None => return false,
+        };
+
+        world.resources.get_meta(id).is_some_and(|meta| {
+            meta.exists() && meta.modified().is_newer(world.frame, system.frame)
+        })
+    }
+}
+
+impl<R: Resource> Condition for Added<R> {
+    fn evaluate(world: &World, system: &SystemMeta) -> bool {
+        let id = match world.resources.get_id::<R>() {
+            Some(id) => id,
+            None => return false,
+        };
+
+        world
+            .resources
+            .get_meta(id)
+            .is_some_and(|meta| meta.exists() && meta.added().is_newer(world.frame, system.frame))
+    }
+}
+
+impl<R: Resource> Condition for Removed<R> {
+    fn evaluate(world: &World, system: &SystemMeta) -> bool {
+        let id = match world.resources.get_id::<R>() {
+            Some(id) => id,
+            None => return false,
+        };
+
+        world.resources.get_meta(id).is_some_and(|meta| {
+            !meta.exists() && meta.removed().is_newer(world.frame, system.frame)
+        })
+    }
+}
+
 impl_tuple_condition! {
     (A, B),
     (A, B, C),
@@ -364,4 +441,71 @@ impl_tuple_condition! {
     (A, B, C, D, E, F, G, H),
     (A, B, C, D, E, F, G, H, I),
     (A, B, C, D, E, F, G, H, I, J)
+}
+
+#[allow(unused_imports, dead_code)]
+mod tests {
+    use super::{Condition, Exists};
+    use crate::{Added, IntoSystemConfig, Modified, Not, Or, Removed, Resource, SystemMeta, World};
+
+    #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Value(u32);
+    impl Resource for Value {}
+
+    pub struct Ghost;
+    impl Resource for Ghost {}
+
+    #[test]
+    fn test_resource_exists() {
+        let mut world = World::new();
+        world.add_resource(Value(0));
+
+        let system = SystemMeta::default();
+        assert!(Exists::<Value>::evaluate(&world, &system));
+        assert!(Not::<Exists<Ghost>>::evaluate(&world, &system));
+    }
+
+    #[test]
+    fn test_resource_added() {
+        let mut world = World::new();
+        world.add_resource(Value(0));
+
+        let system = SystemMeta::default();
+        assert!(Added::<Value>::evaluate(&world, &system));
+        assert!(Not::<Added<Ghost>>::evaluate(&world, &system));
+    }
+
+    #[test]
+    fn test_resource_modified() {
+        let mut world = World::new();
+        world.add_resource(Value(0));
+        world.add_resource(Ghost);
+
+        world.resource_mut::<Value>();
+
+        let system = SystemMeta::default();
+        assert!(Modified::<Value>::evaluate(&world, &system));
+        assert!(Not::<Modified<Ghost>>::evaluate(&world, &system));
+    }
+
+    #[test]
+    fn test_resource_removed() {
+        let mut world = World::new();
+        world.add_resource(Value(0));
+        world.remove_resource::<Value>().unwrap();
+
+        let system = SystemMeta::default();
+        assert!(Removed::<Value>::evaluate(&world, &system));
+    }
+
+    #[test]
+    fn test_or_condition() {
+        let mut world = World::new();
+        world.add_resource(Ghost);
+
+        let system = SystemMeta::default();
+        assert!(Or::<(Exists<Value>, Exists<Ghost>)>::evaluate(
+            &world, &system
+        ));
+    }
 }
