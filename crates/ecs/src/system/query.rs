@@ -1,4 +1,4 @@
-use super::{Added, Modified, Not, Or, Removed, ReadOnly,  SystemArg};
+use super::{Added, Modified, Not, Or, ReadOnly, Removed, SystemArg};
 use crate::{
     Archetype, ArchetypeAccess, ArchetypeId, ArchetypeQuery, Column, Component, ComponentId,
     Entity, EntityEvents, Event, Events, Frame, ObjectStatus, Ptr, RowIndex, SparseIndex, World,
@@ -574,6 +574,22 @@ impl<Q: BaseQuery, F: BaseFilter> QueryState<Q, F> {
         }
     }
 
+    pub fn access(&self) -> &ArchetypeQuery {
+        &self.access
+    }
+
+    pub fn archetypes(&self) -> &[ArchetypeId] {
+        &self.archetypes
+    }
+
+    pub fn data(&self) -> &Q::Data {
+        &self.data
+    }
+
+    pub fn filter(&self) -> &F::Data {
+        &self.filter
+    }
+
     pub fn update(&mut self, world: &mut World) {
         let archetypes = world.archetypes.archetypes();
         for archetype in archetypes.iter().skip(self.last_archetype) {
@@ -587,10 +603,10 @@ impl<Q: BaseQuery, F: BaseFilter> QueryState<Q, F> {
 }
 
 pub struct Query<'w, 's, Q: BaseQuery, F: BaseFilter = ()> {
-    world: WorldCell<'w>,
-    state: &'s QueryState<Q, F>,
-    current_frame: Frame,
-    system_frame: Frame,
+    pub(crate) world: WorldCell<'w>,
+    pub(crate) state: &'s QueryState<Q, F>,
+    pub(crate) current_frame: Frame,
+    pub(crate) system_frame: Frame,
 }
 
 impl<'w, 's, Q: BaseQuery, F: BaseFilter> Query<'w, 's, Q, F> {
@@ -641,6 +657,25 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> Query<'w, 's, Q, F> {
 
         F::filter(&filter, entity, row)
     }
+
+    pub fn get_item<'a>(&'a self, entity: Entity) -> Result<Option<Q::Item<'a>>, ()> {
+        let archetype = match unsafe { self.world.get() }
+            .archetypes
+            .entity_archetype(entity)
+        {
+            Some(archetype) => archetype,
+            None => return Err(()),
+        };
+
+        let mut state = QueryIterState::new(self, archetype);
+
+        let row = archetype.table().get_entity_row(entity).unwrap();
+
+        match F::filter(&state.filter, entity, row) {
+            true => Ok(Some(Q::get(&mut state.data, entity, row))),
+            false => Ok(None),
+        }
+    }
 }
 
 unsafe impl<Q: BaseQuery + 'static, F: BaseFilter + 'static> SystemArg for Query<'_, '_, Q, F> {
@@ -668,14 +703,13 @@ unsafe impl<Q: BaseQuery + 'static, F: BaseFilter + 'static> SystemArg for Query
 unsafe impl<Q: ReadQuery + 'static, F: BaseFilter + 'static> ReadOnly for Query<'_, '_, Q, F> {}
 
 pub struct QueryIterState<'a, Q: BaseQuery, F: BaseFilter = ()> {
-    state: Q::State<'a>,
-    filter: F::State<'a>,
-    entities: indexmap::set::Iter<'a, Entity>,
+    pub(crate) data: Q::State<'a>,
+    pub(crate) filter: F::State<'a>,
 }
 
 impl<'a, Q: BaseQuery, F: BaseFilter> QueryIterState<'a, Q, F> {
     pub fn new(query: &'a Query<'a, 'a, Q, F>, archetype: &'a Archetype) -> Self {
-        let state = Q::state(
+        let data = Q::state(
             &query.state.data,
             query.world,
             archetype,
@@ -691,13 +725,15 @@ impl<'a, Q: BaseQuery, F: BaseFilter> QueryIterState<'a, Q, F> {
             query.system_frame,
         );
 
-        let entities = archetype.table().entities();
+        Self { data, filter }
+    }
 
-        Self {
-            state,
-            filter,
-            entities,
-        }
+    pub fn data(&'a self) -> &'a Q::State<'a> {
+        &self.data
+    }
+
+    pub fn filter(&'a self) -> &'a F::State<'a> {
+        &self.filter
     }
 }
 
@@ -705,6 +741,7 @@ pub struct QueryIter<'w, 's, Q: BaseQuery, F: BaseFilter = ()> {
     query: &'w Query<'w, 's, Q, F>,
     archetypes: Vec<&'w Archetype>,
     state: Option<QueryIterState<'w, Q, F>>,
+    entities: Option<indexmap::set::Iter<'w, Entity>>,
     archetype: usize,
 }
 
@@ -712,22 +749,27 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> QueryIter<'w, 's, Q, F> {
     pub fn new(query: &'w Query<'w, 's, Q, F>) -> Self {
         let world = unsafe { query.world.get() };
         let archetypes = world.archetypes().archetypes();
-        let state = query
+        let archetypes = query
             .state
             .archetypes
-            .first()
-            .and_then(|a| archetypes.get(a.to_usize()))
-            .map(|archetype| QueryIterState::new(query, archetype));
+            .iter()
+            .map(|a| &archetypes[a.to_usize()])
+            .collect::<Vec<_>>();
+
+        let (state, entities) = match archetypes.first() {
+            Some(archetype) => {
+                let state = QueryIterState::new(query, archetype);
+                let entities = archetype.table().entities();
+                (Some(state), Some(entities))
+            }
+            None => (None, None),
+        };
 
         Self {
             query,
-            archetypes: query
-                .state
-                .archetypes
-                .iter()
-                .map(|a| &archetypes[a.to_usize()])
-                .collect::<Vec<_>>(),
+            archetypes,
             state,
+            entities,
             archetype: 0,
         }
     }
@@ -739,30 +781,35 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> Iterator for QueryIter<'w, 's, Q, F> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.archetype >= self.archetypes.len() {
             None
-        } else if let Some(state) = self.state.as_mut() {
-            match state.entities.next().copied() {
-                Some(entity) => {
-                    let archetype = self.archetypes[self.archetype];
-                    let row = archetype.table().get_entity_row(entity).unwrap();
+        } else if let Some(entity) = self.entities.as_mut().and_then(|e| e.next()).copied() {
+            let Some(index) = self.archetypes[self.archetype.to_usize()].get_entity(entity) else {
+                return self.next();
+            };
 
-                    if F::filter(&state.filter, entity, row) {
-                        Some(Q::get(&mut state.state, entity, row))
-                    } else {
-                        None
-                    }
-                }
-                None => {
-                    self.archetype += 1;
-                    self.state = self
-                        .archetypes
-                        .get(self.archetype)
-                        .map(|archetype| QueryIterState::new(self.query, archetype));
+            let Some(state) = self.state.as_mut() else {
+                return self.next();
+            };
 
-                    self.next()
-                }
+            match F::filter(&state.filter, entity, index.row) {
+                true => Some(Q::get(&mut state.data, entity, index.row)),
+                false => None,
             }
         } else {
-            None
+            self.archetype += 1;
+
+            let (state, entities) = match self.archetypes.get(self.archetype) {
+                Some(archetype) => {
+                    let state = QueryIterState::new(self.query, archetype);
+                    let entities = archetype.table().entities();
+                    (Some(state), Some(entities))
+                }
+                None => (None, None),
+            };
+
+            self.entities = entities;
+            self.state = state;
+
+            return self.next();
         }
     }
 }
