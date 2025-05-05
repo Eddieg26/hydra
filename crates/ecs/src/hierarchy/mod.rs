@@ -1,4 +1,4 @@
-use crate::{BaseFilter, BaseQuery, Children, Entity, Parent, Query, QueryIterState};
+use crate::{BaseFilter, BaseQuery, Children, Entity, Parent, Query};
 
 const EMPTY: &'static [Entity] = &[];
 
@@ -12,15 +12,11 @@ pub trait HierarchyExt<Q: BaseQuery, F: BaseFilter> {
 impl<'w, 's, Q: BaseQuery, F: BaseFilter> HierarchyExt<Q, F> for Query<'w, 's, Q, F> {
     fn parent(&self, entity: Entity) -> Option<<Q as BaseQuery>::Item<'_>> {
         let world = unsafe { self.world.get() };
-        let archetype = world.archetypes.entity_archetype(entity)?;
+        let parent = world.get_component::<Parent>(entity)?.get();
 
-        let mut state = QueryIterState::new(self, archetype);
-        let row = archetype.table().get_entity_row(entity).unwrap();
-
-        if F::filter(&state.filter, entity, row) {
-            Some(Q::get(&mut state.data, entity, row))
-        } else {
-            None
+        match self.get_item(parent) {
+            Ok(item) => item,
+            Err(_) => None,
         }
     }
 
