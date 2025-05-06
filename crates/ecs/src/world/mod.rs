@@ -1,5 +1,9 @@
-use std::{any::TypeId, collections::HashMap, ops::{Index, IndexMut}};
-use crate::{core::Frame, impl_sparse_index_wrapper, Removed, SparseIndex};
+use crate::{Removed, SparseIndex, core::Frame, impl_sparse_index_wrapper};
+use std::{
+    any::TypeId,
+    collections::HashMap,
+    ops::{Index, IndexMut},
+};
 
 pub mod access;
 pub mod archetype;
@@ -344,6 +348,12 @@ impl World {
             self.resources.update(self.frame);
             self.modes.update(self.frame);
         }
+    }
+}
+
+impl Default for World {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

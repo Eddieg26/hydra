@@ -1,7 +1,7 @@
 use super::World;
 use std::marker::PhantomData;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WorldCell<'w>(*mut World, PhantomData<&'w mut World>);
 impl<'w> WorldCell<'w> {
     pub(crate) unsafe fn new(world: &World) -> Self {

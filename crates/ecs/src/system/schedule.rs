@@ -28,7 +28,7 @@ impl<'a> PhaseContext<'a> {
     }
 }
 
-pub trait Phase: 'static {
+pub trait Phase: Send + 'static {
     fn run(&self, ctx: PhaseContext) {
         ctx.execute();
     }

@@ -7,7 +7,7 @@ pub mod sequential;
 pub use parallel::*;
 pub use sequential::*;
 
-pub trait SystemExecutor: 'static {
+pub trait SystemExecutor: Send + 'static {
     fn execute(&self, world: WorldCell);
 }
 
