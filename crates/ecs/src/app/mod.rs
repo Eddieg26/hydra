@@ -12,10 +12,14 @@ pub trait Plugin: 'static {
         ext::short_type_name::<Self>()
     }
 
-    fn start(&mut self, app: &mut AppBuilder) {}
+    /// Setup is called when the plugin is added to the app.
+    /// It is used to register systems, resources, and other app components.
+    fn setup(&mut self, app: &mut AppBuilder) {}
 
+    /// Run is called when the app is being built.
     fn run(&mut self, app: &mut AppBuilder);
 
+    /// Finish is called after all of a plugin's dependencies have been added and ran.
     fn finish(&mut self, app: &mut AppBuilder) {}
 }
 
@@ -270,7 +274,7 @@ impl Plugins for AppBuilder {
         if !self.config().registered.contains(plugin.name()) {
             self.config_mut().registered.insert(plugin.name());
 
-            plugin.start(self);
+            plugin.setup(self);
             self.plugins_mut().push(Box::new(plugin));
         }
 
