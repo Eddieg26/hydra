@@ -322,6 +322,7 @@ impl<'a, Q: BaseQuery, F: BaseFilter> Iterator for DescendentIter<'a, Q, F> {
     }
 }
 
+#[allow(unused_imports, dead_code)]
 mod tests {
     use super::{Children, HierarchyExt, Parent};
     use crate::{
