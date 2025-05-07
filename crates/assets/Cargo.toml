@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 ecs = { path = "../ecs" }
+uuid = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+ron = { workspace = true }
