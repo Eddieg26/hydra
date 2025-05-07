@@ -1,10 +1,13 @@
+use crate::{
+    Archetypes, Component, ComponentId, Components, Entities, Event, EventId, EventRegistry,
+    ModeId, Phase, Resource, ResourceId, Resources, RunMode, Schedule, Systems, World, WorldCell,
+    WorldMode, ext,
+};
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
     thread::JoinHandle,
 };
-
-use crate::{Phase, Resource, RunMode, Schedule, Systems, World, WorldCell, ext};
 
 #[allow(unused_variables)]
 pub trait Plugin: 'static {
@@ -14,10 +17,10 @@ pub trait Plugin: 'static {
 
     /// Setup is called when the plugin is added to the app.
     /// It is used to register systems, resources, and other app components.
-    fn setup(&mut self, app: &mut AppBuilder) {}
+    fn setup(&mut self, app: &mut AppBuilder);
 
     /// Run is called when the app is being built.
-    fn run(&mut self, app: &mut AppBuilder);
+    fn run(&mut self, app: &mut AppBuilder) {}
 
     /// Finish is called after all of a plugin's dependencies have been added and ran.
     fn finish(&mut self, app: &mut AppBuilder) {}
@@ -69,14 +72,14 @@ impl Phase for Extract {}
 pub struct Shutdown;
 impl Phase for Shutdown {}
 
-pub struct AppConfig {
+pub struct AppBuildInfo {
     world: World,
     schedule: Schedule,
     plugins: Vec<Box<dyn Plugin>>,
     registered: HashSet<&'static str>,
 }
 
-impl AppConfig {
+impl AppBuildInfo {
     pub fn new() -> Self {
         Self {
             world: World::new(),
@@ -87,62 +90,144 @@ impl AppConfig {
     }
 }
 
-pub enum AppConfigKind {
+pub enum AppType {
     Main {
-        config: AppConfig,
-        secondary: HashMap<Box<dyn AppTag>, AppConfig>,
+        config: AppBuildInfo,
+        secondary: HashMap<Box<dyn AppTag>, AppBuilder>,
         runner: Option<Box<dyn Fn(Apps) -> Apps>>,
     },
-    Sub(AppConfig),
+    Sub(AppBuildInfo),
 }
 
-pub struct AppBuilder(AppConfigKind);
+pub struct AppBuilder(AppType);
 impl AppBuilder {
     pub fn new() -> Self {
-        Self(AppConfigKind::Main {
-            config: AppConfig::new(),
+        Self(AppType::Main {
+            config: AppBuildInfo::new(),
             secondary: HashMap::new(),
             runner: None,
         })
     }
 
     pub fn single() -> Self {
-        Self(AppConfigKind::Sub(AppConfig::new()))
+        Self(AppType::Sub(AppBuildInfo::new()))
     }
 
-    pub fn world(&self) -> &World {
-        &self.config().world
+    pub fn components(&self) -> &Components {
+        self.world().components()
     }
 
-    pub fn world_mut(&mut self) -> &mut World {
-        &mut self.config_mut().world
+    pub fn archetypes(&self) -> &Archetypes {
+        self.world().archetypes()
+    }
+
+    pub fn resources(&self) -> &Resources {
+        self.world().resources()
+    }
+
+    pub fn entities(&self) -> &Entities {
+        self.world().entities()
+    }
+
+    pub fn events(&self) -> &EventRegistry {
+        self.world().events()
+    }
+
+    pub fn register<C: Component>(&mut self) -> ComponentId {
+        self.world_mut().register::<C>()
+    }
+
+    pub fn register_resource<R: Resource + Send>(&mut self) -> ResourceId {
+        self.world_mut().register_resource::<R>()
+    }
+
+    pub fn register_non_send_resource<R: Resource>(&mut self) -> ResourceId {
+        self.world_mut().register_non_send_resource::<R>()
+    }
+
+    pub fn register_event<E: Event>(&mut self) -> EventId {
+        self.world_mut().register_event::<E>()
+    }
+
+    pub fn add_mode<M: WorldMode>(&mut self) -> ModeId {
+        self.world_mut().add_mode::<M>()
+    }
+
+    pub fn add_resource<R: Resource + Send>(&mut self, resource: R) -> ResourceId {
+        self.world_mut().add_resource(resource)
+    }
+
+    pub fn add_non_send_resource<R: Resource>(&mut self, resource: R) -> ResourceId {
+        self.world_mut().add_non_send_resource(resource)
+    }
+
+    pub fn resource<R: Resource + Send>(&self) -> &R {
+        self.world().resource::<R>()
+    }
+
+    pub fn resource_mut<R: Resource + Send>(&mut self) -> &mut R {
+        self.world_mut().resource_mut::<R>()
+    }
+
+    pub fn try_resource<R: Resource + Send>(&self) -> Option<&R> {
+        self.world().try_resource::<R>()
+    }
+
+    pub fn try_resource_mut<R: Resource + Send>(&mut self) -> Option<&mut R> {
+        self.world_mut().try_resource_mut::<R>()
+    }
+
+    pub fn non_send_resource<R: Resource>(&self) -> &R {
+        self.world().non_send_resource::<R>()
+    }
+
+    pub fn non_send_resource_mut<R: Resource>(&mut self) -> &mut R {
+        self.world_mut().non_send_resource_mut::<R>()
+    }
+
+    pub fn try_non_send_resource<R: Resource>(&self) -> Option<&R> {
+        self.world().try_non_send_resource::<R>()
+    }
+
+    pub fn try_non_send_resource_mut<R: Resource>(&mut self) -> Option<&mut R> {
+        self.world_mut().try_non_send_resource_mut::<R>()
+    }
+
+    pub fn get_or_insert_resource<R: Resource + Send>(&mut self, get: impl Fn() -> R) -> &mut R {
+        self.world_mut().get_or_insert_resource::<R>(get)
+    }
+
+    pub fn get_or_insert_non_send_resource<R: Resource>(&mut self, get: impl Fn() -> R) -> &mut R {
+        self.world_mut().get_or_insert_non_send_resource::<R>(get)
+    }
+
+    pub fn remove_resource<R: Resource>(&mut self) -> Option<R> {
+        self.world_mut().remove_resource::<R>()
     }
 
     pub fn add_sub_app(&mut self, app: impl AppTag) {
         let app = Box::new(app) as Box<dyn AppTag>;
         match &mut self.0 {
-            AppConfigKind::Main { secondary, .. } => {
-                secondary.entry(app).or_insert(AppConfig::new());
+            AppType::Main { secondary, .. } => {
+                secondary.entry(app).or_insert(AppBuilder::single());
             }
-            AppConfigKind::Sub(_) => panic!("Cannot add sub app to a sub app"),
+            AppType::Sub(_) => panic!("Cannot add sub app to a sub app"),
         }
     }
 
-    pub fn sub_app(&self, app: impl AppTag) -> Option<&AppConfig> {
+    pub fn sub_app(&self, app: impl AppTag) -> Option<&AppBuilder> {
         match &self.0 {
-            AppConfigKind::Main { secondary, .. } => {
-                secondary.get(&(Box::new(app) as Box<dyn AppTag>))
-            }
-            AppConfigKind::Sub(_) => None,
+            AppType::Main { secondary, .. } => secondary.get(&(Box::new(app) as Box<dyn AppTag>)),
+            AppType::Sub(_) => None,
         }
     }
 
-    pub fn sub_app_mut(&mut self, app: impl AppTag) -> Option<&mut AppConfig> {
+    pub fn sub_app_mut(&mut self, app: impl AppTag) -> Option<&mut AppBuilder> {
         match &mut self.0 {
-            AppConfigKind::Main { secondary, .. } => {
+            AppType::Main { secondary, .. } => {
                 secondary.get_mut(&(Box::new(app) as Box<dyn AppTag>))
             }
-            AppConfigKind::Sub(_) => None,
+            AppType::Sub(_) => None,
         }
     }
 
@@ -150,14 +235,14 @@ impl AppBuilder {
         plugins.get(self);
     }
 
-    pub fn build(self) -> App {
+    pub fn build(self) -> Apps {
         match self.0 {
-            AppConfigKind::Main {
+            AppType::Main {
                 config,
                 secondary,
                 runner,
             } => {
-                let mut main = Self(AppConfigKind::Main {
+                let mut main = Self(AppType::Main {
                     config,
                     secondary,
                     runner,
@@ -165,7 +250,7 @@ impl AppBuilder {
 
                 main.build_plugins();
 
-                let AppConfigKind::Main {
+                let AppType::Main {
                     config,
                     secondary,
                     runner,
@@ -177,24 +262,24 @@ impl AppBuilder {
                 let main = App::from(config);
                 let sub = secondary
                     .into_values()
-                    .map(|app| {
-                        let mut app = Self(AppConfigKind::Sub(app));
+                    .map(|mut app| {
                         app.build_plugins();
 
-                        App::from(app.into_config())
+                        App::from(app.into_build_info())
                     })
-                    .collect();
+                    .collect::<Vec<_>>();
 
                 match runner {
-                    Some(runner) => runner(Apps::new(main, sub)).main,
-                    None => Self::default_runner(Apps::new(main, sub)).main,
+                    Some(runner) => runner(Apps::new(main, sub)),
+                    None => Self::default_runner(Apps::new(main, sub)),
                 }
             }
-            AppConfigKind::Sub(config) => {
-                let mut sub = Self(AppConfigKind::Sub(config));
+            AppType::Sub(config) => {
+                let mut sub = Self(AppType::Sub(config));
                 sub.build_plugins();
 
-                App::from(sub.into_config())
+                let app = App::from(sub.into_build_info());
+                Apps::new(app, vec![])
             }
         }
     }
@@ -225,45 +310,48 @@ impl AppBuilder {
         }
     }
 
-    fn config(&self) -> &AppConfig {
+    fn info(&self) -> &AppBuildInfo {
         match &self.0 {
-            AppConfigKind::Main { config, .. } => config,
-            AppConfigKind::Sub(config) => config,
+            AppType::Main { config, .. } => config,
+            AppType::Sub(config) => config,
         }
     }
 
-    fn config_mut(&mut self) -> &mut AppConfig {
+    fn info_mut(&mut self) -> &mut AppBuildInfo {
         match &mut self.0 {
-            AppConfigKind::Main { config, .. } => config,
-            AppConfigKind::Sub(config) => config,
+            AppType::Main { config, .. } => config,
+            AppType::Sub(config) => config,
         }
     }
 
     fn plugins(&self) -> &Vec<Box<dyn Plugin>> {
-        match &self.0 {
-            AppConfigKind::Main { config, .. } => &config.plugins,
-            AppConfigKind::Sub(config) => &config.plugins,
-        }
+        &self.info().plugins
     }
 
     fn plugins_mut(&mut self) -> &mut Vec<Box<dyn Plugin>> {
-        match &mut self.0 {
-            AppConfigKind::Main { config, .. } => &mut config.plugins,
-            AppConfigKind::Sub(config) => &mut config.plugins,
+        &mut self.info_mut().plugins
+    }
+
+    fn into_build_info(self) -> AppBuildInfo {
+        match self.0 {
+            AppType::Main { config, .. } => config,
+            AppType::Sub(config) => config,
         }
     }
 
-    fn into_config(self) -> AppConfig {
-        match self.0 {
-            AppConfigKind::Main { config, .. } => config,
-            AppConfigKind::Sub(config) => config,
-        }
+    fn world(&self) -> &World {
+        &self.info().world
+    }
+
+    fn world_mut(&mut self) -> &mut World {
+        &mut self.info_mut().world
     }
 
     fn default_runner(mut apps: Apps) -> Apps {
         apps.init();
         apps.run();
         apps.shutdown();
+        apps.await_apps();
 
         apps
     }
@@ -271,8 +359,8 @@ impl AppBuilder {
 
 impl Plugins for AppBuilder {
     fn add_plugin<P: Plugin>(&mut self, mut plugin: P) -> &mut Self {
-        if !self.config().registered.contains(plugin.name()) {
-            self.config_mut().registered.insert(plugin.name());
+        if !self.info().registered.contains(plugin.name()) {
+            self.info_mut().registered.insert(plugin.name());
 
             plugin.setup(self);
             self.plugins_mut().push(Box::new(plugin));
@@ -282,8 +370,8 @@ impl Plugins for AppBuilder {
     }
 }
 
-impl From<AppConfig> for App {
-    fn from(mut value: AppConfig) -> Self {
+impl From<AppBuildInfo> for App {
+    fn from(mut value: AppBuildInfo) -> Self {
         let systems = value.schedule.build(&mut value.world).unwrap();
         App {
             world: value.world,
@@ -300,6 +388,10 @@ pub struct App {
 impl App {
     pub fn new() -> AppBuilder {
         AppBuilder::new()
+    }
+
+    pub fn single() -> AppBuilder {
+        AppBuilder::single()
     }
 
     pub fn world(&self) -> &World {
@@ -340,11 +432,16 @@ pub struct Apps {
 
 impl Apps {
     fn new(main: App, sub: Vec<App>) -> Self {
+        println!("SUB: {}", sub.len());
         Self {
             main,
             sub,
             handles: Vec::new(),
         }
+    }
+
+    pub fn world(&self) -> &World {
+        &self.main.world
     }
 
     pub fn init(&mut self) {
@@ -416,3 +513,81 @@ impl std::ops::DerefMut for MainWorld {
 impl Resource for MainWorld {}
 unsafe impl Send for MainWorld {}
 unsafe impl Sync for MainWorld {}
+
+#[allow(unused_imports, dead_code)]
+mod tests {
+    use super::{App, AppTag, Plugin, Plugins};
+    use crate::Resource;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Value(usize);
+    impl Resource for Value {}
+
+    pub struct PluginA;
+    impl Plugin for PluginA {
+        fn setup(&mut self, app: &mut super::AppBuilder) {
+            assert_eq!(app.resource::<Value>().0, 0);
+            app.resource_mut::<Value>().0 = 1;
+            app.add_plugins(PluginB);
+        }
+    }
+
+    pub struct PluginB;
+    impl Plugin for PluginB {
+        fn setup(&mut self, _: &mut super::AppBuilder) {}
+
+        fn run(&mut self, app: &mut super::AppBuilder) {
+            assert_eq!(app.resource::<Value>().0, 1);
+            app.resource_mut::<Value>().0 = 2;
+            app.add_plugins(PluginC);
+        }
+    }
+
+    pub struct PluginC;
+    impl Plugin for PluginC {
+        fn setup(&mut self, _: &mut super::AppBuilder) {}
+
+        fn finish(&mut self, app: &mut super::AppBuilder) {
+            assert_eq!(app.resource::<Value>().0, 2);
+            app.resource_mut::<Value>().0 = 3;
+            app.add_plugins(PluginD);
+        }
+    }
+
+    pub struct PluginD;
+    impl Plugin for PluginD {
+        fn setup(&mut self, app: &mut super::AppBuilder) {
+            assert_eq!(app.resource::<Value>().0, 3);
+            app.resource_mut::<Value>().0 = 4;
+        }
+    }
+
+    pub struct TestApp;
+    impl AppTag for TestApp {}
+
+    #[test]
+    fn build_plugins() {
+        let mut builder = App::single();
+        builder.add_resource(Value(0));
+        builder.add_plugin(PluginA);
+
+        builder.build_plugins();
+
+        assert_eq!(builder.resource::<Value>().0, 4);
+    }
+
+    #[test]
+    fn build_multi_app() {
+        let mut builder = App::new();
+        builder.add_resource(Value(0));
+        builder.add_plugins(PluginA);
+        builder.add_sub_app(TestApp);
+        builder.sub_app_mut(TestApp).unwrap().add_resource(Value(0));
+        builder.sub_app_mut(TestApp).unwrap().add_plugins(PluginA);
+
+        let app = builder.build();
+
+        assert_eq!(app.world().resource::<Value>().0, 4);
+        assert_eq!(app.sub[0].world().resource::<Value>().0, 4);
+    }
+}
