@@ -1,7 +1,7 @@
 use crate::{ComponentId, ResourceId, SparseIndex};
 use fixedbitset::FixedBitSet;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessError {
     Component(ComponentId),
     Resource(ResourceId),
@@ -258,5 +258,60 @@ impl WorldAccess {
         }
 
         Ok(())
+    }
+}
+
+mod test {
+    use crate::{ArchetypeAccess, ComponentId, ResourceId, SparseIndex};
+
+    use super::WorldAccess;
+
+    #[test]
+    fn disjoint_archetype_access() {
+        let mut access = ArchetypeAccess::new();
+        let mut other = ArchetypeAccess::new();
+
+        access.read(ComponentId(0));
+        access.write(ComponentId(1));
+
+        other.write(ComponentId(0));
+        other.exclude(ComponentId(1));
+
+        assert!(access.is_disjoint(&other));
+    }
+
+    #[test]
+    fn world_access_conflict() {
+        let mut access = WorldAccess::new();
+        let mut other = WorldAccess::new();
+
+        access.components.read(ComponentId(0));
+        access.components.write(ComponentId(1));
+        access.resources.read(ResourceId(0));
+
+        other.components.read(ComponentId(0));
+        other.components.write(ComponentId(2));
+        other.resources.write(ResourceId(1));
+
+        assert_eq!(access.conflicts(&other), Ok(()));
+    }
+
+    #[test]
+    fn world_access_validate() {
+        let mut valid = WorldAccess::new();
+        valid.components.read(ComponentId(0));
+        valid.components.write(ComponentId(1));
+        valid.resources.read(ResourceId(0));
+
+        assert_eq!(valid.validate(), Ok(()));
+
+        let mut archetype = ArchetypeAccess::new();
+        archetype.write(ComponentId(0));
+
+        let mut invalid = WorldAccess::new();
+        invalid.components.read(ComponentId(0));
+        invalid.add_archetype(archetype);
+
+        assert_ne!(invalid.validate(), Ok(()));
     }
 }

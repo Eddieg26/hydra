@@ -8,7 +8,7 @@ use std::{any::TypeId, collections::HashMap, thread::ThreadId};
 pub trait Resource: Sized + 'static {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ResourceId(u32);
+pub struct ResourceId(pub(crate) u32);
 impl_sparse_index_wrapper!(ResourceId);
 
 pub struct ResourceMeta {
