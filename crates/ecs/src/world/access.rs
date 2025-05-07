@@ -261,9 +261,10 @@ impl WorldAccess {
     }
 }
 
+
+#[allow(unused_imports, dead_code)]
 mod test {
     use crate::{ArchetypeAccess, ComponentId, ResourceId, SparseIndex};
-
     use super::WorldAccess;
 
     #[test]

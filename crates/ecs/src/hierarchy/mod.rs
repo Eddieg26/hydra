@@ -1,6 +1,5 @@
-use std::ops::Index;
-
 use crate::{BaseFilter, BaseQuery, Component, Entity, Query};
+use std::ops::Index;
 
 const EMPTY: &'static [Entity] = &[];
 
@@ -320,5 +319,70 @@ impl<'a, Q: BaseQuery, F: BaseFilter> Iterator for DescendentIter<'a, Q, F> {
             Ok(result) => result,
             Err(_) => return self.next(),
         }
+    }
+}
+
+mod tests {
+    use super::{Children, HierarchyExt, Parent};
+    use crate::{
+        ArchetypeAccess, Command, Entity, Query, QueryState, World, commands::entity::AddChild,
+    };
+
+    #[test]
+    fn parent_query() {
+        let mut world = World::new();
+        world.register::<Parent>();
+        world.register::<Children>();
+
+        let parent = world.spawn();
+        let child = world.spawn();
+
+        AddChild::new(parent, child).execute(&mut world);
+
+        let mut state = QueryState::<Entity>::new(&mut world, &mut ArchetypeAccess::new());
+        let query = Query::new(unsafe { world.cell() }, &mut state);
+        let parent_query = query.parent(child);
+        let mut children = query.children(parent);
+
+        assert_eq!(parent_query, Some(parent));
+        assert!(children.any(|entity| entity == child));
+    }
+
+    #[test]
+    fn anscestor_query() {
+        let mut world = World::new();
+        world.register::<Parent>();
+        world.register::<Children>();
+
+        let ancestor = world.spawn();
+        let parent = world.spawn();
+        let child = world.spawn();
+
+        AddChild::new(ancestor, parent).execute(&mut world);
+        AddChild::new(parent, child).execute(&mut world);
+
+        let mut state = QueryState::<Entity>::new(&mut world, &mut ArchetypeAccess::new());
+        let query = Query::new(unsafe { world.cell() }, &mut state);
+        let ancestors = query.ancestors(child);
+        ancestors.for_each(|entity| assert!(entity == parent || entity == ancestor));
+    }
+
+    #[test]
+    fn descendent_query() {
+        let mut world = World::new();
+        world.register::<Parent>();
+        world.register::<Children>();
+
+        let ancestor = world.spawn();
+        let parent = world.spawn();
+        let child = world.spawn();
+
+        AddChild::new(ancestor, parent).execute(&mut world);
+        AddChild::new(parent, child).execute(&mut world);
+
+        let mut state = QueryState::<Entity>::new(&mut world, &mut ArchetypeAccess::new());
+        let query = Query::new(unsafe { world.cell() }, &mut state);
+        let descendents = query.descendents(ancestor);
+        descendents.for_each(|entity| assert!(entity == parent || entity == child));
     }
 }
