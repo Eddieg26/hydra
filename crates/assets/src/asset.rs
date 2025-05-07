@@ -11,6 +11,12 @@ pub struct AssetId<A: Asset>(uuid::Uuid, std::marker::PhantomData<A>);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ErasedId(uuid::Uuid);
 
+impl ToString for ErasedId {
+    fn to_string(&self) -> String {
+        self.0.to_string()
+    }
+}
+
 impl Serialize for ErasedId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -102,7 +108,7 @@ impl From<uuid::Uuid> for ErasedId {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AssetType(u32);
 impl SparseIndex for AssetType {
     fn to_usize(self) -> usize {

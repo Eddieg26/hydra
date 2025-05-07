@@ -8,3 +8,10 @@ ecs = { path = "../ecs" }
 uuid = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 ron = { workspace = true }
+futures = { workspace = true }
+smol = { workspace = true }
+downcast-rs = { workspace = true }
+thiserror = { workspace = true }
+blake3 = "1.8.2"
+crc32fast = "=1.0.3"
+bincode = { version = "2.0.1", features = ["serde"] }
