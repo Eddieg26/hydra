@@ -1,7 +1,6 @@
 use crate::{
-    ObjectStatus,
-    core::{Frame, sparse::SparseIndex},
-    ext, impl_sparse_index_wrapper,
+    core::{Frame, ObjectStatus, ext, sparse::SparseIndex},
+    impl_sparse_index_wrapper,
 };
 use std::{any::TypeId, collections::HashMap, thread::ThreadId};
 
@@ -342,11 +341,9 @@ impl<R: Resource + Clone> Clone for Cloned<R> {
 
 #[allow(unused_imports)]
 mod tests {
-    use std::rc::Rc;
-
-    use crate::Frame;
-
     use super::{Resource, Resources};
+    use crate::core::Frame;
+    use std::rc::Rc;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Value(u32);

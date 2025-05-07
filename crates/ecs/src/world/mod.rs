@@ -1,4 +1,4 @@
-use crate::{Removed, SparseIndex, core::Frame, impl_sparse_index_wrapper};
+use crate::{system::Removed, SparseIndex, core::Frame, impl_sparse_index_wrapper};
 use std::{
     any::TypeId,
     collections::HashMap,

@@ -1,7 +1,7 @@
 use crate::{
-    Archetypes, Component, ComponentId, Components, Entities, Event, EventId, EventRegistry,
-    ModeId, Phase, Resource, ResourceId, Resources, RunMode, Schedule, Systems, World, WorldCell,
-    WorldMode, ext,
+    Component, ComponentId, Components, Entities, Event, EventId, EventRegistry, ModeId, Phase,
+    Resource, ResourceId, Resources, RunMode, Schedule, Systems, World, WorldMode, ext,
+    world::{Archetypes, WorldCell},
 };
 use std::{
     collections::{HashMap, HashSet},

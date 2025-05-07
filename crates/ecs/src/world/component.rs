@@ -1,4 +1,4 @@
-use crate::{SparseIndex, TypeMeta, impl_sparse_index_wrapper};
+use crate::{SparseIndex, core::TypeMeta, impl_sparse_index_wrapper};
 use fixedbitset::FixedBitSet;
 use std::{alloc::Layout, any::TypeId, collections::HashMap};
 

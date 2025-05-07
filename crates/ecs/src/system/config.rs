@@ -476,7 +476,9 @@ impl_tuple_condition! {
 mod tests {
     use super::{Condition, CurrentMode, Exists};
     use crate::{
-        world, Added, Entered, Exited, IntoSystemConfig, Modified, Not, Or, Removed, Resource, System, SystemConfigs, SystemMeta, World, WorldMode
+        IntoSystemConfig, Resource, System, SystemConfigs, SystemMeta, World, WorldMode,
+        system::{Added, Entered, Exited, Modified, Not, Or, Removed},
+        world,
     };
 
     #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]

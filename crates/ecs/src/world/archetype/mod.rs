@@ -1,6 +1,8 @@
 use super::{ArchetypeAccess, Component, ComponentId, ComponentKit, Components, Entity};
 use crate::{
-    core::{sparse::SparseIndex, FixedBitSet, Frame}, impl_sparse_index_wrapper, ComponentWriter
+    core::{FixedBitSet, Frame, sparse::SparseIndex},
+    impl_sparse_index_wrapper,
+    world::ComponentWriter,
 };
 use std::collections::HashMap;
 
@@ -620,12 +622,12 @@ mod tests {
             vec![components.register::<Age>(), components.register::<Name>()]
         }
 
-        fn get<'a>(self, mut writer: impl crate::ComponentWriter<'a>) {
+        fn get<'a>(self, mut writer: impl crate::world::ComponentWriter<'a>) {
             writer.write(self.age);
             writer.write(self.name);
         }
 
-        fn remove<'a>(mut remover: impl crate::ComponentRemover<'a>) {
+        fn remove<'a>(mut remover: impl crate::world::ComponentRemover<'a>) {
             remover.remove::<Age>();
             remover.remove::<Name>();
         }

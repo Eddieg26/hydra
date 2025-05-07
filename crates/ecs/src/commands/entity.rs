@@ -1,7 +1,7 @@
 use super::CommandBuffer;
 use crate::{
     Children, Command, Component, ComponentKit, Entity, EntityCommands, EntityMut, Events, Parent,
-    Removed, SystemArg, World, WorldCell,
+    SystemArg, World, system::Removed, world::WorldCell,
 };
 
 pub struct Spawner<'world, 'state> {

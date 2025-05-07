@@ -1,8 +1,10 @@
 use super::SystemExecutor;
 use crate::{
-    core::{ImmutableIndexDag, IndexDag},
+    core::{
+        ImmutableIndexDag, IndexDag,
+        task::{self, Scope, available_parallelism},
+    },
     system::SystemCell,
-    task::{self, Scope, available_parallelism},
     world::WorldCell,
 };
 use fixedbitset::FixedBitSet;

@@ -1,8 +1,9 @@
 use super::{IntoSystemConfig, SystemConfig, SystemMeta};
 use crate::{
-    Cloned, CommandBuffer, Commands, Event, EventReader, EventStorage, EventWriter, Events, ModeId,
-    WorldAccess,
-    world::{Entities, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell},
+    CommandBuffer, Commands, Event, EventReader, EventWriter, Events, ModeId, WorldAccess,
+    world::{
+        Cloned, Entities, EventStorage, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell,
+    },
 };
 use std::any::Any;
 
@@ -477,7 +478,7 @@ pub mod unlifetime {
 
         unsafe fn get<'world, 'state>(
             state: &'state mut Self::State,
-            world: crate::WorldCell<'world>,
+            world: crate::world::WorldCell<'world>,
             system: &crate::SystemMeta,
         ) -> Self::Item<'world, 'state> {
             unsafe { StaticArg(S::get(state, world, system)) }

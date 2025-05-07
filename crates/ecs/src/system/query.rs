@@ -1,8 +1,9 @@
 use super::{Added, Modified, Not, Or, ReadOnly, Removed, SystemArg};
 use crate::{
-    Archetype, ArchetypeAccess, ArchetypeId, ArchetypeQuery, Column, Component, ComponentId,
-    Entity, EntityEvents, Event, Events, Frame, ObjectStatus, Ptr, RowIndex, SparseIndex, World,
-    WorldCell,
+    Archetype, ArchetypeAccess, ArchetypeId, ArchetypeQuery, Component, ComponentId, Entity,
+    EntityEvents, Event, Frame, SparseIndex, World,
+    core::{ObjectStatus, Ptr},
+    world::{Column, Events, RowIndex, WorldCell},
 };
 
 pub trait BaseQuery {
@@ -926,8 +927,9 @@ impl_base_query_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q))
 mod tests {
     use super::*;
     use crate::{
-        ComponentKit, ComponentRemover, ComponentWriter, Components, WorldAccess,
+        ComponentKit, Components, WorldAccess,
         system::SystemMeta,
+        world::{ComponentRemover, ComponentWriter},
     };
 
     #[derive(Debug, Default, PartialEq, Eq)]
