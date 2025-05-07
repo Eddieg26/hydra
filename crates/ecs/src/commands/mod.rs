@@ -171,3 +171,32 @@ impl<'a> EntityCommands<'a> {
         self.entity
     }
 }
+
+#[allow(unused_imports, dead_code)]
+mod tests {
+    use super::{Command, CommandBuffer};
+    use crate::{Resource, World};
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Value(usize);
+    impl Resource for Value {}
+
+    pub struct Test;
+    impl Command for Test {
+        fn execute(self, world: &mut crate::World) {
+            world.resource_mut::<Value>().0 += 1;
+        }
+    }
+
+    #[test]
+    fn command_buffer() {
+        let mut world = World::new();
+        let mut buffer = CommandBuffer::new();
+        let count = (0..3).map(|_| buffer.add(Test)).collect::<Vec<_>>().len();
+
+        world.add_resource(Value(0));
+        buffer.execute(&mut world);
+
+        assert_eq!(world.resource::<Value>().0, count);
+    }
+}
