@@ -170,7 +170,6 @@ impl<A: Asset> LoadedAsset<A> {
     }
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ArtifactHeader {
     /// The size of the artifact metadata in bytes.
@@ -375,37 +374,46 @@ impl AssetLibrary {
 
 pub type SharedLibrary = Arc<RwLock<AssetLibrary>>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum LoadPath {
-    Id(ErasedId),
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub enum LoadPath<A: Asset> {
+    Id(AssetId<A>),
     Path(AssetPath),
 }
 
-impl From<ErasedId> for LoadPath {
+impl<A: Asset> From<ErasedId> for LoadPath<A> {
     fn from(id: ErasedId) -> Self {
-        LoadPath::Id(id)
-    }
-}
-
-impl<A: Asset> From<AssetId<A>> for LoadPath {
-    fn from(id: AssetId<A>) -> Self {
         LoadPath::Id(id.into())
     }
 }
 
-impl From<uuid::Uuid> for LoadPath {
+impl<A: Asset> From<AssetId<A>> for LoadPath<A> {
+    fn from(id: AssetId<A>) -> Self {
+        LoadPath::Id(id)
+    }
+}
+
+impl<A: Asset> From<uuid::Uuid> for LoadPath<A> {
     fn from(id: uuid::Uuid) -> Self {
         LoadPath::Id(id.into())
     }
 }
 
-impl<I: Into<AssetPath>> From<I> for LoadPath {
+impl<A: Asset, I: Into<AssetPath>> From<I> for LoadPath<A> {
     fn from(path: I) -> Self {
         LoadPath::Path(path.into())
     }
 }
 
-impl std::fmt::Display for LoadPath {
+impl<A: Asset> std::fmt::Debug for LoadPath<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Id(arg0) => f.debug_tuple("Id").field(arg0).finish(),
+            Self::Path(arg0) => f.debug_tuple("Path").field(arg0).finish(),
+        }
+    }
+}
+
+impl<A: Asset> std::fmt::Display for LoadPath<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(self, f)
     }

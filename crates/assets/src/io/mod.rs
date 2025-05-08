@@ -196,10 +196,12 @@ impl<T: AsRef<Path>> PathExt for T {
     }
 }
 
-fn deserialize<T: for<'a> Deserialize<'a>>(data: &[u8]) -> Result<T, bincode::error::DecodeError> {
+pub fn deserialize<T: for<'a> Deserialize<'a>>(
+    data: &[u8],
+) -> Result<T, bincode::error::DecodeError> {
     bincode::serde::decode_from_slice::<T, _>(data, bincode::config::standard()).map(|v| v.0)
 }
 
-fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, bincode::error::EncodeError> {
+pub fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, bincode::error::EncodeError> {
     bincode::serde::encode_to_vec(value, bincode::config::standard())
 }

@@ -4,12 +4,22 @@ use std::{collections::HashMap, hash::Hash};
 
 pub trait Asset: Send + Sync + 'static {}
 
-pub trait Settings: Send + Sync + 'static {}
+pub trait Settings: Default + Send + Sync + 'static {}
 
 pub struct AssetId<A: Asset>(uuid::Uuid, std::marker::PhantomData<A>);
+impl<A: Asset> AssetId<A> {
+    pub fn new() -> Self {
+        Self(uuid::Uuid::new_v4(), Default::default())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ErasedId(uuid::Uuid);
+impl ErasedId {
+    pub fn new() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+}
 
 impl ToString for ErasedId {
     fn to_string(&self) -> String {
@@ -130,6 +140,15 @@ impl<S: Settings> AssetMetadata<S> {
         Self {
             id: id.into(),
             settings,
+        }
+    }
+}
+
+impl<S: Settings> Default for AssetMetadata<S> {
+    fn default() -> Self {
+        Self {
+            id: ErasedId::new(),
+            settings: Default::default(),
         }
     }
 }
