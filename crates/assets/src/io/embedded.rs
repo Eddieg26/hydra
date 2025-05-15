@@ -1,4 +1,4 @@
-use super::{AssetIoError, AssetReader, AssetWriter, FileSystem, PathExt};
+use super::{AssetIoError, AyncReader, AsyncWriter, FileSystem, PathExt};
 use crate::asset::{Asset, AssetMetadata, ErasedId, Settings};
 use futures::{AsyncRead, AsyncWrite};
 use serde::Serialize;
@@ -84,7 +84,7 @@ impl AsyncRead for EmbeddedReader {
     }
 }
 
-impl AssetReader for EmbeddedReader {
+impl AyncReader for EmbeddedReader {
     fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> super::AssetFuture<'a, usize> {
         Box::pin(async move {
             let len = self.data.len();
@@ -147,7 +147,7 @@ impl AsyncWrite for EmbeddedWriter {
     }
 }
 
-impl AssetWriter for EmbeddedWriter {}
+impl AsyncWriter for EmbeddedWriter {}
 
 impl Drop for EmbeddedWriter {
     fn drop(&mut self) {

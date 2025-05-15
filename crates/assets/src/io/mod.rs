@@ -70,19 +70,19 @@ impl From<ron::error::SpannedError> for AssetIoError {
 pub type BoxedFuture<'a, T, E = AssetIoError> = Box<dyn Future<Output = Result<T, E>> + 'a>;
 pub type AssetFuture<'a, T, E = AssetIoError> = Pin<BoxedFuture<'a, T, E>>;
 
-pub trait AssetReader: AsyncRead + Send + Sync + Unpin {
+pub trait AyncReader: AsyncRead + Send + Sync + Unpin {
     fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> AssetFuture<'a, usize>;
 }
 
-pub trait AssetWriter: AsyncWrite + Send + Sync + Unpin {}
+pub trait AsyncWriter: AsyncWrite + Send + Sync + Unpin {}
 
 pub trait PathStream: Stream<Item = PathBuf> + Send + Unpin {}
 
 impl<T: Stream<Item = PathBuf> + Send + Unpin> PathStream for T {}
 
 pub trait FileSystem: Send + Sync + 'static {
-    type Reader: AssetReader;
-    type Writer: AssetWriter;
+    type Reader: AyncReader;
+    type Writer: AsyncWriter;
 
     fn root(&self) -> &Path;
     fn reader(&self, path: &Path) -> impl Future<Output = Result<Self::Reader, AssetIoError>>;
@@ -102,10 +102,10 @@ pub trait FileSystem: Send + Sync + 'static {
 
 pub trait ErasedFileSystem: downcast_rs::Downcast + Send + Sync + 'static {
     fn root(&self) -> &Path;
-    fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AssetReader>>;
+    fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AyncReader>>;
     fn read_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn PathStream>>;
     fn is_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool>;
-    fn writer<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AssetWriter>>;
+    fn writer<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AsyncWriter>>;
     fn create_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()>;
     fn create_dir_all<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()>;
     fn rename<'a>(&'a self, from: &'a Path, to: &'a Path) -> AssetFuture<'a, ()>;
@@ -119,10 +119,10 @@ impl<T: FileSystem> ErasedFileSystem for T {
         FileSystem::root(self)
     }
 
-    fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AssetReader>> {
+    fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AyncReader>> {
         Box::pin(async {
             let reader = self.reader(path).await?;
-            Ok(Box::new(reader) as Box<dyn AssetReader>)
+            Ok(Box::new(reader) as Box<dyn AyncReader>)
         })
     }
 
@@ -134,10 +134,10 @@ impl<T: FileSystem> ErasedFileSystem for T {
         Box::pin(async { self.is_dir(path).await })
     }
 
-    fn writer<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AssetWriter>> {
+    fn writer<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AsyncWriter>> {
         Box::pin(async {
             let writer = self.writer(path).await?;
-            Ok(Box::new(writer) as Box<dyn AssetWriter>)
+            Ok(Box::new(writer) as Box<dyn AsyncWriter>)
         })
     }
 
@@ -196,12 +196,12 @@ impl<T: AsRef<Path>> PathExt for T {
     }
 }
 
-pub fn deserialize<T: for<'a> Deserialize<'a>>(
-    data: &[u8],
-) -> Result<T, bincode::error::DecodeError> {
-    bincode::serde::decode_from_slice::<T, _>(data, bincode::config::standard()).map(|v| v.0)
+pub fn deserialize<T: for<'a> Deserialize<'a>>(data: &[u8]) -> Result<T, AssetIoError> {
+    bincode::serde::decode_from_slice::<T, _>(data, bincode::config::standard())
+        .map(|v| v.0)
+        .map_err(AssetIoError::from)
 }
 
-pub fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, bincode::error::EncodeError> {
-    bincode::serde::encode_to_vec(value, bincode::config::standard())
+pub fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, AssetIoError> {
+    bincode::serde::encode_to_vec(value, bincode::config::standard()).map_err(AssetIoError::from)
 }

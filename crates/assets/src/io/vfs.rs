@@ -1,4 +1,4 @@
-use super::{AssetIoError, AssetReader, AssetWriter, FileSystem, PathExt};
+use super::{AssetIoError, AyncReader, AsyncWriter, FileSystem, PathExt};
 use futures::{executor::block_on, AsyncRead, AsyncWrite, StreamExt};
 use smol::lock::RwLock;
 use std::{
@@ -92,7 +92,7 @@ impl AsyncRead for FileReader {
     }
 }
 
-impl AssetReader for FileReader {
+impl AyncReader for FileReader {
     fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> super::AssetFuture<'a, usize> {
         Box::pin(async move {
             let len = self.data.len();
@@ -155,7 +155,7 @@ impl AsyncWrite for FileWriter {
     }
 }
 
-impl AssetWriter for FileWriter {}
+impl AsyncWriter for FileWriter {}
 
 impl Drop for FileWriter {
     fn drop(&mut self) {

@@ -1,10 +1,11 @@
 use super::{
-    AssetFuture, AssetIoError, AssetReader, AssetWriter, ErasedFileSystem, FileSystem, PathExt,
+    AssetFuture, AssetIoError, AsyncWriter, AyncReader, ErasedFileSystem, FileSystem, PathExt,
     PathStream,
 };
 use crate::asset::{AssetMetadata, Settings};
 use serde::{Deserialize, Serialize};
 use std::{
+    borrow::Cow,
     collections::HashMap,
     hash::Hash,
     path::{Path, PathBuf},
@@ -12,17 +13,17 @@ use std::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct AssetPath {
-    source: AssetSourceName,
+pub struct AssetPath<'a> {
+    source: SourceName<'a>,
     path: Box<Path>,
     name: Option<Box<str>>,
 }
 
-impl From<&AssetPath> for PathBuf {
-    fn from(value: &AssetPath) -> Self {
+impl<'a> From<AssetPath<'a>> for PathBuf {
+    fn from(value: AssetPath<'a>) -> Self {
         let source = match value.source {
-            AssetSourceName::Default => "",
-            AssetSourceName::Name(ref name) => name,
+            SourceName::Default => "",
+            SourceName::Name(ref name) => name,
         };
 
         let path = format!("{}://{}", source, value.path.display());
@@ -33,14 +34,15 @@ impl From<&AssetPath> for PathBuf {
     }
 }
 
-impl std::fmt::Display for AssetPath {
+impl std::fmt::Display for AssetPath<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", PathBuf::from(self).display())
+        let path: PathBuf = self.into();
+        write!(f, "{}", path.display())
     }
 }
 
-impl AssetPath {
-    pub fn new(source: AssetSourceName, path: impl AsRef<Path>) -> Self {
+impl<'a> AssetPath<'a> {
+    pub fn new(source: SourceName<'a>, path: impl AsRef<Path>) -> Self {
         Self {
             source,
             path: path.as_ref().to_path_buf().into_boxed_path(),
@@ -55,7 +57,7 @@ impl AssetPath {
         }
     }
 
-    pub fn source(&self) -> &AssetSourceName {
+    pub fn source(&self) -> &SourceName {
         &self.source
     }
 
@@ -71,29 +73,14 @@ impl AssetPath {
         self.name.as_deref()
     }
 
-    pub fn artifact_name(&self) -> PathBuf {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(self.path.as_ref().as_os_str().as_encoded_bytes());
-        hasher.update(self.source.as_bytes());
-        if let Some(name) = &self.name {
-            hasher.update(name.as_bytes());
-        }
-
-        let hash = hasher.finalize();
-        let name = String::from_utf8_lossy(hash.as_bytes());
-
-        PathBuf::from(name.to_string())
-    }
-
     /// remote://assets/texture.png@main
-    pub fn from_str<A: AsRef<str>>(path: A) -> Self {
-        let path = path.as_ref();
+    pub fn from_str(path: &'a str) -> Self {
         let (source, src_index) = match path.find("://") {
             Some(position) => {
                 let source = &path[..position];
-                (AssetSourceName::Name(source.to_string()), position + 3)
+                (SourceName::Name(source.into()), position + 3)
             }
-            None => (AssetSourceName::Default, 0),
+            None => (SourceName::Default, 0),
         };
 
         let (name, name_index) = match path[src_index..].find('@') {
@@ -113,66 +100,102 @@ impl AssetPath {
             name: name.map(|name| name.into_boxed_str()),
         }
     }
-}
 
-impl From<String> for AssetPath {
-    fn from(path: String) -> Self {
-        Self::from_str(path)
-    }
-}
+    pub fn from_string(path: String) -> AssetPath<'static> {
+        let (source, src_index) = match path.find("://") {
+            Some(position) => {
+                let source = &path[..position];
+                (SourceName::Name(source.to_string().into()), position + 3)
+            }
+            None => (SourceName::Default, 0),
+        };
 
-impl From<&str> for AssetPath {
-    fn from(path: &str) -> Self {
-        Self::from_str(path)
-    }
-}
+        let (name, name_index) = match path[src_index..].find('@') {
+            Some(position) => {
+                let name = &path[src_index + position + 1..];
+                (Some(name.to_string()), src_index + position)
+            }
+            None => (None, path.len()),
+        };
 
-impl From<&Path> for AssetPath {
-    fn from(path: &Path) -> Self {
-        match path.as_os_str().to_str() {
-            Some(path) => Self::from_str(path),
-            None => Self::new(AssetSourceName::Default, path),
+        let path = PathBuf::from(&path[src_index..name_index]);
+
+        AssetPath {
+            source,
+            path: path.into_boxed_path(),
+            name: name.map(|name| name.into_boxed_str()),
         }
     }
 }
 
-impl From<PathBuf> for AssetPath {
-    fn from(path: PathBuf) -> Self {
-        Self::from(path.as_path())
+impl From<String> for AssetPath<'static> {
+    fn from(path: String) -> Self {
+        Self::from_string(path)
     }
 }
 
-impl From<&AssetPath> for AssetPath {
-    fn from(value: &AssetPath) -> Self {
+impl<'a> From<&'a str> for AssetPath<'a> {
+    fn from(path: &'a str) -> Self {
+        Self::from_str(path)
+    }
+}
+
+impl<'a> From<&'a Path> for AssetPath<'a> {
+    fn from(path: &'a Path) -> Self {
+        match path.as_os_str().to_str() {
+            Some(path) => Self::from_str(path),
+            None => Self::new(SourceName::Default, path),
+        }
+    }
+}
+
+impl From<PathBuf> for AssetPath<'static> {
+    fn from(path: PathBuf) -> Self {
+        if let Some(path) = path.as_os_str().to_str() {
+            Self::from_string(path.to_string())
+        } else {
+            Self::new(SourceName::Default, path)
+        }
+    }
+}
+
+impl Into<PathBuf> for &AssetPath<'_> {
+    fn into(self) -> PathBuf {
+        todo!()
+    }
+}
+
+impl<'a> From<&AssetPath<'a>> for AssetPath<'a> {
+    fn from(value: &AssetPath<'a>) -> Self {
         value.clone()
     }
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Hash)]
-pub enum AssetSourceName {
+pub enum SourceName<'a> {
     #[default]
     Default,
-    Name(String),
+    Name(Cow<'a, str>),
 }
 
-impl AssetSourceName {
+impl<'a> SourceName<'a> {
     pub fn as_bytes(&self) -> &[u8] {
         match self {
-            AssetSourceName::Default => b"default",
-            AssetSourceName::Name(name) => name.as_bytes(),
+            SourceName::Default => b"default",
+            SourceName::Name(name) => name.as_bytes(),
         }
     }
 }
 
-impl From<String> for AssetSourceName {
+impl From<String> for SourceName<'static> {
     fn from(name: String) -> Self {
-        AssetSourceName::Name(name)
+        SourceName::Name(name.into())
     }
 }
 
-impl From<&str> for AssetSourceName {
-    fn from(name: &str) -> Self {
-        AssetSourceName::Name(name.to_string())
+impl<'a> From<&'a str> for SourceName<'a> {
+    fn from(name: &'a str) -> Self {
+        SourceName::Name(name.into())
     }
 }
 
@@ -190,22 +213,22 @@ impl AssetSource {
         self.io.as_ref()
     }
 
-    pub fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AssetReader>> {
+    pub fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AyncReader>> {
         self.io.reader(path)
     }
 
-    pub async fn read_dir(
-        &self,
-        path: impl AsRef<Path>,
+    pub async fn read_dir<'a>(
+        &'a self,
+        path: &'a Path,
     ) -> Result<Box<dyn PathStream>, AssetIoError> {
-        self.io.read_dir(path.as_ref()).await
+        self.io.read_dir(path).await
     }
 
     pub fn is_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool> {
         self.io.is_dir(path)
     }
 
-    pub fn writer<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AssetWriter>> {
+    pub fn writer<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AsyncWriter>> {
         self.io.writer(path)
     }
 
@@ -282,7 +305,7 @@ impl AssetSource {
 }
 
 pub struct AssetSources {
-    sources: HashMap<AssetSourceName, AssetSource>,
+    sources: HashMap<SourceName<'static>, AssetSource>,
 }
 
 impl AssetSources {
@@ -292,19 +315,19 @@ impl AssetSources {
         }
     }
 
-    pub fn add<I: FileSystem>(&mut self, name: AssetSourceName, io: I) {
+    pub fn add<I: FileSystem>(&mut self, name: SourceName<'static>, io: I) {
         self.sources.insert(name, AssetSource::new(io));
     }
 
-    pub fn get(&self, name: &AssetSourceName) -> Option<&AssetSource> {
+    pub fn get(&self, name: &SourceName<'static>) -> Option<&AssetSource> {
         self.sources.get(name)
     }
 
-    pub fn contains(&self, name: &AssetSourceName) -> bool {
+    pub fn contains(&self, name: &SourceName) -> bool {
         self.sources.contains_key(name)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&AssetSourceName, &AssetSource)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&SourceName, &AssetSource)> {
         self.sources.iter()
     }
 }

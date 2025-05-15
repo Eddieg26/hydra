@@ -1,7 +1,7 @@
 use crate::{
     asset::{Asset, AssetMetadata, ErasedId, Settings},
     io::{
-        AssetReader, BoxedFuture, deserialize,
+        AyncReader, AsyncWriter, BoxedFuture, deserialize,
         source::{AssetPath, AssetSource},
     },
 };
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::any::TypeId;
 
 pub struct ImportContext<'a> {
-    path: &'a AssetPath,
+    path: &'a AssetPath<'a>,
     source: &'a AssetSource,
 }
 
@@ -34,7 +34,7 @@ pub trait AssetImporter: Send + Sync + 'static {
 
     fn import(
         ctx: &mut ImportContext,
-        reader: &mut dyn AssetReader,
+        reader: &mut dyn AyncReader,
         metadata: &AssetMetadata<Self::Settings>,
     ) -> impl Future<Output = Result<Self::Asset, Self::Error>>;
 
@@ -58,7 +58,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub struct ErasedImporter {
     import: for<'a> fn(
         &'a mut ImportContext,
-        &'a mut dyn AssetReader,
+        &'a mut dyn AyncReader,
         &'a Box<dyn DynMetadata>,
     ) -> BoxedFuture<'a, ImportedAsset, BoxedError>,
     deserialize_metadata: fn(&[u8]) -> Result<Box<dyn DynMetadata>, BoxedError>,
@@ -104,7 +104,7 @@ impl ErasedImporter {
     pub fn import<'a>(
         &'a self,
         ctx: &'a mut ImportContext<'a>,
-        reader: &'a mut dyn AssetReader,
+        reader: &'a mut dyn AyncReader,
         metadata: &'a Box<dyn DynMetadata>,
     ) -> BoxedFuture<'a, ImportedAsset, BoxedError> {
         (self.import)(ctx, reader, metadata)
@@ -139,4 +139,6 @@ pub trait AssetProcessor: Send + Sync + 'static {
     type Importer: AssetImporter;
 
     type Error: std::error::Error + Send + Sync + 'static;
+
+    fn process(writer: &mut dyn AsyncWriter);
 }
