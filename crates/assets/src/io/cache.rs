@@ -1,8 +1,14 @@
-use super::{AssetIoError, deserialize, serialize};
-use crate::asset::{Asset, AssetId, AssetType, ErasedId};
+use super::{AssetIoError, AsyncReader, ErasedFileSystem, FileSystem, deserialize, serialize};
+use crate::asset::{Asset, AssetType, ErasedId};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::PathBuf};
+use smol::io::{AsyncReadExt, AsyncWriteExt};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AssetLibrary {
     id_map: HashMap<PathBuf, ErasedId>,
     path_map: HashMap<ErasedId, PathBuf>,
@@ -89,6 +95,14 @@ impl Artifact {
         Self { header, meta, data }
     }
 
+    pub fn id(&self) -> ErasedId {
+        self.meta.id
+    }
+
+    pub fn ty(&self) -> AssetType {
+        self.meta.ty
+    }
+
     pub fn header(&self) -> ArtifactHeader {
         self.header
     }
@@ -106,12 +120,102 @@ impl Artifact {
     }
 }
 
-pub struct LoadedAsset<A: Asset> {
-    id: AssetId<A>,
-    data: Vec<u8>,
+pub struct ArtifactReader(Box<dyn AsyncReader>);
+
+impl ArtifactReader {
+    pub fn new(reader: Box<dyn AsyncReader>) -> Self {
+        Self(reader)
+    }
+
+    pub async fn header(&mut self) -> Result<ArtifactHeader, AssetIoError> {
+        let mut buf = [0; std::mem::size_of::<ArtifactHeader>()];
+        self.0.read_exact(&mut buf).await?;
+
+        deserialize(&buf)
+    }
+
+    pub async fn meta(&mut self, header: &ArtifactHeader) -> Result<ArtifactMeta, AssetIoError> {
+        let mut buf = vec![0; header.meta as usize];
+        self.0.read_exact(&mut buf).await?;
+
+        deserialize(&buf)
+    }
+
+    pub async fn data(mut self) -> Result<Vec<u8>, AssetIoError> {
+        let mut buf = vec![];
+        AsyncReader::read_to_end(&mut self.0, &mut buf)
+            .await
+            .map(|_| buf)
+    }
 }
 
-pub struct LoadedAssets<A: Asset> {
-    assets: Vec<LoadedAsset<A>>,
-    _marker: std::marker::PhantomData<A>,
+#[derive(Clone)]
+pub struct AssetCache {
+    fs: Arc<dyn ErasedFileSystem>,
+    artifacts: PathBuf,
+    temp: PathBuf,
+    library: PathBuf,
+}
+
+impl AssetCache {
+    pub fn new<F: FileSystem>(fs: F) -> Self {
+        let fs = Arc::new(fs);
+        let artifacts = fs.root().join("artifacts");
+        let temp = fs.root().join(".temp");
+        let library = fs.root().join("assets.lib");
+
+        Self {
+            fs,
+            artifacts,
+            temp,
+            library,
+        }
+    }
+
+    pub fn get_artifacts_path(&self) -> &Path {
+        &self.artifacts
+    }
+
+    pub fn get_temp_path(&self) -> &Path {
+        &self.temp
+    }
+
+    pub fn get_library_path(&self) -> &Path {
+        &self.library
+    }
+
+    pub fn get_artifact_path(&self, id: ErasedId) -> PathBuf {
+        self.artifacts.join(id.to_string())
+    }
+
+    pub async fn get_artifact_reader(&self, id: ErasedId) -> Result<ArtifactReader, AssetIoError> {
+        let path = self.get_artifact_path(id);
+        self.fs.reader(&path).await.map(ArtifactReader::new)
+    }
+
+    pub async fn save_artifact(&self, artifact: &Artifact) -> Result<usize, AssetIoError> {
+        let data = serialize(artifact)?;
+        let path = self.get_artifact_path(artifact.id());
+        let mut writer = self.fs.writer(&path).await?;
+        writer.write(&data).await.map_err(AssetIoError::from)
+    }
+
+    pub async fn remove_artifact(&self, id: ErasedId) -> Result<(), AssetIoError> {
+        let path = self.get_artifact_path(id);
+        self.fs.remove(&path).await
+    }
+
+    pub async fn load_library(&self) -> Result<AssetLibrary, AssetIoError> {
+        let mut reader = self.fs.reader(&self.library).await?;
+        let mut buf = vec![];
+        AsyncReader::read_to_end(&mut reader, &mut buf).await?;
+
+        deserialize(&buf)
+    }
+
+    pub async fn save_library(&self, library: &AssetLibrary) -> Result<usize, AssetIoError> {
+        let data = serialize(library)?;
+        let mut writer = self.fs.writer(&self.library).await?;
+        writer.write(&data).await.map_err(AssetIoError::from)
+    }
 }

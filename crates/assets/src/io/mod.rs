@@ -70,8 +70,14 @@ impl From<ron::error::SpannedError> for AssetIoError {
 pub type BoxedFuture<'a, T, E = AssetIoError> = Box<dyn Future<Output = Result<T, E>> + 'a>;
 pub type AssetFuture<'a, T, E = AssetIoError> = Pin<BoxedFuture<'a, T, E>>;
 
-pub trait AyncReader: AsyncRead + Send + Sync + Unpin {
+pub trait AsyncReader: AsyncRead + Send + Sync + Unpin {
     fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> AssetFuture<'a, usize>;
+}
+
+impl AsyncReader for Box<dyn AsyncReader> {
+    fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> AssetFuture<'a, usize> {
+        self.as_mut().read_to_end(buf)
+    }
 }
 
 pub trait AsyncWriter: AsyncWrite + Send + Sync + Unpin {}
@@ -81,7 +87,7 @@ pub trait PathStream: Stream<Item = PathBuf> + Send + Unpin {}
 impl<T: Stream<Item = PathBuf> + Send + Unpin> PathStream for T {}
 
 pub trait FileSystem: Send + Sync + 'static {
-    type Reader: AyncReader;
+    type Reader: AsyncReader;
     type Writer: AsyncWriter;
 
     fn root(&self) -> &Path;
@@ -102,7 +108,7 @@ pub trait FileSystem: Send + Sync + 'static {
 
 pub trait ErasedFileSystem: downcast_rs::Downcast + Send + Sync + 'static {
     fn root(&self) -> &Path;
-    fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AyncReader>>;
+    fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AsyncReader>>;
     fn read_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn PathStream>>;
     fn is_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool>;
     fn writer<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AsyncWriter>>;
@@ -119,10 +125,10 @@ impl<T: FileSystem> ErasedFileSystem for T {
         FileSystem::root(self)
     }
 
-    fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AyncReader>> {
+    fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AsyncReader>> {
         Box::pin(async {
             let reader = self.reader(path).await?;
-            Ok(Box::new(reader) as Box<dyn AyncReader>)
+            Ok(Box::new(reader) as Box<dyn AsyncReader>)
         })
     }
 

@@ -1,5 +1,5 @@
 use super::{
-    AssetFuture, AssetIoError, AsyncWriter, AyncReader, ErasedFileSystem, FileSystem, PathExt,
+    AssetFuture, AssetIoError, AsyncWriter, AsyncReader, ErasedFileSystem, FileSystem, PathExt,
     PathStream,
 };
 use crate::asset::{AssetMetadata, Settings};
@@ -213,7 +213,7 @@ impl AssetSource {
         self.io.as_ref()
     }
 
-    pub fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AyncReader>> {
+    pub fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AsyncReader>> {
         self.io.reader(path)
     }
 

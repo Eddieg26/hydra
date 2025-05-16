@@ -1,7 +1,7 @@
 use crate::{
     asset::{Asset, AssetMetadata, ErasedId, Settings},
     io::{
-        AyncReader, AsyncWriter, BoxedFuture, deserialize,
+        AsyncReader, AsyncWriter, BoxedFuture, deserialize, serialize,
         source::{AssetPath, AssetSource},
     },
 };
@@ -34,7 +34,7 @@ pub trait AssetImporter: Send + Sync + 'static {
 
     fn import(
         ctx: &mut ImportContext,
-        reader: &mut dyn AyncReader,
+        reader: &mut dyn AsyncReader,
         metadata: &AssetMetadata<Self::Settings>,
     ) -> impl Future<Output = Result<Self::Asset, Self::Error>>;
 
@@ -58,9 +58,9 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub struct ErasedImporter {
     import: for<'a> fn(
         &'a mut ImportContext,
-        &'a mut dyn AyncReader,
+        &'a mut dyn AsyncReader,
         &'a Box<dyn DynMetadata>,
-    ) -> BoxedFuture<'a, ImportedAsset, BoxedError>,
+    ) -> BoxedFuture<'a, Vec<u8>, BoxedError>,
     deserialize_metadata: fn(&[u8]) -> Result<Box<dyn DynMetadata>, BoxedError>,
     default_metadata: fn() -> Box<dyn DynMetadata>,
     type_id: fn() -> TypeId,
@@ -79,12 +79,16 @@ impl ErasedImporter {
                         .downcast_ref::<AssetMetadata<I::Settings>>()
                         .expect("AssetMetadata type mismatch");
 
-                    match <I as AssetImporter>::import(ctx, reader, metadata).await {
-                        Ok(asset) => Ok(ImportedAsset::new(asset)),
+                    let asset = match <I as AssetImporter>::import(ctx, reader, metadata).await {
+                        Ok(asset) => serialize(&asset).map_err(|e| Box::new(e) as BoxedError)?,
                         Err(error) => {
-                            Err(Box::new(error) as Box<dyn std::error::Error + Send + Sync>)
+                            return Err(Box::new(error) as BoxedError);
                         }
-                    }
+                    };
+
+                    let metadata = serialize(metadata).map_err(|e| Box::new(e) as BoxedError)?;
+
+                    Ok(vec![])
                 };
 
                 Box::new(f)
@@ -104,9 +108,9 @@ impl ErasedImporter {
     pub fn import<'a>(
         &'a self,
         ctx: &'a mut ImportContext<'a>,
-        reader: &'a mut dyn AyncReader,
+        reader: &'a mut dyn AsyncReader,
         metadata: &'a Box<dyn DynMetadata>,
-    ) -> BoxedFuture<'a, ImportedAsset, BoxedError> {
+    ) -> BoxedFuture<'a, Vec<u8>, BoxedError> {
         (self.import)(ctx, reader, metadata)
     }
 

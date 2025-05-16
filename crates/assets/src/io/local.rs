@@ -1,9 +1,9 @@
-use super::{AssetIoError, AyncReader, AsyncWriter, FileSystem, PathExt, PathStream};
+use super::{AssetIoError, AsyncReader, AsyncWriter, FileSystem, PathExt, PathStream};
 use futures::AsyncReadExt;
 use smol::{fs::File, stream::StreamExt};
 use std::path::Path;
 
-impl AyncReader for File {
+impl AsyncReader for File {
     fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> super::AssetFuture<'a, usize> {
         Box::pin(async move {
             AsyncReadExt::read_to_end(self, buf)
