@@ -199,6 +199,10 @@ impl<N> ImmutableIndexDag<N> {
         &self.topology
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = &N> {
+        self.topology.iter().map(|i| &self.nodes[*i])
+    }
+
     pub fn len(&self) -> usize {
         self.nodes.len()
     }

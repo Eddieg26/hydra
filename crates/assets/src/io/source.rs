@@ -1,5 +1,5 @@
 use super::{
-    AssetFuture, AssetIoError, AsyncWriter, AsyncReader, ErasedFileSystem, FileSystem, PathExt,
+    AssetFuture, AssetIoError, AsyncReader, AsyncWriter, ErasedFileSystem, FileSystem, PathExt,
     PathStream,
 };
 use crate::asset::{AssetMetadata, Settings};
@@ -57,7 +57,7 @@ impl<'a> AssetPath<'a> {
         }
     }
 
-    pub fn source(&self) -> &SourceName {
+    pub fn source(&self) -> &SourceName<'a> {
         &self.source
     }
 
@@ -126,6 +126,14 @@ impl<'a> AssetPath<'a> {
             name: name.map(|name| name.into_boxed_str()),
         }
     }
+
+    pub fn into_static(self) -> AssetPath<'static> {
+        AssetPath {
+            source: self.source.into_owned(),
+            path: self.path,
+            name: self.name,
+        }
+    }
 }
 
 impl From<String> for AssetPath<'static> {
@@ -181,8 +189,15 @@ pub enum SourceName<'a> {
 impl<'a> SourceName<'a> {
     pub fn as_bytes(&self) -> &[u8] {
         match self {
-            SourceName::Default => b"default",
-            SourceName::Name(name) => name.as_bytes(),
+            Self::Default => b"default",
+            Self::Name(name) => name.as_bytes(),
+        }
+    }
+
+    pub fn into_owned(&self) -> SourceName<'static> {
+        match self {
+            Self::Default => SourceName::Default,
+            Self::Name(cow) => SourceName::Name(Cow::Owned(cow.to_string())),
         }
     }
 }
@@ -196,6 +211,12 @@ impl From<String> for SourceName<'static> {
 impl<'a> From<&'a str> for SourceName<'a> {
     fn from(name: &'a str) -> Self {
         SourceName::Name(name.into())
+    }
+}
+
+impl std::fmt::Display for SourceName<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
     }
 }
 
@@ -290,11 +311,11 @@ impl AssetSource {
     pub async fn save_metadata<S: Settings + Serialize>(
         &self,
         path: &Path,
-        settings: &AssetMetadata<S>,
+        metadata: &AssetMetadata<S>,
     ) -> Result<String, AssetIoError> {
         let meta_path = Self::metadata_path(path);
         let mut writer = self.writer(&meta_path).await?;
-        let content = ron::to_string(settings).map_err(AssetIoError::from)?;
+        let content = ron::to_string(metadata).map_err(AssetIoError::from)?;
 
         use futures::AsyncWriteExt;
         writer.write(content.as_bytes()).await?;
@@ -315,8 +336,8 @@ impl AssetSources {
         }
     }
 
-    pub fn add<I: FileSystem>(&mut self, name: SourceName<'static>, io: I) {
-        self.sources.insert(name, AssetSource::new(io));
+    pub fn add<F: FileSystem>(&mut self, name: SourceName<'static>, fs: F) {
+        self.sources.insert(name, AssetSource::new(fs));
     }
 
     pub fn get(&self, name: &SourceName<'static>) -> Option<&AssetSource> {

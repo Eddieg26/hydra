@@ -6,6 +6,48 @@ pub trait Command: Sized + Send + 'static {
     fn execute(self, world: &mut World);
 }
 
+#[repr(C, packed)]
+struct Packed<C: Command> {
+    execute: ExecuteCommand,
+    command: C,
+}
+
+impl<C: Command> Packed<C> {
+    pub fn new(command: C) -> Self {
+        Self {
+            execute: |bytes, world| {
+                let command = unsafe { std::ptr::read::<C>(bytes.as_ptr() as *const C) };
+                command.execute(world);
+
+                std::mem::size_of::<C>()
+            },
+            command,
+        }
+    }
+}
+
+pub struct RawCommand(Vec<u8>);
+
+impl RawCommand {
+    pub fn new<C: Command>(command: C) -> Self {
+        let mut data = vec![0; std::mem::size_of::<Packed::<C>>()];
+
+        unsafe {
+            data.as_mut_ptr()
+                .cast::<Packed<C>>()
+                .write_unaligned(Packed::new(command));
+        };
+
+        Self(data)
+    }
+}
+
+impl<C: Command> From<C> for RawCommand {
+    fn from(command: C) -> Self {
+        Self::new(command)
+    }
+}
+
 impl<F: FnOnce(&mut World) + Send + 'static> Command for F {
     fn execute(self, world: &mut World) {
         self(world)
@@ -41,38 +83,26 @@ impl CommandBuffer {
     }
 
     pub fn add<C: Command>(&mut self, command: C) {
-        #[repr(C, packed)]
-        struct RawCommand<C: Command> {
-            execute: ExecuteCommand,
-            command: C,
-        }
-
-        impl<C: Command> RawCommand<C> {
-            pub fn new(command: C) -> Self {
-                Self {
-                    execute: |bytes, world| {
-                        let command = unsafe { std::ptr::read::<C>(bytes.as_ptr() as *const C) };
-                        command.execute(world);
-
-                        std::mem::size_of::<C>()
-                    },
-                    command,
-                }
-            }
-        }
-
         unsafe {
             let offset = self.buffer.len();
-            self.buffer.reserve(std::mem::size_of::<RawCommand<C>>());
+            self.buffer.reserve(std::mem::size_of::<Packed<C>>());
 
             let ptr = self.buffer.as_mut_ptr().add(offset);
 
-            ptr.cast::<RawCommand<C>>()
-                .write_unaligned(RawCommand::new(command));
+            ptr.cast::<Packed<C>>()
+                .write_unaligned(Packed::new(command));
 
             self.buffer
-                .set_len(offset + std::mem::size_of::<RawCommand<C>>());
+                .set_len(offset + std::mem::size_of::<Packed<C>>());
         };
+    }
+
+    pub fn extend(&mut self, commands: CommandBuffer) {
+        self.buffer.extend(commands.buffer);
+    }
+
+    pub unsafe fn add_raw(&mut self, command: RawCommand) {
+        self.buffer.extend(command.0);
     }
 
     pub fn execute(&mut self, world: &mut World) {

@@ -15,6 +15,12 @@ pub mod local;
 pub mod source;
 pub mod vfs;
 
+pub use cache::*;
+pub use embedded::*;
+pub use local::*;
+pub use source::*;
+pub use vfs::*;
+
 #[derive(Clone, Error, Debug)]
 pub enum AssetIoError {
     #[error("Path not found: {0}")]
@@ -36,6 +42,12 @@ impl From<std::io::Error> for AssetIoError {
 impl From<std::io::ErrorKind> for AssetIoError {
     fn from(value: std::io::ErrorKind) -> Self {
         Self::Io(Arc::new(std::io::Error::from(value)))
+    }
+}
+
+impl From<&Path> for AssetIoError {
+    fn from(value: &Path) -> Self {
+        Self::NotFound(value.to_path_buf())
     }
 }
 

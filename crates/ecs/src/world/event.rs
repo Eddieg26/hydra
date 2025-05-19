@@ -45,6 +45,14 @@ impl<E: Event> Events<E> {
         self.read = std::mem::take(&mut self.write);
     }
 
+    pub fn writer(&mut self) -> EventWriter<E> {
+        EventWriter::new(&mut self.write)
+    }
+
+    pub fn reader(&self) -> EventReader<E> {
+        EventReader::new(self)
+    }
+
     pub fn entity(&self, entity: Entity) -> std::slice::Iter<'_, usize> {
         self.read
             .entities

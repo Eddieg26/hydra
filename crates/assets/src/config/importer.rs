@@ -1,16 +1,70 @@
+use super::BoxedError;
 use crate::{
-    asset::{Asset, AssetMetadata, ErasedId, Settings},
+    asset::{Asset, AssetMetadata, AssetType, ErasedId, Settings},
     io::{
-        AsyncReader, AsyncWriter, BoxedFuture, deserialize, serialize,
-        source::{AssetPath, AssetSource},
+        Artifact, ArtifactMeta, AssetFuture, AssetIoError, AssetPath, AssetSource, AsyncReader,
+        BoxedFuture, ImportMeta, PathExt, deserialize, serialize,
     },
 };
 use serde::{Deserialize, Serialize};
-use std::any::TypeId;
+use std::{
+    any::TypeId,
+    collections::HashMap,
+    hash::Hash,
+    path::{Path, PathBuf},
+};
 
 pub struct ImportContext<'a> {
-    path: &'a AssetPath<'a>,
+    ty: AssetType,
     source: &'a AssetSource,
+    path: &'a AssetPath<'a>,
+    metadata_path: PathBuf,
+    processor: Option<u32>,
+}
+
+impl<'a> ImportContext<'a> {
+    pub fn new(ty: AssetType, path: &'a AssetPath<'a>, source: &'a AssetSource) -> Self {
+        let metadata_path = path.path().append_ext("meta");
+        Self {
+            ty,
+            path,
+            source,
+            metadata_path,
+            processor: None,
+        }
+    }
+
+    pub fn ty(&self) -> AssetType {
+        self.ty
+    }
+
+    pub fn path(&self) -> &AssetPath {
+        &self.path
+    }
+
+    pub fn metadata_path(&self) -> &Path {
+        &self.metadata_path
+    }
+
+    pub fn set_processor(&mut self, processor: u32) {
+        self.processor = Some(processor)
+    }
+
+    pub async fn read_asset(&self) -> Result<Vec<u8>, AssetIoError> {
+        let mut buf = vec![];
+        let mut reader = self.source.reader(self.path.path()).await?;
+        AsyncReader::read_to_end(&mut reader, &mut buf)
+            .await
+            .map(|_| buf)
+    }
+
+    pub async fn read_metadata(&self) -> Result<Vec<u8>, AssetIoError> {
+        let mut buf = vec![];
+        let mut reader = self.source.reader(&self.metadata_path).await?;
+        AsyncReader::read_to_end(&mut reader, &mut buf)
+            .await
+            .map(|_| buf)
+    }
 }
 
 pub trait DynMetadata: downcast_rs::Downcast + Send + Sync + 'static {
@@ -43,29 +97,17 @@ pub trait AssetImporter: Send + Sync + 'static {
     }
 }
 
-pub struct ImportedAsset {
-    data: Vec<u8>,
-}
-
-impl ImportedAsset {
-    pub fn new<A: Asset>(asset: A) -> Self {
-        todo!()
-    }
-}
-
-pub type BoxedError = Box<dyn std::error::Error + Send + Sync + 'static>;
-
+#[derive(Clone, Copy)]
 pub struct ErasedImporter {
     import: for<'a> fn(
         &'a mut ImportContext,
         &'a mut dyn AsyncReader,
         &'a Box<dyn DynMetadata>,
-    ) -> BoxedFuture<'a, Vec<u8>, BoxedError>,
-    deserialize_metadata: fn(&[u8]) -> Result<Box<dyn DynMetadata>, BoxedError>,
+    ) -> AssetFuture<'a, Artifact, BoxedError>,
+    deserialize_metadata: fn(&[u8]) -> Result<Box<dyn DynMetadata>, AssetIoError>,
     default_metadata: fn() -> Box<dyn DynMetadata>,
     type_id: fn() -> TypeId,
     asset_type_id: fn() -> TypeId,
-    asset_name: fn() -> &'static str,
     extensions: fn() -> &'static [&'static str],
 }
 
@@ -79,28 +121,43 @@ impl ErasedImporter {
                         .downcast_ref::<AssetMetadata<I::Settings>>()
                         .expect("AssetMetadata type mismatch");
 
-                    let asset = match <I as AssetImporter>::import(ctx, reader, metadata).await {
-                        Ok(asset) => serialize(&asset).map_err(|e| Box::new(e) as BoxedError)?,
-                        Err(error) => {
-                            return Err(Box::new(error) as BoxedError);
-                        }
+                    let asset = <I as AssetImporter>::import(ctx, reader, metadata)
+                        .await
+                        .map_err(|e| Box::new(e) as BoxedError)?;
+
+                    let checksum = {
+                        let mut hasher = crc32fast::Hasher::new();
+                        let mut data = ctx.read_asset().await?;
+                        let metabytes =
+                            serialize(metadata).map_err(|e| Box::new(e) as BoxedError)?;
+                        data.extend(metabytes);
+                        data.hash(&mut hasher);
+                        hasher.finalize()
                     };
 
-                    let metadata = serialize(metadata).map_err(|e| Box::new(e) as BoxedError)?;
+                    let mut dependencies = vec![];
+                    asset.dependencies(&mut dependencies);
 
-                    Ok(vec![])
+                    let meta = ArtifactMeta {
+                        id: metadata.id,
+                        ty: ctx.ty,
+                        path: ctx.path.clone().into_static(),
+                        import: ImportMeta::new(ctx.processor, checksum),
+                        dependencies,
+                    };
+
+                    Artifact::new(&asset, meta).map_err(|e| Box::new(e) as BoxedError)
                 };
 
-                Box::new(f)
+                Box::pin(f)
             },
-            deserialize_metadata: |data| match deserialize::<AssetMetadata<I::Settings>>(data) {
-                Ok(metadata) => Ok(Box::new(metadata)),
-                Err(error) => Err(Box::new(error)),
+            deserialize_metadata: |data| {
+                deserialize::<AssetMetadata<I::Settings>>(data)
+                    .map(|metadata| Box::new(metadata) as Box<dyn DynMetadata>)
             },
             default_metadata: || Box::new(AssetMetadata::<I::Settings>::default()),
             type_id: || TypeId::of::<I::Asset>(),
             asset_type_id: || TypeId::of::<I>(),
-            asset_name: || ecs::ext::short_type_name::<I::Asset>(),
             extensions: <I as AssetImporter>::extensions,
         }
     }
@@ -110,11 +167,11 @@ impl ErasedImporter {
         ctx: &'a mut ImportContext<'a>,
         reader: &'a mut dyn AsyncReader,
         metadata: &'a Box<dyn DynMetadata>,
-    ) -> BoxedFuture<'a, Vec<u8>, BoxedError> {
+    ) -> AssetFuture<'a, Artifact, BoxedError> {
         (self.import)(ctx, reader, metadata)
     }
 
-    pub fn deserialize_metadata(&self, data: &[u8]) -> Result<Box<dyn DynMetadata>, BoxedError> {
+    pub fn deserialize_metadata(&self, data: &[u8]) -> Result<Box<dyn DynMetadata>, AssetIoError> {
         (self.deserialize_metadata)(data)
     }
 
@@ -130,19 +187,55 @@ impl ErasedImporter {
         (self.type_id)()
     }
 
-    pub fn asset_name(&self) -> &'static str {
-        (self.asset_name)()
-    }
-
     pub fn extensions(&self) -> &'static [&'static str] {
         (self.extensions)()
     }
 }
 
-pub trait AssetProcessor: Send + Sync + 'static {
-    type Importer: AssetImporter;
+pub struct AssetImporters {
+    importers: Vec<ErasedImporter>,
+    ty_map: HashMap<TypeId, Vec<usize>>,
+    ext_map: HashMap<&'static str, usize>,
+}
 
-    type Error: std::error::Error + Send + Sync + 'static;
+impl AssetImporters {
+    pub fn new() -> Self {
+        Self {
+            importers: Vec::new(),
+            ext_map: HashMap::new(),
+            ty_map: HashMap::new(),
+        }
+    }
 
-    fn process(writer: &mut dyn AsyncWriter);
+    pub fn get(&self, ty: TypeId) -> Option<Vec<&ErasedImporter>> {
+        self.ty_map.get(&ty).map(|indicies| {
+            indicies
+                .iter()
+                .map(|i| &self.importers[*i])
+                .collect::<Vec<_>>()
+        })
+    }
+
+    pub fn get_by_ext(&self, ext: &str) -> Option<&ErasedImporter> {
+        self.ext_map.get(ext).map(|index| &self.importers[*index])
+    }
+
+    pub fn add<I: AssetImporter>(&mut self) {
+        let ty = TypeId::of::<I>();
+        let asset_ty = TypeId::of::<I::Asset>();
+        if !self.contains(ty, asset_ty) {
+            let index = self.importers.len();
+            self.importers.push(ErasedImporter::new::<I>());
+            self.ty_map.entry(asset_ty).or_default().push(index);
+            for ext in I::extensions() {
+                self.ext_map.insert(ext, index);
+            }
+        }
+    }
+
+    pub fn contains(&self, ty: TypeId, asset_ty: TypeId) -> bool {
+        self.ty_map
+            .get(&asset_ty)
+            .is_some_and(|importers| importers.iter().any(|i| self.importers[*i].type_id() == ty))
+    }
 }

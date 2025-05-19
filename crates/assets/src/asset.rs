@@ -1,10 +1,62 @@
+use crate::io::source::AssetPath;
 use ecs::{Resource, SparseIndex};
 use serde::{Deserialize, Serialize, de::Visitor, ser::SerializeStruct};
-use std::{collections::HashMap, hash::Hash};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+    path::PathBuf,
+};
 
-pub trait Asset: Send + Sync + 'static {}
+pub trait AssetDependencies: Send + Sync {
+    fn add(&mut self, id: impl Into<ErasedId>);
+}
+
+impl AssetDependencies for Vec<ErasedId> {
+    fn add(&mut self, id: impl Into<ErasedId>) {
+        self.push(id.into());
+    }
+}
+
+impl<A: Asset> AssetDependencies for Vec<AssetId<A>> {
+    fn add(&mut self, id: impl Into<ErasedId>) {
+        self.push(AssetId::<A>::from(id.into()));
+    }
+}
+
+impl AssetDependencies for HashSet<ErasedId> {
+    fn add(&mut self, id: impl Into<ErasedId>) {
+        self.insert(id.into());
+    }
+}
+
+pub trait Asset: Send + Sync + 'static {
+    fn dependencies(&self, _dependencies: &mut impl AssetDependencies) {}
+}
+
+pub enum AssetDependency {
+    Import(ErasedId),
+    Load(ErasedId),
+}
 
 pub trait Settings: Default + Send + Sync + 'static {}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DefaultSettings {
+    pub created: u64,
+}
+
+impl Default for DefaultSettings {
+    fn default() -> Self {
+        let created = match std::time::SystemTime::now().elapsed() {
+            Ok(elapsed) => elapsed.as_secs(),
+            Err(_) => 0,
+        };
+
+        Self { created }
+    }
+}
+
+impl Settings for DefaultSettings {}
 
 pub struct AssetId<A: Asset>(uuid::Uuid, std::marker::PhantomData<A>);
 impl<A: Asset> AssetId<A> {
@@ -268,3 +320,41 @@ impl<A: Asset> Assets<A> {
 }
 
 impl<A: Asset> Resource for Assets<A> {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LoadPath<'a> {
+    Id(ErasedId),
+    Path(AssetPath<'a>),
+}
+
+impl<I: Into<ErasedId>> From<I> for LoadPath<'static> {
+    fn from(value: I) -> Self {
+        LoadPath::Id(value.into())
+    }
+}
+
+impl<'a> From<AssetPath<'a>> for LoadPath<'a> {
+    fn from(value: AssetPath<'a>) -> Self {
+        LoadPath::Path(value)
+    }
+}
+
+impl<'a> From<&'a str> for LoadPath<'a> {
+    fn from(value: &'a str) -> Self {
+        LoadPath::Path(AssetPath::from_str(value))
+    }
+}
+
+impl From<String> for LoadPath<'static> {
+    fn from(value: String) -> Self {
+        LoadPath::Path(AssetPath::from_string(value))
+    }
+}
+
+#[derive(Default, Clone, Serialize, Deserialize)]
+pub struct Folder {
+    pub children: Vec<PathBuf>,
+}
+
+impl Asset for Folder {}
+impl Settings for Folder {}
