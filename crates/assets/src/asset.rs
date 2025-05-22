@@ -172,6 +172,10 @@ impl From<uuid::Uuid> for ErasedId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AssetType(u32);
+impl AssetType {
+    pub const NONE: AssetType = AssetType(0);
+}
+
 impl SparseIndex for AssetType {
     fn to_usize(self) -> usize {
         self.0 as usize

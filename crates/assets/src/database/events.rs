@@ -6,8 +6,25 @@ use crate::{
     },
 };
 use ecs::{Command, Event, Events, IndexDag, core::ImmutableIndexDag};
-use smol::{channel::Sender, lock::RwLock, stream::StreamExt};
-use std::{collections::HashMap, hash::Hash, sync::Arc};
+use smol::{
+    block_on,
+    channel::Sender,
+    lock::{Mutex, RwLock},
+    stream::StreamExt,
+};
+use std::{
+    collections::HashMap,
+    hash::Hash,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
+
+use super::{
+    AssetDatabase,
+    state::{AssetStates, LoadState},
+};
 
 #[derive(Default)]
 pub struct ImportInfo {
@@ -72,17 +89,69 @@ impl From<ImportError> for DatabaseEvent {
     }
 }
 
+pub trait DatabaseCommand: Send + Sync + 'static {
+    fn execute(&self, database: AssetDatabase) -> impl Future<Output = ()>;
+}
+
+pub type BoxedCommand = Box<dyn Fn(AssetDatabase) + Send>;
+
+#[derive(Clone, Default)]
+pub struct DatabaseCommands {
+    commands: Arc<Mutex<Vec<BoxedCommand>>>,
+    running: Arc<AtomicBool>,
+}
+
+impl DatabaseCommands {
+    pub fn execute<C: DatabaseCommand>(&self, command: C, database: AssetDatabase) {
+        self.push(command);
+        self.run(database);
+    }
+
+    fn run(&self, database: AssetDatabase) {
+        if self.running.swap(true, Ordering::SeqCst) {
+            return;
+        }
+
+        let commands = self.clone();
+
+        smol::spawn(async move {
+            while let Some(command) = commands.pop() {
+                command(database.clone());
+            }
+
+            commands.running.swap(false, Ordering::SeqCst);
+        })
+        .detach();
+    }
+
+    fn push<C: DatabaseCommand>(&self, command: C) {
+        let mut commands = self.commands.lock_blocking();
+        let command = move |database| block_on(command.execute(database));
+
+        commands.push(Box::new(command));
+    }
+
+    fn pop(&self) -> Option<BoxedCommand> {
+        let mut commands = self.commands.lock_blocking();
+
+        commands.pop()
+    }
+}
+
 pub struct ImportAssets;
 
-impl ImportAssets {
-    pub async fn run(
-        &self,
-        config: Arc<AssetConfig>,
-        library: Arc<RwLock<AssetLibrary>>,
-        events: Sender<DatabaseEvent>,
-    ) {
+impl DatabaseCommand for ImportAssets {
+    async fn execute(&self, database: AssetDatabase) {
+        let AssetDatabase {
+            config,
+            library,
+            sender,
+            states,
+            ..
+        } = database;
+
         if let Err(error) = config.cache().create_temp().await {
-            let _ = events.send(DatabaseEvent::ImportError(ImportError::Unknown(error)));
+            let _ = sender.send(DatabaseEvent::ImportError(ImportError::Unknown(error)));
             return;
         }
 
@@ -93,7 +162,7 @@ impl ImportAssets {
 
             for (name, source) in config.sources().iter() {
                 match self
-                    .import_source(name, source, &config, &library, &events)
+                    .import_source(name, source, &config, &library, &sender)
                     .await
                 {
                     Ok(info) => {
@@ -106,7 +175,7 @@ impl ImportAssets {
                             error,
                         };
 
-                        let _ = events.send(error.into()).await;
+                        let _ = sender.send(error.into()).await;
                     }
                 }
             }
@@ -115,19 +184,22 @@ impl ImportAssets {
                 break;
             }
 
-            self.remove_assets(removed, &config, &mut library, &events)
+            self.remove_assets(removed, &config, &mut library, &sender)
                 .await;
 
             let process_list = self
-                .import_assets(imported, &config, &mut library, &events)
+                .import_assets(imported, &config, &mut library, &sender)
                 .await;
 
-            self.process_assets(process_list, &config, &events).await;
+            self.process_assets(process_list, &config, &sender, states.clone())
+                .await;
         }
 
         let _ = config.cache().delete_temp().await;
     }
+}
 
+impl ImportAssets {
     pub async fn import_source<'a>(
         &'a self,
         name: &'a SourceName<'a>,
@@ -333,6 +405,7 @@ impl ImportAssets {
         graph: ImmutableIndexDag<ErasedId>,
         config: &'a AssetConfig,
         events: &'a Sender<DatabaseEvent>,
+        states: Arc<RwLock<AssetStates>>,
     ) {
         for id in graph.iter().copied() {
             let mut artifact = match config.cache().get_temp_artifact(id).await {
@@ -371,7 +444,10 @@ impl ImportAssets {
 
             if let Err(error) = config.cache().save_artifact(&artifact).await {
                 let _ = events.send(ImportError::SaveAsset(error).into()).await;
-            } else {
+            } else if matches!(
+                states.read().await.get_load_state(id),
+                LoadState::Loaded | LoadState::Failed
+            ) {
                 let _ = events.send(DatabaseEvent::ReloadAsset(id));
             }
         }
@@ -443,5 +519,11 @@ impl ImportAssets {
         }
 
         hasher.finalize()
+    }
+}
+
+impl Command for ImportAssets {
+    fn execute(self, world: &mut ecs::World) {
+        world.resource::<AssetDatabase>().execute(self);
     }
 }

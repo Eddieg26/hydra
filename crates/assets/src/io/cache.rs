@@ -10,7 +10,7 @@ use std::{
     sync::Arc,
 };
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct AssetLibrary {
     id_map: HashMap<AssetPath<'static>, ErasedId>,
     path_map: HashMap<ErasedId, AssetPath<'static>>,

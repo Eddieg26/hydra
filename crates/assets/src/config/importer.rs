@@ -3,7 +3,7 @@ use crate::{
     asset::{Asset, AssetMetadata, AssetType, ErasedId, Settings},
     io::{
         Artifact, ArtifactMeta, AssetFuture, AssetIoError, AssetPath, AssetSource, AsyncReader,
-        BoxedFuture, ImportMeta, PathExt, deserialize, serialize,
+        ImportMeta, PathExt, deserialize, serialize,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -115,7 +115,7 @@ impl ErasedImporter {
     pub fn new<I: AssetImporter>() -> Self {
         Self {
             import: |ctx, reader, metadata| {
-                let f = async move {
+                let f = async {
                     let metadata = metadata
                         .as_any()
                         .downcast_ref::<AssetMetadata<I::Settings>>()
