@@ -166,15 +166,15 @@ impl AssetStates {
         let mut state = self.states.remove(&id)?;
         state.state = LoadState::Unloaded;
 
-        for dep in &state.dependents {
-            if let Some(state) = self.states.get_mut(dep) {
-                state.dependencies.remove(&id);
-            }
-        }
-
         for dep in &state.dependencies {
             if let Some(state) = self.states.get_mut(dep) {
                 state.dependents.remove(&id);
+            }
+        }
+
+        for dep in &state.dependents {
+            if let Some(state) = self.states.get_mut(dep) {
+                state.dependencies.remove(&id);
             }
         }
 

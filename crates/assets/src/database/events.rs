@@ -1,3 +1,7 @@
+use super::{
+    AssetDatabase,
+    state::{AssetStates, LoadState},
+};
 use crate::{
     asset::{AssetMetadata, ErasedId, Folder},
     config::{AssetConfig, BoxedError, importer::ImportContext, processor::ProcessContext},
@@ -19,11 +23,6 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-};
-
-use super::{
-    AssetDatabase,
-    state::{AssetStates, LoadState},
 };
 
 #[derive(Default)]

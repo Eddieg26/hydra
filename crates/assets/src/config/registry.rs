@@ -1,15 +1,17 @@
-use crate::asset::{Asset, AssetType};
+use crate::asset::{Asset, AssetAction, AssetType};
 use ecs::{SparseIndex, ext};
 use std::{any::TypeId, collections::HashMap, ops::Index};
 
 pub struct AssetMeta {
-    name: &'static str,
+    pub name: &'static str,
+    pub dependency_unload_action: Option<AssetAction>,
 }
 
 impl AssetMeta {
     pub fn new<A: Asset>() -> Self {
         Self {
             name: ext::short_type_name::<A>(),
+            dependency_unload_action: A::DEPENDENCY_UNLOAD_ACTION,
         }
     }
 }

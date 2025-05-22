@@ -29,7 +29,15 @@ impl AssetDependencies for HashSet<ErasedId> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssetAction {
+    Reload,
+    Unload,
+}
+
 pub trait Asset: Send + Sync + 'static {
+    const DEPENDENCY_UNLOAD_ACTION: Option<AssetAction> = None;
+
     fn dependencies(&self, _dependencies: &mut impl AssetDependencies) {}
 }
 
