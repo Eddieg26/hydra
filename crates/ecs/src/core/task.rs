@@ -136,10 +136,12 @@ pub mod inner {
     use concurrent_queue::ConcurrentQueue;
     use smol::future::FutureExt;
     use std::{
+        any::Any,
         num::NonZeroUsize,
         ops::{Deref, Range},
-        panic::AssertUnwindSafe,
+        panic::{AssertUnwindSafe, UnwindSafe},
         sync::Arc,
+        task,
         thread::JoinHandle,
     };
 
@@ -307,7 +309,7 @@ pub mod inner {
 
         pub fn scope<'scope, 'env: 'scope, T: Send + 'static>(
             &'scope self,
-            f: impl FnOnce(&Scope<'scope, 'env, T>),
+            f: impl FnOnce(Scope<'scope, 'env, T>),
         ) -> Vec<T> {
             use std::mem::transmute;
 
@@ -315,23 +317,43 @@ pub mod inner {
                 unsafe { transmute(self.executor.deref()) };
 
             let local_executor = Self::with_local(|local| {
-                let local_executor: &'scope smol::LocalExecutor<'scope> =
-                    unsafe { transmute(local) };
+                let local_executor: &'scope smol::Executor<'scope> = unsafe { transmute(local) };
                 local_executor
             });
 
-            let scope = Scope::<T> {
-                executor,
-                local_executor,
-                tasks: ConcurrentQueue::unbounded(),
-                _marker: Default::default(),
+            let tasks =
+                ConcurrentQueue::<FallibleTask<Result<T, Box<dyn Any + Send>>>>::unbounded();
+
+            {
+                let tasks: &'scope &ConcurrentQueue<FallibleTask<Result<T, Box<dyn Any + Send>>>> =
+                    unsafe { transmute(&tasks) };
+
+                let scope = Scope::<T> {
+                    executor,
+                    local_executor,
+                    tasks: &tasks,
+                    _marker: Default::default(),
+                };
+
+                f(scope);
             };
 
-            f(&scope);
-
-            if scope.tasks.is_empty() {
+            if tasks.is_empty() {
                 return vec![];
             }
+
+            let values = async {
+                let mut values = Vec::with_capacity(tasks.len());
+                while let Ok(task) = tasks.pop() {
+                    match task.await {
+                        Some(Ok(value)) => values.push(value),
+                        Some(Err(error)) => std::panic::resume_unwind(error),
+                        None => panic!("Task was cancelled"),
+                    }
+                }
+
+                values
+            };
 
             smol::block_on(async {
                 let result = async {
@@ -346,7 +368,7 @@ pub mod inner {
                     }
                 };
 
-                result.or(scope.finish()).await
+                result.or(values).await
             })
         }
 
@@ -370,10 +392,10 @@ pub mod inner {
         }
     }
 
-    pub struct Scope<'scope, 'env: 'scope, T> {
+    pub struct Scope<'scope, 'env: 'scope, T = ()> {
         executor: &'scope smol::Executor<'scope>,
-        local_executor: &'scope smol::LocalExecutor<'scope>,
-        tasks: ConcurrentQueue<FallibleTask<Result<T, Box<dyn std::any::Any + Send>>>>,
+        local_executor: &'scope smol::Executor<'scope>,
+        tasks: &'scope ConcurrentQueue<FallibleTask<Result<T, Box<dyn std::any::Any + Send>>>>,
         _marker: std::marker::PhantomData<&'env mut ()>,
     }
 
@@ -396,17 +418,19 @@ pub mod inner {
             self.tasks.push(task).unwrap();
         }
 
-        async fn finish(self) -> Vec<T> {
-            let mut values = Vec::with_capacity(self.tasks.len());
-            while let Ok(task) = self.tasks.pop() {
-                match task.await {
-                    Some(Ok(value)) => values.push(value),
-                    Some(Err(error)) => std::panic::resume_unwind(error),
-                    None => panic!("Task was cancelled"),
-                }
-            }
+        pub fn execute_local(
+            &self,
+            signal: impl Future<Output = Vec<T>> + Send + UnwindSafe,
+        ) -> Result<Vec<T>, Box<dyn Any + Send + 'static>> {
+            std::panic::catch_unwind(|| {
+                let runner = async {
+                    loop {
+                        self.local_executor.tick().await;
+                    }
+                };
 
-            values
+                smol::block_on(runner.or(signal))
+            })
         }
     }
 
@@ -503,7 +527,7 @@ pub mod inner {
         }
 
         pub fn scoped<'scope, 'env: 'scope, T: Send + 'static>(
-            f: impl FnOnce(&Scope<'scope, 'env, T>),
+            f: impl FnOnce(Scope<'scope, 'env, T>),
         ) -> Vec<T> {
             let pool = SCOPED_TASK_POOL
                 .get()

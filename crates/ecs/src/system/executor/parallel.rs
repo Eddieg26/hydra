@@ -2,16 +2,13 @@ use super::SystemExecutor;
 use crate::{
     core::{
         ImmutableIndexDag, IndexDag,
-        task::{self, Scope, available_parallelism},
+        task::{self, inner::Scope},
     },
     system::SystemCell,
     world::WorldCell,
 };
 use fixedbitset::FixedBitSet;
-use std::sync::{
-    Arc, Mutex, MutexGuard,
-    mpsc::{Sender, channel},
-};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 pub struct ParallelExecutor {
     state: Arc<Mutex<ExecutionState>>,
@@ -55,26 +52,9 @@ impl ParallelExecutor {
 
 impl SystemExecutor for ParallelExecutor {
     fn execute(&self, mut world: WorldCell) {
-        let (sender, receiver) = channel::<ExecutionResult>();
-        let max_task_count = available_parallelism();
-
-        task::scope(max_task_count, |scope| {
-            let ctx = Arc::new(ExecutionContext::new(
-                world,
-                &self.systems,
-                scope,
-                &sender,
-                self.state.clone(),
-            ));
-
+        task::inner::scoped(|scope| {
+            let ctx = ExecutionContext::new(world, &self.systems, scope, self.state.clone());
             ctx.execute();
-
-            for result in receiver.iter() {
-                match result {
-                    ExecutionResult::Run(index) => ctx.run_system(index),
-                    ExecutionResult::Done => break,
-                }
-            }
         });
 
         let state = self.state.lock().unwrap();
@@ -123,24 +103,27 @@ pub enum ExecutionResult {
 pub struct ExecutionContext<'scope, 'env: 'scope> {
     world: WorldCell<'scope>,
     systems: &'scope ImmutableIndexDag<SystemCell>,
-    scope: Scope<'scope, 'env>,
-    sender: &'env Sender<ExecutionResult>,
+    scope: Arc<Scope<'scope, 'env>>,
+    sender: smol::channel::Sender<()>,
+    receiver: smol::channel::Receiver<()>,
     state: Arc<Mutex<ExecutionState>>,
 }
 
 impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
     pub fn new(
         world: WorldCell<'scope>,
-        systems: &'scope ImmutableIndexDag<SystemCell>,
+        systems: &'env ImmutableIndexDag<SystemCell>,
         scope: Scope<'scope, 'env>,
-        sender: &'env Sender<ExecutionResult>,
         state: Arc<Mutex<ExecutionState>>,
     ) -> Self {
+        let (sender, receiver) = smol::channel::bounded(1);
+
         Self {
             world,
             systems,
-            scope,
+            scope: Arc::new(scope),
             sender,
+            receiver,
             state,
         }
     }
@@ -149,7 +132,8 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
         let world = self.world;
         let systems = self.systems;
         let scope = self.scope.clone();
-        let sender = self.sender;
+        let sender = self.sender.clone();
+        let receiver = self.receiver.clone();
         let state = self.state.clone();
 
         Self {
@@ -157,27 +141,35 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
             systems,
             scope,
             sender,
+            receiver,
             state,
         }
     }
 
     fn spawn(&self, index: usize) {
         let scoped = self.scoped();
-        self.scope.spawn(move || scoped.run_system(index));
+        self.scope.spawn(async move { scoped.run_system(index) });
     }
 
     fn spawn_non_send(&self, index: usize) {
-        self.sender.send(ExecutionResult::Run(index)).unwrap();
+        let scoped = self.scoped();
+        self.scope
+            .spawn_local(async move { scoped.run_system(index) });
     }
 
     fn execute(&self) {
         let state = self.state.lock().unwrap();
         self.spawn_systems(state);
+
+        let receiver = self.receiver.clone();
+        let _ = self
+            .scope
+            .execute_local(async { receiver.recv().await.map(|_| vec![]).unwrap() });
     }
 
     fn spawn_systems(&self, mut state: MutexGuard<'_, ExecutionState>) {
         if state.completed.is_full() {
-            let _ = self.sender.send(ExecutionResult::Done);
+            let _ = self.sender.close();
             return;
         }
 
