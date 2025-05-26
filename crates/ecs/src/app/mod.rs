@@ -1,7 +1,7 @@
 use crate::{
     Component, ComponentId, Components, Entities, Event, EventId, EventRegistry, ModeId, Phase,
     Resource, ResourceId, Resources, RunMode, Schedule, Systems, World, WorldMode,
-    core::task::inner::{CpuTaskPool, Task, TaskPoolSettings},
+    core::task::{CpuTaskPool, Task, TaskPoolSettings},
     ext,
     world::{Archetypes, WorldCell},
 };
@@ -286,6 +286,8 @@ impl AppBuilder {
                     panic!("Expected AppConfigKind::Main");
                 };
 
+                task_pool_settings.init_task_pools();
+
                 let main = App::from(config);
                 let sub = secondary
                     .into_values()
@@ -296,20 +298,18 @@ impl AppBuilder {
                     })
                     .collect::<Vec<_>>();
 
-                task_pool_settings.init_task_pools();
-
                 match runner {
                     Some(runner) => runner(Apps::new(main, sub)),
                     None => Self::default_runner(Apps::new(main, sub)),
                 }
             }
             AppType::Sub(config, task_pool_settings) => {
-                let mut sub = Self(AppType::Sub(config, task_pool_settings));
-                sub.build_plugins();
+                let mut builder = Self(AppType::Sub(config, task_pool_settings));
+                builder.build_plugins();
 
-                sub.task_pool_settings().init_task_pools();
+                builder.task_pool_settings().init_task_pools();
 
-                let app = App::from(sub.into_build_info());
+                let app = App::from(builder.into_build_info());
                 Apps::new(app, vec![])
             }
         }

@@ -276,6 +276,10 @@ impl Systems {
             }
         }
     }
+
+    pub fn phases(&self) -> &[PhaseNode] {
+        self.phases.nodes()
+    }
 }
 
 #[allow(unused_imports, dead_code)]

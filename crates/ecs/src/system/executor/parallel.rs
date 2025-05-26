@@ -2,7 +2,7 @@ use super::SystemExecutor;
 use crate::{
     core::{
         ImmutableIndexDag, IndexDag,
-        task::{self, inner::Scope},
+        task::{self, Scope, TaskPool, scope},
     },
     system::SystemCell,
     world::WorldCell,
@@ -33,6 +33,10 @@ impl ParallelExecutor {
             running: 0,
         };
 
+        if !scope::is_initialized() {
+            scope::init(TaskPool::builder().build());
+        }
+
         Self {
             state: Arc::new(Mutex::new(state)),
             systems,
@@ -40,8 +44,7 @@ impl ParallelExecutor {
         }
     }
 
-    fn reset(&self) {
-        let mut state = self.state.lock().unwrap();
+    fn reset(&self, mut state: MutexGuard<'_, ExecutionState>) {
         state.running = 0;
         state.completed.clear();
         state.skipped.clear();
@@ -52,7 +55,7 @@ impl ParallelExecutor {
 
 impl SystemExecutor for ParallelExecutor {
     fn execute(&self, mut world: WorldCell) {
-        task::inner::scoped(|scope| {
+        task::scoped(|scope| {
             let ctx = ExecutionContext::new(world, &self.systems, scope, self.state.clone());
             ctx.execute();
         });
@@ -71,7 +74,7 @@ impl SystemExecutor for ParallelExecutor {
             };
         }
 
-        self.reset();
+        self.reset(state);
     }
 }
 
@@ -104,8 +107,6 @@ pub struct ExecutionContext<'scope, 'env: 'scope> {
     world: WorldCell<'scope>,
     systems: &'scope ImmutableIndexDag<SystemCell>,
     scope: Arc<Scope<'scope, 'env>>,
-    sender: smol::channel::Sender<()>,
-    receiver: smol::channel::Receiver<()>,
     state: Arc<Mutex<ExecutionState>>,
 }
 
@@ -116,14 +117,10 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
         scope: Scope<'scope, 'env>,
         state: Arc<Mutex<ExecutionState>>,
     ) -> Self {
-        let (sender, receiver) = smol::channel::bounded(1);
-
         Self {
             world,
             systems,
             scope: Arc::new(scope),
-            sender,
-            receiver,
             state,
         }
     }
@@ -132,16 +129,12 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
         let world = self.world;
         let systems = self.systems;
         let scope = self.scope.clone();
-        let sender = self.sender.clone();
-        let receiver = self.receiver.clone();
         let state = self.state.clone();
 
         Self {
             world,
             systems,
             scope,
-            sender,
-            receiver,
             state,
         }
     }
@@ -160,16 +153,10 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
     fn execute(&self) {
         let state = self.state.lock().unwrap();
         self.spawn_systems(state);
-
-        let receiver = self.receiver.clone();
-        let _ = self
-            .scope
-            .execute_local(async { receiver.recv().await.map(|_| vec![]).unwrap() });
     }
 
     fn spawn_systems(&self, mut state: MutexGuard<'_, ExecutionState>) {
         if state.completed.is_full() {
-            let _ = self.sender.close();
             return;
         }
 

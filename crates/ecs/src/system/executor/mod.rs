@@ -29,7 +29,10 @@ impl RunMode {
 #[allow(unused_imports, dead_code)]
 mod tests {
     use super::RunMode;
-    use crate::{Phase, Resource, Schedule, World};
+    use crate::{
+        Phase, Resource, Schedule, World,
+        core::task::{TaskPool, scope},
+    };
     use std::time::{Duration, Instant};
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +55,10 @@ mod tests {
 
     pub struct Root;
     impl Phase for Root {}
+
+    fn init_task_pool() {
+        scope::init(TaskPool::builder().build());
+    }
 
     #[test]
     fn test_sequential() {
