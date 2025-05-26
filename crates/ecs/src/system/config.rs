@@ -187,7 +187,9 @@ impl<M, I: IntoSystemConfig<M>> IntoSystemConfigs<M> for I {
 
 pub trait IntoSystemConfigs<M> {
     fn configs(self) -> SystemConfigs;
+
     fn before<Marker>(self, configs: impl IntoSystemConfigs<Marker>) -> SystemConfigs;
+
     fn after<Marker>(self, configs: impl IntoSystemConfigs<Marker>) -> SystemConfigs
     where
         Self: Sized,
@@ -206,6 +208,22 @@ pub trait IntoSystemConfigs<M> {
             }
             SystemConfigs::Configs(mut configs) => {
                 configs.iter_mut().for_each(|c| c.condition = C::evaluate);
+                SystemConfigs::Configs(configs)
+            }
+        }
+    }
+
+    fn non_send(self) -> SystemConfigs
+    where
+        Self: Sized,
+    {
+        match self.configs() {
+            SystemConfigs::Config(mut config) => {
+                config.send = false;
+                SystemConfigs::Config(config)
+            }
+            SystemConfigs::Configs(mut configs) => {
+                configs.iter_mut().for_each(|c| c.send = false);
                 SystemConfigs::Configs(configs)
             }
         }

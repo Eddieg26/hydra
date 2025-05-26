@@ -1,4 +1,4 @@
-use crate::asset::{AssetType, ErasedId};
+use crate::asset::{AssetAction, AssetType, ErasedId};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,6 +17,7 @@ pub struct AssetState {
     dependents: HashSet<ErasedId>,
     loading: HashSet<ErasedId>,
     failed: HashSet<ErasedId>,
+    unload_action: Option<AssetAction>,
 }
 
 impl AssetState {
@@ -33,7 +34,12 @@ impl AssetState {
             dependents: HashSet::new(),
             loading: HashSet::new(),
             failed: HashSet::new(),
+            unload_action: None,
         }
+    }
+
+    pub fn ty(&self) -> AssetType {
+        self.ty
     }
 
     pub fn state(&self) -> LoadState {
@@ -65,6 +71,10 @@ impl AssetState {
             (self.state, self.dependency_state),
             (LoadState::Loaded, LoadState::Loaded | LoadState::Failed)
         )
+    }
+
+    pub fn unload_action(&self) -> Option<AssetAction> {
+        self.unload_action
     }
 
     pub fn update(&mut self) {
@@ -122,11 +132,13 @@ impl AssetStates {
         id: ErasedId,
         ty: AssetType,
         dependencies: Vec<ErasedId>,
+        unload_action: Option<AssetAction>,
     ) -> HashSet<ErasedId> {
         let mut state = self.states.remove(&id).unwrap_or_else(AssetState::new);
 
         state.ty = ty;
         state.state = LoadState::Loaded;
+        state.unload_action = unload_action;
 
         for dependency in &dependencies {
             match self.states.get_mut(dependency) {

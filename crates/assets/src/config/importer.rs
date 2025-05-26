@@ -3,9 +3,10 @@ use crate::{
     asset::{Asset, AssetMetadata, AssetType, ErasedId, Settings},
     io::{
         Artifact, ArtifactMeta, AssetFuture, AssetIoError, AssetPath, AssetSource, AsyncReader,
-        ImportMeta, PathExt, deserialize, serialize,
+        ImportMeta, PathExt, SourceName, deserialize, serialize,
     },
 };
+use ecs::Event;
 use serde::{Deserialize, Serialize};
 use std::{
     any::TypeId,
@@ -87,7 +88,7 @@ pub trait AssetImporter: Send + Sync + 'static {
     type Error: std::error::Error + Send + Sync + 'static;
 
     fn import(
-        ctx: &mut ImportContext,
+        ctx: &mut ImportContext<'_>,
         reader: &mut dyn AsyncReader,
         metadata: &AssetMetadata<Self::Settings>,
     ) -> impl Future<Output = Result<Self::Asset, Self::Error>>;
@@ -239,3 +240,41 @@ impl AssetImporters {
             .is_some_and(|importers| importers.iter().any(|i| self.importers[*i].type_id() == ty))
     }
 }
+
+#[derive(thiserror::Error, Debug)]
+pub enum ImportError {
+    #[error("{0}")]
+    File(AssetIoError),
+
+    #[error("{0}")]
+    Folder(AssetIoError),
+
+    #[error("Source: {name} {error}")]
+    Source {
+        name: SourceName<'static>,
+        error: AssetIoError,
+    },
+
+    #[error("{0}")]
+    LoadAsset(AssetIoError),
+
+    #[error("{0}")]
+    LoadArtifact(AssetIoError),
+
+    #[error("{0}")]
+    LoadMetadata(AssetIoError),
+
+    #[error("{0}")]
+    ImportAsset(BoxedError),
+
+    #[error("{0}")]
+    SaveAsset(AssetIoError),
+
+    #[error("{0}")]
+    ProcessAsset(BoxedError),
+
+    #[error("{0}")]
+    Unknown(AssetIoError),
+}
+
+impl Event for ImportError {}

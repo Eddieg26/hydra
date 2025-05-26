@@ -1,12 +1,13 @@
 use crate::{
     Component, ComponentId, Components, Entities, Event, EventId, EventRegistry, ModeId, Phase,
-    Resource, ResourceId, Resources, RunMode, Schedule, Systems, World, WorldMode, ext,
+    Resource, ResourceId, Resources, RunMode, Schedule, Systems, World, WorldMode,
+    core::task::inner::{CpuTaskPool, Task, TaskPoolSettings},
+    ext,
     world::{Archetypes, WorldCell},
 };
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
-    thread::JoinHandle,
 };
 
 #[allow(unused_variables)]
@@ -95,8 +96,9 @@ pub enum AppType {
         config: AppBuildInfo,
         secondary: HashMap<Box<dyn AppTag>, AppBuilder>,
         runner: Option<Box<dyn Fn(Apps) -> Apps>>,
+        task_pool_settings: TaskPoolSettings,
     },
-    Sub(AppBuildInfo),
+    Sub(AppBuildInfo, TaskPoolSettings),
 }
 
 pub struct AppBuilder(AppType);
@@ -106,11 +108,15 @@ impl AppBuilder {
             config: AppBuildInfo::new(),
             secondary: HashMap::new(),
             runner: None,
+            task_pool_settings: TaskPoolSettings::default(),
         })
     }
 
     pub fn single() -> Self {
-        Self(AppType::Sub(AppBuildInfo::new()))
+        Self(AppType::Sub(
+            AppBuildInfo::new(),
+            TaskPoolSettings::default(),
+        ))
     }
 
     pub fn components(&self) -> &Components {
@@ -205,20 +211,38 @@ impl AppBuilder {
         self.world_mut().remove_resource::<R>()
     }
 
+    pub fn task_pool_settings(&self) -> &TaskPoolSettings {
+        match &self.0 {
+            AppType::Main {
+                task_pool_settings, ..
+            } => task_pool_settings,
+            AppType::Sub(_, task_pool_settings) => task_pool_settings,
+        }
+    }
+
+    pub fn task_pool_settings_mut(&mut self) -> &mut TaskPoolSettings {
+        match &mut self.0 {
+            AppType::Main {
+                task_pool_settings, ..
+            } => task_pool_settings,
+            AppType::Sub(_, task_pool_settings) => task_pool_settings,
+        }
+    }
+
     pub fn add_sub_app(&mut self, app: impl AppTag) {
         let app = Box::new(app) as Box<dyn AppTag>;
         match &mut self.0 {
             AppType::Main { secondary, .. } => {
                 secondary.entry(app).or_insert(AppBuilder::single());
             }
-            AppType::Sub(_) => panic!("Cannot add sub app to a sub app"),
+            AppType::Sub(_, _) => panic!("Cannot add sub app to a sub app"),
         }
     }
 
     pub fn sub_app(&self, app: impl AppTag) -> Option<&AppBuilder> {
         match &self.0 {
             AppType::Main { secondary, .. } => secondary.get(&(Box::new(app) as Box<dyn AppTag>)),
-            AppType::Sub(_) => None,
+            AppType::Sub(_, _) => None,
         }
     }
 
@@ -227,7 +251,7 @@ impl AppBuilder {
             AppType::Main { secondary, .. } => {
                 secondary.get_mut(&(Box::new(app) as Box<dyn AppTag>))
             }
-            AppType::Sub(_) => None,
+            AppType::Sub(_, _) => None,
         }
     }
 
@@ -241,11 +265,13 @@ impl AppBuilder {
                 config,
                 secondary,
                 runner,
+                task_pool_settings,
             } => {
                 let mut main = Self(AppType::Main {
                     config,
                     secondary,
                     runner,
+                    task_pool_settings,
                 });
 
                 main.build_plugins();
@@ -254,6 +280,7 @@ impl AppBuilder {
                     config,
                     secondary,
                     runner,
+                    task_pool_settings,
                 } = main.0
                 else {
                     panic!("Expected AppConfigKind::Main");
@@ -269,14 +296,18 @@ impl AppBuilder {
                     })
                     .collect::<Vec<_>>();
 
+                task_pool_settings.init_task_pools();
+
                 match runner {
                     Some(runner) => runner(Apps::new(main, sub)),
                     None => Self::default_runner(Apps::new(main, sub)),
                 }
             }
-            AppType::Sub(config) => {
-                let mut sub = Self(AppType::Sub(config));
+            AppType::Sub(config, task_pool_settings) => {
+                let mut sub = Self(AppType::Sub(config, task_pool_settings));
                 sub.build_plugins();
+
+                sub.task_pool_settings().init_task_pools();
 
                 let app = App::from(sub.into_build_info());
                 Apps::new(app, vec![])
@@ -313,14 +344,14 @@ impl AppBuilder {
     fn info(&self) -> &AppBuildInfo {
         match &self.0 {
             AppType::Main { config, .. } => config,
-            AppType::Sub(config) => config,
+            AppType::Sub(config, _) => config,
         }
     }
 
     fn info_mut(&mut self) -> &mut AppBuildInfo {
         match &mut self.0 {
             AppType::Main { config, .. } => config,
-            AppType::Sub(config) => config,
+            AppType::Sub(config, _) => config,
         }
     }
 
@@ -335,7 +366,7 @@ impl AppBuilder {
     fn into_build_info(self) -> AppBuildInfo {
         match self.0 {
             AppType::Main { config, .. } => config,
-            AppType::Sub(config) => config,
+            AppType::Sub(config, _) => config,
         }
     }
 
@@ -351,7 +382,7 @@ impl AppBuilder {
         apps.init();
         apps.run();
         apps.shutdown();
-        apps.await_apps();
+        smol::block_on(apps.await_apps());
 
         apps
     }
@@ -427,16 +458,15 @@ impl App {
 pub struct Apps {
     main: App,
     sub: Vec<App>,
-    handles: Vec<JoinHandle<App>>,
+    tasks: Vec<Task<App>>,
 }
 
 impl Apps {
     fn new(main: App, sub: Vec<App>) -> Self {
-        println!("SUB: {}", sub.len());
         Self {
             main,
             sub,
-            handles: Vec::new(),
+            tasks: Vec::new(),
         }
     }
 
@@ -449,11 +479,13 @@ impl Apps {
     }
 
     pub fn run(&mut self) {
-        self.await_apps();
+        if self.tasks.len() > 0 {
+            smol::block_on(self.await_apps());
+        }
 
         self.main.run(Run);
 
-        let mut handles = Vec::new();
+        let mut tasks = Vec::new();
         let main = MainWorld::new(&mut self.main.world);
         self.sub = self
             .sub
@@ -462,7 +494,7 @@ impl Apps {
                 app.extract(main);
 
                 if app.is_send() {
-                    handles.push(std::thread::spawn(move || app.run_once(Run)));
+                    tasks.push(CpuTaskPool::get().spawn(async move { app.run_once(Run) }));
                     None
                 } else {
                     Some(app)
@@ -474,16 +506,17 @@ impl Apps {
             app.run(Run);
         }
 
-        self.handles = handles;
+        self.tasks = tasks;
+    }
+
+    async fn await_apps(&mut self) {
+        for task in self.tasks.drain(..) {
+            self.sub.push(task.await);
+        }
     }
 
     pub fn shutdown(&mut self) {
         self.main.run(Shutdown);
-    }
-
-    fn await_apps(&mut self) {
-        let apps = self.handles.drain(..).map(|handle| handle.join().unwrap());
-        self.sub.extend(apps);
     }
 }
 

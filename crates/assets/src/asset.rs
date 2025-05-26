@@ -1,5 +1,5 @@
 use crate::io::source::AssetPath;
-use ecs::{Resource, SparseIndex};
+use ecs::{Resource, SparseIndex, core::BlobCell};
 use serde::{Deserialize, Serialize, de::Visitor, ser::SerializeStruct};
 use std::{
     collections::{HashMap, HashSet},
@@ -370,3 +370,22 @@ pub struct Folder {
 
 impl Asset for Folder {}
 impl Settings for Folder {}
+
+pub struct ErasedAsset(BlobCell);
+impl ErasedAsset {
+    pub fn new<A: Asset>(asset: A) -> Self {
+        Self(BlobCell::new(asset))
+    }
+
+    pub fn downcast<A: Asset>(&self) -> &A {
+        self.0.get::<A>()
+    }
+
+    pub fn downcast_mut<A: Asset>(&mut self) -> &mut A {
+        self.0.get_mut::<A>()
+    }
+
+    pub fn into<A: Asset>(self) -> A {
+        self.0.into_value()
+    }
+}

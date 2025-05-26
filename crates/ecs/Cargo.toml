@@ -6,5 +6,7 @@ edition = "2024"
 [dependencies]
 fixedbitset = { workspace = true }
 indexmap = { workspace = true }
-rayon = { workspace = true }
+smol = { workspace = true }
 threadpool = "1.8.1"
+concurrent-queue = "2.5.0"
+async-task = "4.7.1"

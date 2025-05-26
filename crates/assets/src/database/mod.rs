@@ -1,6 +1,8 @@
-use crate::{config::AssetConfig, io::cache::AssetLibrary};
-use ecs::Resource;
-use events::{DatabaseCommand, DatabaseCommands, DatabaseEvent};
+use crate::{
+    config::{AssetConfig, importer::ImportError},
+    io::cache::AssetLibrary,
+};
+use ecs::{EventWriter, Resource};
 use smol::{
     channel::{Receiver, Sender, unbounded},
     lock::RwLock,
@@ -9,6 +11,7 @@ use state::AssetStates;
 use std::sync::Arc;
 
 pub mod events;
+pub mod import;
 pub mod state;
 
 #[derive(Clone)]
@@ -16,7 +19,7 @@ pub struct AssetDatabase {
     config: Arc<AssetConfig>,
     library: Arc<RwLock<AssetLibrary>>,
     states: Arc<RwLock<AssetStates>>,
-    commands: DatabaseCommands,
+    writer: Arc<RwLock<()>>,
     sender: Sender<DatabaseEvent>,
     receiver: Receiver<DatabaseEvent>,
 }
@@ -29,7 +32,7 @@ impl AssetDatabase {
             config: Arc::new(config),
             library: Arc::default(),
             states: Arc::default(),
-            commands: DatabaseCommands::default(),
+            writer: Arc::default(),
             sender,
             receiver,
         }
@@ -39,13 +42,23 @@ impl AssetDatabase {
         &self.config
     }
 
-    pub fn execute<C: DatabaseCommand>(&self, command: C) {
-        self.commands.execute(command, self.clone());
-    }
-
-    pub fn update(&self) {
-        while let Ok(_event) = self.receiver.try_recv() {}
+    pub fn update(&self, mut events: EventWriter<ImportError>) {
+        while let Ok(event) = self.receiver.try_recv() {
+            match event {
+                DatabaseEvent::ImportError(error) => events.send(error),
+            }
+        }
     }
 }
 
 impl Resource for AssetDatabase {}
+
+pub enum DatabaseEvent {
+    ImportError(ImportError),
+}
+
+impl From<ImportError> for DatabaseEvent {
+    fn from(value: ImportError) -> Self {
+        DatabaseEvent::ImportError(value)
+    }
+}

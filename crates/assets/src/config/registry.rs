@@ -1,10 +1,13 @@
-use crate::asset::{Asset, AssetAction, AssetType};
-use ecs::{SparseIndex, ext};
+use crate::asset::{Asset, AssetAction, AssetType, Assets, ErasedAsset, ErasedId};
+use ecs::{SparseIndex, World, ext};
 use std::{any::TypeId, collections::HashMap, ops::Index};
 
 pub struct AssetMeta {
     pub name: &'static str,
     pub dependency_unload_action: Option<AssetAction>,
+
+    add: fn(&mut World, ErasedId, ErasedAsset),
+    remove: fn(&mut World, ErasedId) -> Option<ErasedAsset>,
 }
 
 impl AssetMeta {
@@ -12,7 +15,23 @@ impl AssetMeta {
         Self {
             name: ext::short_type_name::<A>(),
             dependency_unload_action: A::DEPENDENCY_UNLOAD_ACTION,
+            add: |world, id, asset| {
+                let assets = world.resource_mut::<Assets<A>>();
+                assets.insert(id, asset.into());
+            },
+            remove: |world, id| {
+                let assets = world.resource_mut::<Assets<A>>();
+                assets.remove(id).map(ErasedAsset::new)
+            },
         }
+    }
+
+    pub fn add(&self, world: &mut World, id: ErasedId, asset: ErasedAsset) {
+        (self.add)(world, id, asset)
+    }
+
+    pub fn remove(&self, world: &mut World, id: ErasedId) -> Option<ErasedAsset> {
+        (self.remove)(world, id)
     }
 }
 
