@@ -2,7 +2,7 @@ use super::{
     AssetIoError, AssetPath, AsyncReader, ErasedFileSystem, FileSystem, deserialize, serialize,
 };
 use crate::asset::{Asset, AssetId, AssetType, ErasedId};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, ser::SerializeStruct};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 use std::{
     collections::HashMap,
@@ -59,7 +59,7 @@ pub struct ImportMeta {
     pub processor: Option<u32>,
     pub checksum: u32,
     pub full_checksum: u32,
-    pub dependencies: Vec<ErasedId>,
+    pub dependencies: Vec<(ErasedId, u32)>,
 }
 
 impl ImportMeta {
@@ -73,12 +73,6 @@ impl ImportMeta {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct ArtifactHeader {
-    pub asset: u32,
-    pub meta: u32,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactMeta {
     pub id: ErasedId,
@@ -88,9 +82,8 @@ pub struct ArtifactMeta {
     pub dependencies: Vec<ErasedId>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Artifact {
-    pub(crate) header: ArtifactHeader,
     pub(crate) meta: ArtifactMeta,
     pub(crate) data: Vec<u8>,
 }
@@ -99,16 +92,11 @@ impl Artifact {
     pub fn new<A: Asset + Serialize>(asset: &A, meta: ArtifactMeta) -> Result<Self, AssetIoError> {
         let data = serialize(&asset)?;
 
-        let header = ArtifactHeader {
-            asset: data.len() as u32,
-            meta: serialize(&meta)?.len() as u32,
-        };
-
-        Ok(Self { header, meta, data })
+        Ok(Self { meta, data })
     }
 
-    pub fn from_raw_parts(header: ArtifactHeader, meta: ArtifactMeta, data: Vec<u8>) -> Self {
-        Self { header, meta, data }
+    pub fn from_raw_parts(meta: ArtifactMeta, data: Vec<u8>) -> Self {
+        Self { meta, data }
     }
 
     pub fn id(&self) -> ErasedId {
@@ -121,10 +109,6 @@ impl Artifact {
 
     pub fn path(&self) -> &AssetPath<'static> {
         &self.meta.path
-    }
-
-    pub fn header(&self) -> ArtifactHeader {
-        self.header
     }
 
     pub fn meta(&self) -> &ArtifactMeta {
@@ -140,6 +124,63 @@ impl Artifact {
     }
 }
 
+impl Serialize for Artifact {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut artifact = serializer.serialize_struct("Artifact", 3)?;
+        let meta = serialize(&self.meta).map_err(serde::ser::Error::custom)?;
+        let size: [u8; 4] = (meta.len() as u32).to_le_bytes();
+
+        artifact.serialize_field("header", &size)?;
+        artifact.serialize_field("meta", &self.meta)?;
+        artifact.serialize_field("data", &self.data)?;
+
+        artifact.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Artifact {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct Visitor;
+
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Artifact;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("struct Artifact")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                use serde::de::Error;
+
+                let _ = seq
+                    .next_element::<[u8; 4]>()?
+                    .ok_or(Error::custom("Expected meta size"))?;
+
+                let meta = seq
+                    .next_element::<ArtifactMeta>()?
+                    .ok_or(Error::custom("Expected meta"))?;
+
+                let data = seq
+                    .next_element::<Vec<u8>>()?
+                    .ok_or(Error::custom("Expected data bytes"))?;
+
+                Ok(Artifact { meta, data })
+            }
+        }
+
+        deserializer.deserialize_struct("Artifact", &["meta_size", "meta", "data"], Visitor)
+    }
+}
+
 pub struct ArtifactReader(Box<dyn AsyncReader>);
 
 impl ArtifactReader {
@@ -147,18 +188,15 @@ impl ArtifactReader {
         Self(reader)
     }
 
-    pub async fn header(&mut self) -> Result<ArtifactHeader, AssetIoError> {
-        let mut buf = [0; std::mem::size_of::<ArtifactHeader>()];
-        self.0.read_exact(&mut buf).await?;
+    pub async fn meta(&mut self) -> Result<ArtifactMeta, AssetIoError> {
+        let mut header_buf = [0u8; 4];
+        self.0.read_exact(&mut header_buf).await?;
 
-        deserialize(&buf)
-    }
+        let meta_size = u32::from_le_bytes(header_buf) as usize;
+        let mut meta_buf = vec![0u8; meta_size + 1];
+        self.0.read_exact(&mut meta_buf).await?;
 
-    pub async fn meta(&mut self, header: &ArtifactHeader) -> Result<ArtifactMeta, AssetIoError> {
-        let mut buf = vec![0; header.meta as usize];
-        self.0.read_exact(&mut buf).await?;
-
-        deserialize(&buf)
+        deserialize(&meta_buf)
     }
 
     pub async fn data(mut self) -> Result<Vec<u8>, AssetIoError> {
@@ -169,9 +207,7 @@ impl ArtifactReader {
     }
 
     pub async fn into_meta(mut self) -> Result<ArtifactMeta, AssetIoError> {
-        let header = self.header().await?;
-
-        self.meta(&header).await
+        self.meta().await
     }
 
     pub async fn into_artifact(mut self) -> Result<Artifact, AssetIoError> {
@@ -312,4 +348,81 @@ impl AssetCache {
 pub struct LoadedAsset<A: Asset> {
     pub asset: A,
     pub meta: ArtifactMeta,
+}
+
+#[allow(unused_imports, dead_code)]
+mod tests {
+    use crate::{
+        asset::{Asset, AssetType, ErasedId},
+        io::{
+            Artifact, ArtifactMeta, AssetPath, ImportMeta, SourceName, VirtualFs, deserialize,
+            serialize,
+        },
+    };
+    use serde::{Deserialize, Serialize};
+
+    use super::AssetCache;
+
+    #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+    struct TestAsset {
+        id: u32,
+        name: String,
+    }
+
+    impl Asset for TestAsset {}
+
+    #[test]
+    fn test_serialize_artifact() {
+        let asset = TestAsset {
+            id: 1,
+            name: "Test Asset".to_string(),
+        };
+
+        let meta = ArtifactMeta {
+            id: ErasedId::new(),
+            ty: AssetType::NONE,
+            path: AssetPath::new(SourceName::Default, "test_asset"),
+            import: ImportMeta::new(None, 123),
+            dependencies: vec![],
+        };
+
+        let artifact = Artifact::new(&asset, meta).expect("Failed to create artifact");
+        let serialized = serialize(&artifact).expect("Failed to serialize artifact");
+        let artifact =
+            deserialize::<Artifact>(&serialized).expect("Failed to deserialize artifact");
+
+        let test_asset = artifact
+            .asset::<TestAsset>()
+            .expect("Failed to deserialize asset");
+
+        assert_eq!(test_asset, asset);
+    }
+
+    #[test]
+    fn test_artifact_reader() {
+        let fs = VirtualFs::new();
+        let cache = AssetCache::new(fs);
+        smol::block_on(async {
+            let asset = TestAsset {
+                id: 1,
+                name: "Test Asset".to_string(),
+            };
+
+            let meta = ArtifactMeta {
+                id: ErasedId::new(),
+                ty: AssetType::NONE,
+                path: AssetPath::new(SourceName::Default, "test_asset"),
+                import: ImportMeta::new(None, 123),
+                dependencies: vec![],
+            };
+
+            let artifact = Artifact::new(&asset, meta).expect("Failed to create artifact");
+            cache.save_artifact(&artifact).await.unwrap();
+
+            let mut reader = cache.get_artifact_reader(artifact.id()).await.unwrap();
+            let meta = reader.meta().await.unwrap();
+
+            assert_eq!(meta.id, artifact.id());
+        });
+    }
 }

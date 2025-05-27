@@ -5,6 +5,7 @@ use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
     path::PathBuf,
+    str::FromStr,
 };
 
 pub trait AssetDependencies: Send + Sync {
@@ -92,7 +93,7 @@ impl Serialize for ErasedId {
     where
         S: serde::Serializer,
     {
-        self.0.as_u128().serialize(serializer)
+        self.0.to_string().serialize(serializer)
     }
 }
 
@@ -101,8 +102,9 @@ impl<'de> Deserialize<'de> for ErasedId {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = u128::deserialize(deserializer)?;
-        Ok(Self(uuid::Uuid::from_u128(value)))
+        let value = String::deserialize(deserializer)?;
+        let id = uuid::Uuid::from_str(&value).map_err(serde::de::Error::custom)?;
+        Ok(Self(id))
     }
 }
 
@@ -256,12 +258,19 @@ impl<'de, T: Settings + Deserialize<'de>> Deserialize<'de> for AssetMetadata<T> 
                 formatter.write_str("struct AssetMetadata")
             }
 
-            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
             where
-                A: serde::de::MapAccess<'v>,
+                A: serde::de::SeqAccess<'v>,
             {
-                let id = map.next_value()?;
-                let settings = map.next_value()?;
+                use serde::de::Error;
+
+                let id = seq
+                    .next_element::<ErasedId>()?
+                    .ok_or(Error::custom("Expected meta id"))?;
+
+                let settings = seq
+                    .next_element::<S>()?
+                    .ok_or(Error::custom("Expected meta settings"))?;
 
                 Ok(AssetMetadata { id, settings })
             }

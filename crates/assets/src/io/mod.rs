@@ -79,7 +79,7 @@ impl From<ron::error::SpannedError> for AssetIoError {
     }
 }
 
-pub type BoxedFuture<'a, T, E = AssetIoError> = Box<dyn Future<Output = Result<T, E>> + 'a>;
+pub type BoxedFuture<'a, T, E = AssetIoError> = Box<dyn Future<Output = Result<T, E>> + Send + 'a>;
 pub type AssetFuture<'a, T, E = AssetIoError> = Pin<BoxedFuture<'a, T, E>>;
 
 pub trait AsyncReader: AsyncRead + Send + Sync + Unpin {
@@ -103,19 +103,19 @@ pub trait FileSystem: Send + Sync + 'static {
     type Writer: AsyncWriter;
 
     fn root(&self) -> &Path;
-    fn reader(&self, path: &Path) -> impl Future<Output = Result<Self::Reader, AssetIoError>>;
+    fn reader(&self, path: &Path) -> impl Future<Output = Result<Self::Reader, AssetIoError>> + Send;
     fn read_dir(
         &self,
         path: &Path,
-    ) -> impl Future<Output = Result<Box<dyn PathStream>, AssetIoError>>;
-    fn is_dir(&self, path: &Path) -> impl Future<Output = Result<bool, AssetIoError>>;
-    fn writer(&self, path: &Path) -> impl Future<Output = Result<Self::Writer, AssetIoError>>;
-    fn create_dir(&self, path: &Path) -> impl Future<Output = Result<(), AssetIoError>>;
-    fn create_dir_all(&self, path: &Path) -> impl Future<Output = Result<(), AssetIoError>>;
-    fn rename(&self, from: &Path, to: &Path) -> impl Future<Output = Result<(), AssetIoError>>;
-    fn remove(&self, path: &Path) -> impl Future<Output = Result<(), AssetIoError>>;
-    fn remove_dir(&self, path: &Path) -> impl Future<Output = Result<(), AssetIoError>>;
-    fn exists(&self, path: &Path) -> impl Future<Output = Result<bool, AssetIoError>>;
+    ) -> impl Future<Output = Result<Box<dyn PathStream>, AssetIoError>> + Send;
+    fn is_dir(&self, path: &Path) -> impl Future<Output = Result<bool, AssetIoError>> + Send;
+    fn writer(&self, path: &Path) -> impl Future<Output = Result<Self::Writer, AssetIoError>> + Send;
+    fn create_dir(&self, path: &Path) -> impl Future<Output = Result<(), AssetIoError>> + Send;
+    fn create_dir_all(&self, path: &Path) -> impl Future<Output = Result<(), AssetIoError>> + Send;
+    fn rename(&self, from: &Path, to: &Path) -> impl Future<Output = Result<(), AssetIoError>> + Send;
+    fn remove(&self, path: &Path) -> impl Future<Output = Result<(), AssetIoError>> + Send;
+    fn remove_dir(&self, path: &Path) -> impl Future<Output = Result<(), AssetIoError>> + Send;
+    fn exists(&self, path: &Path) -> impl Future<Output = Result<bool, AssetIoError>> + Send;
 }
 
 pub trait ErasedFileSystem: downcast_rs::Downcast + Send + Sync + 'static {

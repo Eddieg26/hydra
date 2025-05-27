@@ -2,7 +2,10 @@ use super::{
     AssetFuture, AssetIoError, AsyncReader, AsyncWriter, ErasedFileSystem, FileSystem, PathExt,
     PathStream,
 };
-use crate::asset::{AssetMetadata, Settings};
+use crate::{
+    asset::{AssetMetadata, Settings},
+    io::{deserialize, serialize},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
@@ -303,25 +306,24 @@ impl AssetSource {
         path: &Path,
     ) -> Result<AssetMetadata<S>, AssetIoError> {
         let mut reader = self.reader(&Self::metadata_path(path)).await?;
-        let mut buffer = String::new();
+        let mut buffer = Vec::new();
 
-        use futures::AsyncReadExt;
-        reader.read_to_string(&mut buffer).await?;
+        AsyncReader::read_to_end(&mut reader, &mut buffer).await?;
 
-        ron::from_str::<AssetMetadata<S>>(&buffer).map_err(AssetIoError::from)
+        deserialize::<AssetMetadata<S>>(&buffer)
     }
 
     pub async fn save_metadata<S: Settings + Serialize>(
         &self,
         path: &Path,
         metadata: &AssetMetadata<S>,
-    ) -> Result<String, AssetIoError> {
+    ) -> Result<Vec<u8>, AssetIoError> {
         let meta_path = Self::metadata_path(path);
         let mut writer = self.writer(&meta_path).await?;
-        let content = ron::to_string(metadata).map_err(AssetIoError::from)?;
+        let content = serialize(metadata)?;
 
         use futures::AsyncWriteExt;
-        writer.write(content.as_bytes()).await?;
+        writer.write(&content).await?;
         writer.flush().await?;
 
         Ok(content)

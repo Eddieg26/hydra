@@ -1,8 +1,12 @@
 use super::{AssetIoError, AsyncReader, AsyncWriter, FileSystem, PathExt};
-use futures::{executor::block_on, AsyncRead, AsyncWrite, StreamExt};
+use futures::{AsyncRead, AsyncWrite, StreamExt, executor::block_on};
 use smol::lock::RwLock;
 use std::{
-    collections::HashMap, io::{Cursor, Read, Seek, Write}, path::{Path, PathBuf}, sync::Arc, time::SystemTime
+    collections::HashMap,
+    io::{Cursor, Read, Seek, Write},
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::SystemTime,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,24 +181,22 @@ type Handle = Arc<RwLock<VirtualAssets>>;
 
 #[derive(Clone)]
 pub struct VirtualFs {
-    root: Box<Path>,
     fs: Handle,
 }
 
 impl VirtualFs {
-    pub fn new(root: impl AsRef<Path>) -> Self {
+    pub fn new() -> Self {
         let mut fs = VirtualAssets::default();
         fs.entries
-            .insert(root.as_ref().to_path_buf(), VirtualEntry::directory());
+            .insert(PathBuf::from(""), VirtualEntry::directory());
 
         Self {
-            root: root.as_ref().to_path_buf().into_boxed_path(),
             fs: Arc::new(RwLock::new(fs)),
         }
     }
 
     pub fn root(&self) -> &Path {
-        &self.root
+        "".as_ref()
     }
 
     pub fn print(&self, path: &Path, depth: usize, f: &mut std::fmt::Formatter<'_>) {
@@ -222,7 +224,7 @@ impl VirtualFs {
 
 impl std::fmt::Display for VirtualFs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.print(&self.root, 0, f);
+        self.print(self.root(), 0, f);
         Ok(())
     }
 }
@@ -232,11 +234,11 @@ impl FileSystem for VirtualFs {
     type Writer = FileWriter;
 
     fn root(&self) -> &Path {
-        &self.root
+        "".as_ref()
     }
 
     async fn reader(&self, path: &std::path::Path) -> Result<Self::Reader, super::AssetIoError> {
-        let path = path.with_prefix(&self.root);
+        let path = path.with_prefix(self.root());
         let fs = self.fs.read().await;
         match fs.entries.get(path.as_ref()) {
             Some(entry) => match entry.ty {
@@ -259,7 +261,7 @@ impl FileSystem for VirtualFs {
         &self,
         path: &std::path::Path,
     ) -> Result<Box<dyn super::PathStream>, super::AssetIoError> {
-        let path = path.with_prefix(&self.root);
+        let path = path.with_prefix(self.root());
         let fs = self.fs.read().await;
         match fs.entries.get(path.as_ref()) {
             Some(entry) => match entry.ty {
@@ -295,7 +297,7 @@ impl FileSystem for VirtualFs {
     }
 
     async fn is_dir(&self, path: &std::path::Path) -> Result<bool, super::AssetIoError> {
-        let path = path.with_prefix(&self.root);
+        let path = path.with_prefix(self.root());
         let fs = self.fs.read().await;
         match fs
             .entries
@@ -308,7 +310,7 @@ impl FileSystem for VirtualFs {
     }
 
     async fn writer(&self, path: &std::path::Path) -> Result<Self::Writer, super::AssetIoError> {
-        let path = path.with_prefix(&self.root);
+        let path = path.with_prefix(self.root());
         let fs = self.fs.read().await;
         match fs.entries.get(path.as_ref()) {
             Some(entry) => match entry.ty {
@@ -336,7 +338,7 @@ impl FileSystem for VirtualFs {
     }
 
     async fn create_dir(&self, path: &std::path::Path) -> Result<(), super::AssetIoError> {
-        let path = path.with_prefix(&self.root);
+        let path = path.with_prefix(self.root());
         let mut fs = self.fs.write().await;
         match fs.entries.get(path.as_ref()) {
             Some(entry) => match entry.ty {
@@ -361,7 +363,7 @@ impl FileSystem for VirtualFs {
     }
 
     async fn create_dir_all(&self, path: &std::path::Path) -> Result<(), super::AssetIoError> {
-        let path = path.with_prefix(&self.root);
+        let path = path.with_prefix(self.root());
         let mut fs = self.fs.write().await;
         let mut current = path.to_path_buf();
         while let Some(parent) = current.parent() {
@@ -370,7 +372,7 @@ impl FileSystem for VirtualFs {
                     return Err(AssetIoError::from(std::io::Error::new(
                         std::io::ErrorKind::Unsupported,
                         format!("Not a directory: {:?}", parent),
-                    )))
+                    )));
                 }
                 Some(VirtualEntryType::Directory) => current = parent.to_path_buf(),
                 None => {
@@ -391,8 +393,8 @@ impl FileSystem for VirtualFs {
         from: &std::path::Path,
         to: &std::path::Path,
     ) -> Result<(), super::AssetIoError> {
-        let from = from.with_prefix(&self.root);
-        let to = to.with_prefix(&self.root);
+        let from = from.with_prefix(self.root());
+        let to = to.with_prefix(self.root());
         let mut fs = self.fs.write().await;
         match fs.entries.remove(from.as_ref()) {
             Some(entry) => match fs.entries.contains_key(to.as_ref()) {
@@ -407,7 +409,7 @@ impl FileSystem for VirtualFs {
     }
 
     async fn remove(&self, path: &std::path::Path) -> Result<(), super::AssetIoError> {
-        let path = path.with_prefix(&self.root);
+        let path = path.with_prefix(self.root());
         let mut fs = self.fs.write().await;
         match fs.entries.remove(path.as_ref()) {
             Some(_) => Ok(()),
@@ -416,7 +418,7 @@ impl FileSystem for VirtualFs {
     }
 
     async fn remove_dir(&self, path: &std::path::Path) -> Result<(), super::AssetIoError> {
-        let path = path.with_prefix(&self.root);
+        let path = path.with_prefix(self.root());
         let mut fs = self.fs.write().await;
         match fs.entries.get(path.as_ref()).map(|e| e.ty) {
             Some(VirtualEntryType::File) => Err(AssetIoError::from(std::io::Error::new(

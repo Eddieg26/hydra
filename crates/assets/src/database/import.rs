@@ -1,29 +1,19 @@
-use std::{collections::HashMap, hash::Hash};
-
-use ecs::{IndexDag, core::ImmutableIndexDag};
-use smol::{channel::Sender, stream::StreamExt};
-
+use super::{AssetDatabase, DatabaseEvent};
 use crate::{
     asset::{AssetMetadata, ErasedId, Folder},
     config::{
         AssetConfig,
-        importer::{ImportContext, ImportError},
+        importer::{self, ImportContext, ImportError},
         processor::ProcessContext,
     },
-    io::{
-        ArtifactMeta, AssetIoError, AssetLibrary, AssetPath, AssetSource, SourceName, deserialize,
-    },
+    io::{AssetIoError, AssetLibrary, AssetPath, AssetSource, PathExt, SourceName, deserialize},
 };
-
-use super::{AssetDatabase, DatabaseEvent};
-
-pub trait AssetDatabaseImportExt {
-    fn import_assets(&self);
-}
-
-impl AssetDatabaseImportExt for AssetDatabase {
-    fn import_assets(&self) {}
-}
+use ecs::{
+    IndexDag,
+    core::{ImmutableIndexDag, task::IoTaskPool},
+};
+use smol::{channel::Sender, stream::StreamExt};
+use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct ImportInfo {
@@ -31,69 +21,71 @@ pub struct ImportInfo {
     removed: Vec<AssetPath<'static>>,
 }
 
-pub struct ImportAssets;
+impl AssetDatabase {
+    pub fn import(&self) {
+        let db = self.clone();
 
-impl ImportAssets {
-    pub(crate) async fn run(&self, database: AssetDatabase) {
-        let AssetDatabase {
-            config,
-            library,
-            sender,
-            writer,
-            ..
-        } = database;
+        let import = async move {
+            let AssetDatabase {
+                config,
+                library,
+                sender,
+                writer,
+                ..
+            } = &db;
 
-        let _ = writer.write().await;
+            let _writer = writer.write().await;
 
-        if let Err(error) = config.cache().create_temp().await {
-            let _ = sender.send(DatabaseEvent::ImportError(ImportError::Unknown(error)));
-            return;
-        }
+            if let Err(error) = config.cache().create_temp().await {
+                let _ = sender.send(DatabaseEvent::ImportError(ImportError::Unknown(error)));
+                return;
+            }
 
-        loop {
-            let mut library = library.write().await;
-            let mut imported = vec![];
-            let mut removed = vec![];
+            for _ in 0..3 {
+                let mut library = library.write().await;
+                let mut imported = vec![];
+                let mut removed = vec![];
 
-            for (name, source) in config.sources().iter() {
-                match self
-                    .import_source(name, source, &config, &library, &sender)
-                    .await
-                {
-                    Ok(info) => {
-                        imported.extend(info.imported);
-                        removed.extend(info.removed);
-                    }
-                    Err(error) => {
-                        let error = ImportError::Source {
-                            name: name.into_owned(),
-                            error,
-                        };
+                for (name, source) in config.sources().iter() {
+                    match db
+                        .import_source(name, source, config, &library, sender)
+                        .await
+                    {
+                        Ok(info) => {
+                            imported.extend(info.imported);
+                            removed.extend(info.removed);
+                        }
+                        Err(error) => {
+                            let error = ImportError::Source {
+                                name: name.into_owned(),
+                                error,
+                            };
 
-                        let _ = sender.send(error.into()).await;
+                            let _ = sender.send(error.into()).await;
+                        }
                     }
                 }
+
+                if imported.is_empty() && removed.is_empty() {
+                    break;
+                }
+
+                db.remove_assets(removed, config, &mut library).await;
+
+                let process_list = db
+                    .import_assets(imported, config, &mut library, sender)
+                    .await;
+
+                db.process_assets(process_list, config, &sender).await;
             }
 
-            if imported.is_empty() && removed.is_empty() {
-                break;
-            }
+            let _ = config.cache().delete_temp().await;
+        };
 
-            self.remove_assets(removed, &config, &mut library).await;
-
-            let process_list = self
-                .import_assets(imported, &config, &mut library, &sender)
-                .await;
-
-            self.process_assets(process_list, &config, &sender).await;
-        }
-
-        let _ = config.cache().delete_temp().await;
+        IoTaskPool::get().spawn(import).detach();
     }
-}
 
-impl ImportAssets {
-    pub async fn import_source<'a>(
+    async fn import_source<'a>(
         &'a self,
         name: &'a SourceName<'a>,
         source: &'a AssetSource,
@@ -106,6 +98,8 @@ impl ImportAssets {
             mut imported,
             mut removed,
         } = self.import_dir(path, source).await?;
+
+        let mut import = vec![];
 
         while let Some(path) = imported.pop() {
             match source.is_dir(path.path()).await {
@@ -124,7 +118,7 @@ impl ImportAssets {
                     }
 
                     match self.import_file(path, source, config, library).await {
-                        Ok(Some(path)) => imported.push(path.into_static()),
+                        Ok(Some(path)) => import.push(path.into_static()),
                         Ok(None) => continue,
                         Err(error) => {
                             let _ = events.send(ImportError::File(error).into()).await;
@@ -137,10 +131,13 @@ impl ImportAssets {
             }
         }
 
-        Ok(ImportInfo { imported, removed })
+        Ok(ImportInfo {
+            imported: import,
+            removed,
+        })
     }
 
-    pub async fn import_dir<'a>(
+    async fn import_dir<'a>(
         &'a self,
         path: AssetPath<'a>,
         source: &'a AssetSource,
@@ -177,7 +174,7 @@ impl ImportAssets {
         Ok(ImportInfo { imported, removed })
     }
 
-    pub async fn import_file<'a>(
+    async fn import_file<'a>(
         &'a self,
         path: AssetPath<'a>,
         source: &'a AssetSource,
@@ -188,7 +185,7 @@ impl ImportAssets {
             return Ok(Some(path));
         };
 
-        let meta_path = path.path().with_extension("meta");
+        let meta_path = path.path().append_ext("meta");
         if !source.exists(&meta_path).await? {
             return Ok(Some(path));
         }
@@ -197,24 +194,27 @@ impl ImportAssets {
             return Ok(Some(path));
         };
 
+        let Ok(meta) = reader.meta().await else {
+            return Ok(Some(path));
+        };
+
         let checksum = match Self::get_checksum(source, &path).await? {
             Some(checksum) => checksum,
             None => return Ok(Some(path)),
-        };
-
-        let Ok(header) = reader.header().await else {
-            return Ok(Some(path));
-        };
-
-        let Ok(meta) = reader.meta(&header).await else {
-            return Ok(Some(path));
         };
 
         if checksum != meta.import.checksum {
             return Ok(Some(path));
         }
 
-        if Self::get_full_checksum(config, &meta).await != meta.import.full_checksum {
+        let dependencies = meta
+            .import
+            .dependencies
+            .iter()
+            .map(|(_, checksum)| *checksum);
+
+        let full_checksum = importer::get_full_checksum(checksum, dependencies);
+        if full_checksum != meta.import.full_checksum {
             return Ok(Some(path));
         }
 
@@ -324,8 +324,18 @@ impl ImportAssets {
                     Ok(data) => {
                         artifact.meta.ty =
                             config.registry().get_ty(processor.output_asset()).unwrap();
-                        artifact.header.asset = data.len() as u32;
                         artifact.data = data;
+
+                        let dependencies = ctx.dependencies.iter().map(|a| a.import.full_checksum);
+                        artifact.meta.import.full_checksum = importer::get_full_checksum(
+                            artifact.meta.import.checksum,
+                            dependencies,
+                        );
+                        artifact.meta.import.dependencies = ctx
+                            .dependencies
+                            .iter()
+                            .map(|meta| (meta.id, meta.import.full_checksum))
+                            .collect();
                     }
                     Err(error) => {
                         let _ = events.send(ImportError::ProcessAsset(error).into()).await;
@@ -378,33 +388,6 @@ impl ImportAssets {
             Err(_) => return Ok(None),
         };
 
-        let mut hasher = crc32fast::Hasher::new();
-        asset.hash(&mut hasher);
-        metadata.hash(&mut hasher);
-
-        Ok(Some(hasher.finalize()))
-    }
-
-    async fn get_full_checksum(config: &AssetConfig, meta: &ArtifactMeta) -> u32 {
-        let mut hasher = crc32fast::Hasher::new();
-        meta.import.checksum.hash(&mut hasher);
-
-        for dependency in &meta.import.dependencies {
-            let Ok(mut reader) = config.cache().get_artifact_reader(*dependency).await else {
-                continue;
-            };
-
-            let Ok(header) = reader.header().await else {
-                continue;
-            };
-
-            let Ok(dep_meta) = reader.meta(&header).await else {
-                continue;
-            };
-
-            dep_meta.import.full_checksum.hash(&mut hasher);
-        }
-
-        hasher.finalize()
+        Ok(Some(importer::get_checksum(&asset, &metadata)))
     }
 }

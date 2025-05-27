@@ -3,7 +3,7 @@ use crate::{
     asset::{Asset, AssetMetadata, AssetType, ErasedId, Settings},
     io::{
         Artifact, ArtifactMeta, AssetFuture, AssetIoError, AssetPath, AssetSource, AsyncReader,
-        ImportMeta, PathExt, SourceName, deserialize, serialize,
+        ImportMeta, PathExt, SourceName, deserialize,
     },
 };
 use ecs::Event;
@@ -91,7 +91,7 @@ pub trait AssetImporter: Send + Sync + 'static {
         ctx: &mut ImportContext<'_>,
         reader: &mut dyn AsyncReader,
         metadata: &AssetMetadata<Self::Settings>,
-    ) -> impl Future<Output = Result<Self::Asset, Self::Error>>;
+    ) -> impl Future<Output = Result<Self::Asset, Self::Error>> + Send;
 
     fn extensions() -> &'static [&'static str] {
         &[]
@@ -127,13 +127,14 @@ impl ErasedImporter {
                         .map_err(|e| Box::new(e) as BoxedError)?;
 
                     let checksum = {
-                        let mut hasher = crc32fast::Hasher::new();
-                        let mut data = ctx.read_asset().await?;
-                        let metabytes =
-                            serialize(metadata).map_err(|e| Box::new(e) as BoxedError)?;
-                        data.extend(metabytes);
-                        data.hash(&mut hasher);
-                        hasher.finalize()
+                        let asset = ctx.read_asset().await?;
+                        let metadata = ctx
+                            .source
+                            .save_metadata(ctx.path.path(), metadata)
+                            .await
+                            .map_err(|e| Box::new(e) as BoxedError)?;
+
+                        get_checksum(&asset, &metadata)
                     };
 
                     let mut dependencies = vec![];
@@ -173,7 +174,10 @@ impl ErasedImporter {
     }
 
     pub fn deserialize_metadata(&self, data: &[u8]) -> Result<Box<dyn DynMetadata>, AssetIoError> {
-        (self.deserialize_metadata)(data)
+        match (self.deserialize_metadata)(data) {
+            Ok(meta) => Ok(meta),
+            Err(error) => Err(error),
+        }
     }
 
     pub fn default_metadata(&self) -> Box<dyn DynMetadata> {
@@ -278,3 +282,25 @@ pub enum ImportError {
 }
 
 impl Event for ImportError {}
+
+pub fn get_checksum(asset: &[u8], metadata: &[u8]) -> u32 {
+    let mut hasher = crc32fast::Hasher::new();
+    asset.hash(&mut hasher);
+    metadata.hash(&mut hasher);
+
+    hasher.finalize()
+}
+
+pub fn get_full_checksum(checksum: u32, dependencies: impl Iterator<Item = u32>) -> u32 {
+    let mut hasher = crc32fast::Hasher::new();
+    checksum.hash(&mut hasher);
+
+    let mut checksums = vec![];
+
+    for checksum in dependencies {
+        checksums.push(checksum);
+        checksum.hash(&mut hasher);
+    }
+
+    hasher.finalize()
+}

@@ -168,7 +168,7 @@ impl TaskPool {
         Task::new(Self::LOCAL_EXECUTOR.with(|executor| executor.spawn(task)))
     }
 
-    pub fn with_local<T>(f: impl FnOnce(&smol::LocalExecutor) -> T) -> T {
+    pub fn with_local<T>(&self, f: impl FnOnce(&smol::LocalExecutor) -> T) -> T {
         Self::LOCAL_EXECUTOR.with(f)
     }
 
@@ -180,7 +180,7 @@ impl TaskPool {
 
         let executor: &'scope smol::Executor<'scope> = unsafe { transmute(self.executor.deref()) };
 
-        let local_executor = Self::with_local(|local| {
+        let local_executor = self.with_local(|local| {
             let local_executor: &'scope smol::Executor<'scope> = unsafe { transmute(local) };
             local_executor
         });

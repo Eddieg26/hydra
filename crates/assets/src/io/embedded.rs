@@ -1,4 +1,4 @@
-use super::{AssetIoError, AsyncReader, AsyncWriter, FileSystem, PathExt};
+use super::{serialize, AssetIoError, AsyncReader, AsyncWriter, FileSystem, PathExt};
 use crate::asset::{Asset, AssetMetadata, ErasedId, Settings};
 use futures::{AsyncRead, AsyncWrite};
 use serde::Serialize;
@@ -187,7 +187,7 @@ impl EmbeddedFs {
         settings: S,
     ) -> AssetMetadata<S> {
         let metadata = AssetMetadata::<S>::new(id, settings);
-        let metabytes = match ron::to_string(&metadata) {
+        let metabytes = match serialize(&metadata) {
             Ok(metabytes) => metabytes,
             Err(err) => panic!("Failed to serialize metadata: {}", err),
         };
@@ -197,7 +197,7 @@ impl EmbeddedFs {
         fs.entries.insert(path.clone(), EmbeddedData::Static(asset));
         fs.entries.insert(
             path.append_ext("meta"),
-            EmbeddedData::Dynamic(metabytes.into_bytes().into()),
+            EmbeddedData::Dynamic(metabytes.into()),
         );
         metadata
     }

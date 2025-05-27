@@ -1,7 +1,7 @@
 use super::{BoxedError, importer::AssetImporter};
 use crate::{
-    asset::{Asset, AssetId, AssetMetadata, ErasedId},
-    io::{AssetFuture, AssetIoError, cache::AssetCache, deserialize, serialize},
+    asset::{Asset, AssetId, AssetMetadata},
+    io::{ArtifactMeta, AssetFuture, AssetIoError, cache::AssetCache, deserialize, serialize},
 };
 use ecs::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,7 @@ use std::any::TypeId;
 
 pub struct ProcessContext<'a> {
     cache: &'a AssetCache,
-    dependencies: Vec<ErasedId>,
+    pub(crate) dependencies: Vec<ArtifactMeta>,
 }
 
 impl<'a> ProcessContext<'a> {
@@ -25,7 +25,7 @@ impl<'a> ProcessContext<'a> {
         id: impl Into<AssetId<A>>,
     ) -> Result<A, AssetIoError> {
         let loaded = self.cache.load_asset::<A>(id.into()).await?;
-        self.dependencies.push(loaded.meta.id);
+        self.dependencies.push(loaded.meta);
 
         Ok(loaded.asset)
     }
@@ -42,7 +42,7 @@ pub trait AssetProcessor: Send + Sync + 'static {
         ctx: &mut ProcessContext,
         asset: <Self::Input as AssetImporter>::Asset,
         metadata: &AssetMetadata<<Self::Input as AssetImporter>::Settings>,
-    ) -> impl Future<Output = Result<Self::Output, Self::Error>>;
+    ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send;
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
