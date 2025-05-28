@@ -46,6 +46,7 @@ pub trait AssetProcessor: Send + Sync + 'static {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct ErasedProcesser {
     process: for<'a> fn(
         &'a mut ProcessContext,
@@ -94,6 +95,7 @@ impl ErasedProcesser {
     }
 }
 
+#[derive(Debug)]
 pub struct AssetProcessors(IndexMap<TypeId, ErasedProcesser>);
 
 impl AssetProcessors {

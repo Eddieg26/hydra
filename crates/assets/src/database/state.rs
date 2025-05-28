@@ -9,6 +9,7 @@ pub enum LoadState {
     Failed,
 }
 
+#[derive(Debug)]
 pub struct AssetState {
     ty: AssetType,
     state: LoadState,
@@ -88,7 +89,7 @@ impl AssetState {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct AssetStates {
     states: HashMap<ErasedId, AssetState>,
 }

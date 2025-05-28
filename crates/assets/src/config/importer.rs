@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     any::TypeId,
     collections::HashMap,
-    hash::Hash,
     path::{Path, PathBuf},
 };
 
@@ -98,7 +97,7 @@ pub trait AssetImporter: Send + Sync + 'static {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct ErasedImporter {
     import: for<'a> fn(
         &'a mut ImportContext,
@@ -134,7 +133,7 @@ impl ErasedImporter {
                             .await
                             .map_err(|e| Box::new(e) as BoxedError)?;
 
-                        get_checksum(&asset, &metadata)
+                        ImportMeta::get_checksum(&asset, &metadata)
                     };
 
                     let mut dependencies = vec![];
@@ -197,6 +196,7 @@ impl ErasedImporter {
     }
 }
 
+#[derive(Debug)]
 pub struct AssetImporters {
     importers: Vec<ErasedImporter>,
     ty_map: HashMap<TypeId, Vec<usize>>,
@@ -282,25 +282,3 @@ pub enum ImportError {
 }
 
 impl Event for ImportError {}
-
-pub fn get_checksum(asset: &[u8], metadata: &[u8]) -> u32 {
-    let mut hasher = crc32fast::Hasher::new();
-    asset.hash(&mut hasher);
-    metadata.hash(&mut hasher);
-
-    hasher.finalize()
-}
-
-pub fn get_full_checksum(checksum: u32, dependencies: impl Iterator<Item = u32>) -> u32 {
-    let mut hasher = crc32fast::Hasher::new();
-    checksum.hash(&mut hasher);
-
-    let mut checksums = vec![];
-
-    for checksum in dependencies {
-        checksums.push(checksum);
-        checksum.hash(&mut hasher);
-    }
-
-    hasher.finalize()
-}

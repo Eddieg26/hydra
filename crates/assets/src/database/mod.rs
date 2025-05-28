@@ -2,19 +2,21 @@ use crate::{
     config::{AssetConfig, importer::ImportError},
     io::cache::AssetLibrary,
 };
-use ecs::{EventWriter, Resource};
+use ecs::EventWriter;
 use smol::{
     channel::{Receiver, Sender, unbounded},
     lock::RwLock,
 };
 use state::AssetStates;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 pub mod events;
 pub mod import;
 pub mod state;
 
-#[derive(Clone)]
+static DB: OnceLock<AssetDatabase> = OnceLock::new();
+
+#[derive(Debug, Clone)]
 pub struct AssetDatabase {
     config: Arc<AssetConfig>,
     library: Arc<RwLock<AssetLibrary>>,
@@ -25,7 +27,16 @@ pub struct AssetDatabase {
 }
 
 impl AssetDatabase {
-    pub fn new(config: AssetConfig) -> Self {
+    pub fn init(config: AssetConfig) {
+        DB.set(AssetDatabase::new(config))
+            .expect("AssetDatabase already initialized");
+    }
+
+    pub fn get() -> &'static AssetDatabase {
+        DB.get().expect("AssetDatabase not initialized")
+    }
+
+    fn new(config: AssetConfig) -> Self {
         let (sender, receiver) = unbounded();
 
         Self {
@@ -50,8 +61,6 @@ impl AssetDatabase {
         }
     }
 }
-
-impl Resource for AssetDatabase {}
 
 pub enum DatabaseEvent {
     ImportError(ImportError),

@@ -73,6 +73,7 @@ impl AssetConfigBuilder {
 
 impl Resource for AssetConfigBuilder {}
 
+#[derive(Debug)]
 pub struct AssetConfig {
     registry: AssetRegistry,
     importers: AssetImporters,

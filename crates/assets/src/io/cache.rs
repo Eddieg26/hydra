@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize, ser::SerializeStruct};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 use std::{
     collections::HashMap,
+    hash::Hash,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -67,9 +68,28 @@ impl ImportMeta {
         Self {
             processor,
             checksum,
-            full_checksum: checksum,
+            full_checksum: Self::get_full_checksum(checksum, std::iter::empty()),
             dependencies: vec![],
         }
+    }
+
+    pub fn get_checksum(asset: &[u8], metadata: &[u8]) -> u32 {
+        let mut hasher = crc32fast::Hasher::new();
+        asset.hash(&mut hasher);
+        metadata.hash(&mut hasher);
+
+        hasher.finalize()
+    }
+
+    pub fn get_full_checksum(checksum: u32, dependencies: impl Iterator<Item = u32>) -> u32 {
+        let mut hasher = crc32fast::Hasher::new();
+        checksum.hash(&mut hasher);
+
+        for checksum in dependencies {
+            checksum.hash(&mut hasher);
+        }
+
+        hasher.finalize()
     }
 }
 
@@ -342,6 +362,16 @@ impl AssetCache {
         } else {
             Ok(())
         }
+    }
+}
+
+impl std::fmt::Debug for AssetCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AssetCache")
+            .field("artifacts", &self.artifacts)
+            .field("temp", &self.temp)
+            .field("library", &self.library)
+            .finish()
     }
 }
 

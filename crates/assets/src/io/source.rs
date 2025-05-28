@@ -357,3 +357,11 @@ impl AssetSources {
         self.sources.iter()
     }
 }
+
+impl std::fmt::Debug for AssetSources {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map()
+            .key(&self.sources.keys().map(|k| k))
+            .finish()
+    }
+}

@@ -3,22 +3,26 @@ use crate::{
     asset::{AssetMetadata, ErasedId, Folder},
     config::{
         AssetConfig,
-        importer::{self, ImportContext, ImportError},
+        importer::{ImportContext, ImportError},
         processor::ProcessContext,
     },
-    io::{AssetIoError, AssetLibrary, AssetPath, AssetSource, PathExt, SourceName, deserialize},
+    io::{
+        AssetIoError, AssetLibrary, AssetPath, AssetSource, ImportMeta, PathExt, SourceName,
+        deserialize,
+    },
 };
 use ecs::{
     IndexDag,
     core::{ImmutableIndexDag, task::IoTaskPool},
 };
 use smol::{channel::Sender, stream::StreamExt};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Default)]
 pub struct ImportInfo {
     imported: Vec<AssetPath<'static>>,
     removed: Vec<AssetPath<'static>>,
+    errors: HashSet<AssetPath<'static>>,
 }
 
 impl AssetDatabase {
@@ -41,19 +45,22 @@ impl AssetDatabase {
                 return;
             }
 
-            for _ in 0..3 {
+            let mut skip = HashSet::new();
+
+            loop {
                 let mut library = library.write().await;
                 let mut imported = vec![];
                 let mut removed = vec![];
 
                 for (name, source) in config.sources().iter() {
                     match db
-                        .import_source(name, source, config, &library, sender)
+                        .import_source(name, source, config, &library, sender, &skip)
                         .await
                     {
                         Ok(info) => {
                             imported.extend(info.imported);
                             removed.extend(info.removed);
+                            skip.extend(info.errors);
                         }
                         Err(error) => {
                             let error = ImportError::Source {
@@ -92,16 +99,22 @@ impl AssetDatabase {
         config: &'a AssetConfig,
         library: &'a AssetLibrary,
         events: &'a Sender<DatabaseEvent>,
+        skip: &'a HashSet<AssetPath<'static>>,
     ) -> Result<ImportInfo, AssetIoError> {
         let path = AssetPath::new(name.clone(), "");
         let ImportInfo {
             mut imported,
             mut removed,
+            mut errors,
         } = self.import_dir(path, source).await?;
 
         let mut import = vec![];
 
         while let Some(path) = imported.pop() {
+            if skip.contains(&path) {
+                continue;
+            }
+
             match source.is_dir(path.path()).await {
                 Ok(true) => match self.import_dir(path, source).await {
                     Ok(info) => {
@@ -113,15 +126,23 @@ impl AssetDatabase {
                     }
                 },
                 Ok(false) => {
-                    if matches!(path.ext(), Some("meta") | None) {
+                    let Some(ext) = path.ext() else {
+                        continue;
+                    };
+
+                    if ext == "meta" || config.importers().get_by_ext(ext).is_none() {
                         continue;
                     }
 
-                    match self.import_file(path, source, config, library).await {
+                    match self
+                        .import_file(path.clone(), source, config, library)
+                        .await
+                    {
                         Ok(Some(path)) => import.push(path.into_static()),
                         Ok(None) => continue,
                         Err(error) => {
                             let _ = events.send(ImportError::File(error).into()).await;
+                            errors.insert(path.into_static());
                         }
                     }
                 }
@@ -134,6 +155,7 @@ impl AssetDatabase {
         Ok(ImportInfo {
             imported: import,
             removed,
+            errors,
         })
     }
 
@@ -171,7 +193,11 @@ impl AssetDatabase {
 
         let _ = source.save_metadata(path.path(), &metadata).await;
 
-        Ok(ImportInfo { imported, removed })
+        Ok(ImportInfo {
+            imported,
+            removed,
+            errors: HashSet::new(),
+        })
     }
 
     async fn import_file<'a>(
@@ -213,7 +239,7 @@ impl AssetDatabase {
             .iter()
             .map(|(_, checksum)| *checksum);
 
-        let full_checksum = importer::get_full_checksum(checksum, dependencies);
+        let full_checksum = ImportMeta::get_full_checksum(checksum, dependencies);
         if full_checksum != meta.import.full_checksum {
             return Ok(Some(path));
         }
@@ -327,7 +353,7 @@ impl AssetDatabase {
                         artifact.data = data;
 
                         let dependencies = ctx.dependencies.iter().map(|a| a.import.full_checksum);
-                        artifact.meta.import.full_checksum = importer::get_full_checksum(
+                        artifact.meta.import.full_checksum = ImportMeta::get_full_checksum(
                             artifact.meta.import.checksum,
                             dependencies,
                         );
@@ -388,6 +414,96 @@ impl AssetDatabase {
             Err(_) => return Ok(None),
         };
 
-        Ok(Some(importer::get_checksum(&asset, &metadata)))
+        Ok(Some(ImportMeta::get_checksum(&asset, &metadata)))
+    }
+}
+
+#[allow(unused_imports, dead_code)]
+mod tests {
+    use crate::{
+        asset::{Asset, DefaultSettings},
+        config::{AssetConfigBuilder, importer::AssetImporter},
+        database::AssetDatabase,
+        io::{AssetIoError, AssetPath, FileSystem, SourceName, VirtualFs},
+    };
+    use ecs::core::task::{IoTaskPool, TaskPool};
+    use serde::{Deserialize, Serialize};
+    use smol::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct Text(String);
+
+    impl Asset for Text {}
+
+    impl AssetImporter for Text {
+        type Asset = Self;
+
+        type Settings = DefaultSettings;
+
+        type Error = AssetIoError;
+
+        async fn import(
+            _: &mut crate::config::importer::ImportContext<'_>,
+            reader: &mut dyn crate::io::AsyncReader,
+            _: &crate::asset::AssetMetadata<Self::Settings>,
+        ) -> Result<Self::Asset, Self::Error> {
+            let mut buf = String::new();
+            reader
+                .read_to_string(&mut buf)
+                .await
+                .map_err(AssetIoError::from)
+                .map(|_| Text(buf))
+        }
+
+        fn extensions() -> &'static [&'static str] {
+            &["txt"]
+        }
+    }
+
+    #[test]
+    fn test_import() {
+        IoTaskPool::init(TaskPool::builder().build());
+
+        let fs = VirtualFs::new();
+        smol::block_on(async {
+            let mut writer = fs.writer("text.txt".as_ref()).await.unwrap();
+            writer.write(b"This is test text.").await.unwrap();
+        });
+
+        let mut config = AssetConfigBuilder::new();
+        config.set_cache(VirtualFs::new());
+        config.add_source(SourceName::Default, fs);
+        config.add_importer::<Text>();
+        AssetDatabase::init(config.build());
+
+        let database = AssetDatabase::get();
+        database.import();
+
+        let task = IoTaskPool::get().spawn(async move {
+            std::thread::sleep(std::time::Duration::from_nanos(500)); // Simulate some delay for the import to start
+            let _reader = database.writer.read().await;
+
+            let library = database.library.read().await;
+            let path = AssetPath::from_str("text.txt");
+            let id = library.get_id(&path).copied().unwrap();
+
+            let source = database.config.sources().get(&SourceName::Default).unwrap();
+            let metadata = source
+                .load_metadata::<<Text as AssetImporter>::Settings>("text.txt".as_ref())
+                .await
+                .unwrap();
+
+            let loaded = database
+                .config
+                .cache()
+                .load_asset::<Text>(id.into())
+                .await
+                .unwrap();
+
+            assert_eq!(id, metadata.id);
+            assert_eq!(&loaded.asset.0, "This is test text.");
+        });
+
+        smol::block_on(task);
     }
 }

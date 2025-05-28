@@ -2,6 +2,7 @@ use crate::asset::{Asset, AssetAction, AssetType, Assets, ErasedAsset, ErasedId}
 use ecs::{SparseIndex, World, ext};
 use std::{any::TypeId, collections::HashMap, ops::Index};
 
+#[derive(Debug)]
 pub struct AssetMeta {
     pub name: &'static str,
     pub dependency_unload_action: Option<AssetAction>,
@@ -35,6 +36,7 @@ impl AssetMeta {
     }
 }
 
+#[derive(Debug)]
 pub struct AssetRegistry {
     metas: Vec<AssetMeta>,
     map: HashMap<TypeId, AssetType>,
