@@ -25,6 +25,7 @@ pub struct ImportContext<'a> {
 impl<'a> ImportContext<'a> {
     pub fn new(ty: AssetType, path: &'a AssetPath<'a>, source: &'a AssetSource) -> Self {
         let metadata_path = path.path().append_ext("meta");
+
         Self {
             ty,
             path,

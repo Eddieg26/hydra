@@ -5,7 +5,7 @@ use crate::{
 };
 use ecs::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::any::TypeId;
+use std::{any::TypeId, collections::HashMap};
 
 pub struct ProcessContext<'a> {
     cache: &'a AssetCache,
@@ -45,8 +45,7 @@ pub trait AssetProcessor: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send;
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-#[derive(Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ErasedProcesser {
     process: for<'a> fn(
         &'a mut ProcessContext,
@@ -96,21 +95,34 @@ impl ErasedProcesser {
 }
 
 #[derive(Debug)]
-pub struct AssetProcessors(IndexMap<TypeId, ErasedProcesser>);
+pub struct AssetProcessors {
+    processors: IndexMap<TypeId, ErasedProcesser>,
+    default_processors: HashMap<&'static str, TypeId>,
+}
 
 impl AssetProcessors {
     pub fn new() -> Self {
-        Self(IndexMap::new())
+        Self {
+            processors: IndexMap::new(),
+            default_processors: HashMap::new(),
+        }
     }
 
     pub fn get(&self, ty: TypeId) -> Option<&ErasedProcesser> {
-        self.0.get(&ty)
+        self.processors.get(&ty)
+    }
+
+    pub fn get_default(&self, ext: &str) -> Option<u32> {
+        self.default_processors
+            .get(ext)
+            .and_then(|ty| self.processors.get_index_of(ty))
+            .map(|i| i as u32)
     }
 
     pub fn add<P: AssetProcessor>(&mut self) {
         let ty = TypeId::of::<P>();
-        if !self.0.contains_key(&ty) {
-            self.0.insert(ty, ErasedProcesser::new::<P>());
+        if !self.processors.contains_key(&ty) {
+            self.processors.insert(ty, ErasedProcesser::new::<P>());
         }
     }
 }
@@ -119,6 +131,6 @@ impl std::ops::Index<u32> for AssetProcessors {
     type Output = ErasedProcesser;
 
     fn index(&self, index: u32) -> &Self::Output {
-        &self.0[index as usize]
+        &self.processors[index as usize]
     }
 }

@@ -334,7 +334,16 @@ impl AssetDatabase {
                 }
             };
 
-            if let Some(processor) = artifact.meta().import.processor {
+            let processor = match artifact.meta.import.processor {
+                Some(processor) => Some(processor),
+                None => artifact
+                    .meta
+                    .path
+                    .ext()
+                    .and_then(|ext| config.processors().get_default(ext)),
+            };
+
+            if let Some(processor) = processor {
                 let source = config.sources().get(artifact.path().source()).unwrap();
                 let metadata = match source.read_metadata_bytes(artifact.path().path()).await {
                     Ok(metadata) => metadata,
