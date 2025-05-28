@@ -1,4 +1,7 @@
-use crate::asset::{AssetAction, AssetType, ErasedId};
+use crate::{
+    asset::{AssetAction, AssetType, ErasedId},
+    io::ArtifactMeta,
+};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,9 +21,9 @@ pub struct AssetState {
     dependents: HashSet<ErasedId>,
     loading: HashSet<ErasedId>,
     failed: HashSet<ErasedId>,
-    unload_action: Option<AssetAction>,
     children: Vec<ErasedId>,
     parent: Option<ErasedId>,
+    unload_action: Option<AssetAction>,
 }
 
 impl AssetState {
@@ -37,9 +40,9 @@ impl AssetState {
             dependents: HashSet::new(),
             loading: HashSet::new(),
             failed: HashSet::new(),
-            unload_action: None,
             children: vec![],
             parent: None,
+            unload_action: None,
         }
     }
 
@@ -142,23 +145,28 @@ impl AssetStates {
 
     pub fn loaded(
         &mut self,
-        id: ErasedId,
-        ty: AssetType,
-        parent: Option<ErasedId>,
-        dependencies: Vec<ErasedId>,
+        meta: &ArtifactMeta,
         unload_action: Option<AssetAction>,
     ) -> HashSet<ErasedId> {
-        let mut state = self.states.remove(&id).unwrap_or_else(AssetState::new);
+        let ArtifactMeta {
+            id,
+            ty,
+            dependencies,
+            parent,
+            ..
+        } = meta;
 
-        state.ty = ty;
+        let mut state = self.states.remove(id).unwrap_or_else(AssetState::new);
+
+        state.ty = *ty;
         state.state = LoadState::Loaded;
         state.unload_action = unload_action;
-        state.parent = parent;
+        state.parent = *parent;
 
         for dependency in dependencies.iter().chain(parent.as_ref()) {
             match self.states.get_mut(dependency) {
                 Some(dep_state) => {
-                    dep_state.dependents.insert(id);
+                    dep_state.dependents.insert(*id);
                     match dep_state.state {
                         LoadState::Loading => state.loading.insert(*dependency),
                         LoadState::Failed => state.failed.insert(*dependency),
@@ -167,26 +175,30 @@ impl AssetStates {
                 }
                 None => {
                     let mut dep_state = AssetState::new();
-                    dep_state.dependents.insert(id);
+                    dep_state.dependents.insert(*id);
                     state.loading.insert(*dependency);
                     self.states.insert(*dependency, dep_state);
                 }
             };
+
+            if Some(dependency) != parent.as_ref() {
+                state.dependencies.insert(*dependency);
+            }
         }
 
         state.update();
 
         for dependent in &state.dependents {
             if let Some(state) = self.states.get_mut(dependent) {
-                state.loading.remove(&id);
-                state.failed.remove(&id);
+                state.loading.remove(id);
+                state.failed.remove(id);
                 state.update();
             }
         }
 
-        self.states.insert(id, state);
+        self.states.insert(*id, state);
 
-        self.finish(id)
+        self.finish(*id)
     }
 
     pub fn unload(&mut self, id: ErasedId) -> Option<AssetState> {
