@@ -41,6 +41,11 @@ impl Command for UnloadAssets {
                     continue;
                 };
 
+                if state.parent() == Some(id) {
+                    stack.push(*dependent);
+                    continue;
+                }
+
                 match state.unload_action() {
                     Some(AssetAction::Unload) => stack.push(*dependent),
                     Some(AssetAction::Reload) => {

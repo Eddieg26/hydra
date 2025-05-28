@@ -100,6 +100,54 @@ pub struct ArtifactMeta {
     pub path: AssetPath<'static>,
     pub import: ImportMeta,
     pub dependencies: Vec<ErasedId>,
+    pub children: Vec<ErasedId>,
+    pub parent: Option<ErasedId>,
+}
+
+impl ArtifactMeta {
+    pub fn new(
+        id: impl Into<ErasedId>,
+        ty: AssetType,
+        path: AssetPath<'static>,
+        import: ImportMeta,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            ty,
+            path,
+            import,
+            dependencies: vec![],
+            children: vec![],
+            parent: None,
+        }
+    }
+
+    pub fn new_child(
+        id: impl Into<ErasedId>,
+        ty: AssetType,
+        path: AssetPath<'static>,
+        parent: ErasedId,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            ty,
+            path,
+            import: ImportMeta::new(None, 0),
+            dependencies: vec![],
+            children: vec![],
+            parent: Some(parent),
+        }
+    }
+
+    pub fn with_dependencies(mut self, dependencies: Vec<ErasedId>) -> Self {
+        self.dependencies = dependencies;
+        self
+    }
+
+    pub fn with_children(mut self, children: Vec<ErasedId>) -> Self {
+        self.children = children;
+        self
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -408,13 +456,12 @@ mod tests {
             name: "Test Asset".to_string(),
         };
 
-        let meta = ArtifactMeta {
-            id: ErasedId::new(),
-            ty: AssetType::NONE,
-            path: AssetPath::new(SourceName::Default, "test_asset"),
-            import: ImportMeta::new(None, 123),
-            dependencies: vec![],
-        };
+        let meta = ArtifactMeta::new(
+            ErasedId::NONE,
+            AssetType::NONE,
+            AssetPath::new(SourceName::Default, "test_asset"),
+            ImportMeta::new(None, 123),
+        );
 
         let artifact = Artifact::new(&asset, meta).expect("Failed to create artifact");
         let serialized = serialize(&artifact).expect("Failed to serialize artifact");
@@ -438,13 +485,12 @@ mod tests {
                 name: "Test Asset".to_string(),
             };
 
-            let meta = ArtifactMeta {
-                id: ErasedId::new(),
-                ty: AssetType::NONE,
-                path: AssetPath::new(SourceName::Default, "test_asset"),
-                import: ImportMeta::new(None, 123),
-                dependencies: vec![],
-            };
+            let meta = ArtifactMeta::new(
+                ErasedId::NONE,
+                AssetType::NONE,
+                AssetPath::new(SourceName::Default, "test_asset"),
+                ImportMeta::new(None, 123),
+            );
 
             let artifact = Artifact::new(&asset, meta).expect("Failed to create artifact");
             cache.save_artifact(&artifact).await.unwrap();

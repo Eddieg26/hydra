@@ -19,6 +19,8 @@ pub struct AssetState {
     loading: HashSet<ErasedId>,
     failed: HashSet<ErasedId>,
     unload_action: Option<AssetAction>,
+    children: Vec<ErasedId>,
+    parent: Option<ErasedId>,
 }
 
 impl AssetState {
@@ -36,6 +38,8 @@ impl AssetState {
             loading: HashSet::new(),
             failed: HashSet::new(),
             unload_action: None,
+            children: vec![],
+            parent: None,
         }
     }
 
@@ -65,6 +69,14 @@ impl AssetState {
 
     pub fn failed(&self) -> &HashSet<ErasedId> {
         &self.failed
+    }
+
+    pub fn parent(&self) -> Option<ErasedId> {
+        self.parent
+    }
+
+    pub fn children(&self) -> &[ErasedId] {
+        &self.children
     }
 
     pub fn is_fully_loaded(&self) -> bool {
@@ -132,6 +144,7 @@ impl AssetStates {
         &mut self,
         id: ErasedId,
         ty: AssetType,
+        parent: Option<ErasedId>,
         dependencies: Vec<ErasedId>,
         unload_action: Option<AssetAction>,
     ) -> HashSet<ErasedId> {
@@ -140,8 +153,9 @@ impl AssetStates {
         state.ty = ty;
         state.state = LoadState::Loaded;
         state.unload_action = unload_action;
+        state.parent = parent;
 
-        for dependency in &dependencies {
+        for dependency in dependencies.iter().chain(parent.as_ref()) {
             match self.states.get_mut(dependency) {
                 Some(dep_state) => {
                     dep_state.dependents.insert(id);

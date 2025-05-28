@@ -284,34 +284,39 @@ impl AssetDatabase {
                 .and_then(|data| importer.deserialize_metadata(&data))
                 .unwrap_or(importer.default_metadata());
 
-            let mut ctx = ImportContext::new(ty, &path, source);
+            let ctx =
+                ImportContext::new(metadata.erased_id(), ty, &path, source, config.registry());
 
-            let artifact = match importer.import(&mut ctx, &mut reader, &metadata).await {
-                Ok(artifact) => artifact,
+            let artifacts = match importer.import(ctx, &mut reader, &metadata).await {
+                Ok(artifacts) => artifacts,
                 Err(error) => {
                     let _ = events.send(ImportError::ImportAsset(error).into()).await;
                     continue;
                 }
             };
 
-            if let Err(error) = config.cache().save_temp_artifact(&artifact).await {
-                let _ = events.send(ImportError::SaveAsset(error).into()).await;
-                continue;
+            for artifact in artifacts {
+                if let Err(error) = config.cache().save_temp_artifact(&artifact).await {
+                    let _ = events.send(ImportError::SaveAsset(error).into()).await;
+                    continue;
+                }
+
+                let node = *node_map
+                    .entry(artifact.id())
+                    .or_insert_with(|| graph.add_node(artifact.id()));
+
+                for dependency in &artifact.meta().dependencies {
+                    let dependency = *node_map
+                        .entry(*dependency)
+                        .or_insert_with(|| graph.add_node(*dependency));
+
+                    graph.add_dependency(dependency, node);
+                }
+
+                let id = artifact.id();
+
+                library.add_asset(artifact.meta.path, id);
             }
-
-            let node = *node_map
-                .entry(artifact.id())
-                .or_insert_with(|| graph.add_node(artifact.id()));
-
-            for dependency in &artifact.meta().dependencies {
-                let dependency = *node_map
-                    .entry(*dependency)
-                    .or_insert_with(|| graph.add_node(*dependency));
-
-                graph.add_dependency(dependency, node);
-            }
-
-            library.add_asset(path, artifact.id());
         }
 
         let _ = graph.build();
@@ -387,12 +392,13 @@ impl AssetDatabase {
 
     async fn remove_assets<'a>(
         &'a self,
-        paths: Vec<AssetPath<'static>>,
+        mut paths: Vec<AssetPath<'static>>,
         config: &'a AssetConfig,
         library: &'a mut AssetLibrary,
     ) {
         let mut removed = vec![];
-        for path in paths {
+
+        while let Some(path) = paths.pop() {
             let Some(id) = library.remove_asset(&path) else {
                 continue;
             };
@@ -404,10 +410,14 @@ impl AssetDatabase {
                 continue;
             };
 
-            let Ok(_) = reader.into_meta().await else {
+            let Ok(meta) = reader.into_meta().await else {
                 let _ = config.cache().remove_artifact(id).await;
                 continue;
             };
+
+            for child in meta.children.iter().filter_map(|id| library.get_path(*id)) {
+                paths.push(child.clone().into_static());
+            }
 
             let _ = config.cache().remove_artifact(id).await;
         }

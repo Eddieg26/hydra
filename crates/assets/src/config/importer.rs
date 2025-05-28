@@ -1,6 +1,6 @@
-use super::BoxedError;
+use super::{BoxedError, registry::AssetRegistry};
 use crate::{
-    asset::{Asset, AssetMetadata, AssetType, ErasedId, Settings},
+    asset::{Asset, AssetId, AssetMetadata, AssetType, ErasedId, Settings},
     io::{
         Artifact, ArtifactMeta, AssetFuture, AssetIoError, AssetPath, AssetSource, AsyncReader,
         ImportMeta, PathExt, SourceName, deserialize,
@@ -15,24 +15,40 @@ use std::{
 };
 
 pub struct ImportContext<'a> {
+    id: ErasedId,
     ty: AssetType,
     source: &'a AssetSource,
+    registry: &'a AssetRegistry,
     path: &'a AssetPath<'a>,
     metadata_path: PathBuf,
     processor: Option<u32>,
+    children: Vec<Artifact>,
 }
 
 impl<'a> ImportContext<'a> {
-    pub fn new(ty: AssetType, path: &'a AssetPath<'a>, source: &'a AssetSource) -> Self {
+    pub fn new(
+        id: ErasedId,
+        ty: AssetType,
+        path: &'a AssetPath<'a>,
+        source: &'a AssetSource,
+        registry: &'a AssetRegistry,
+    ) -> Self {
         let metadata_path = path.path().append_ext("meta");
 
         Self {
+            id,
             ty,
             path,
             source,
+            registry,
             metadata_path,
             processor: None,
+            children: vec![],
         }
+    }
+
+    pub fn id(&self) -> ErasedId {
+        self.id
     }
 
     pub fn ty(&self) -> AssetType {
@@ -49,6 +65,26 @@ impl<'a> ImportContext<'a> {
 
     pub fn set_processor(&mut self, processor: u32) {
         self.processor = Some(processor)
+    }
+
+    pub fn add_child<A: Asset + Serialize>(
+        &mut self,
+        id: AssetId<A>,
+        name: impl ToString,
+        child: A,
+    ) -> Result<AssetId<A>, AssetIoError> {
+        let ty = self.registry.get_ty(TypeId::of::<A>()).expect(&format!(
+            "Asset type {} not registered",
+            std::any::type_name::<A>()
+        ));
+
+        let path = self.path.with_name(name.to_string()).into_static();
+        let meta = ArtifactMeta::new_child(id, ty, path, self.id);
+        let artifact = Artifact::new(&child, meta)?;
+
+        self.children.push(artifact);
+
+        Ok(id)
     }
 
     pub async fn read_asset(&self) -> Result<Vec<u8>, AssetIoError> {
@@ -101,10 +137,10 @@ pub trait AssetImporter: Send + Sync + 'static {
 #[derive(Clone, Copy, Debug)]
 pub struct ErasedImporter {
     import: for<'a> fn(
-        &'a mut ImportContext,
+        ImportContext<'a>,
         &'a mut dyn AsyncReader,
         &'a Box<dyn DynMetadata>,
-    ) -> AssetFuture<'a, Artifact, BoxedError>,
+    ) -> AssetFuture<'a, Vec<Artifact>, BoxedError>,
     deserialize_metadata: fn(&[u8]) -> Result<Box<dyn DynMetadata>, AssetIoError>,
     default_metadata: fn() -> Box<dyn DynMetadata>,
     type_id: fn() -> TypeId,
@@ -115,14 +151,14 @@ pub struct ErasedImporter {
 impl ErasedImporter {
     pub fn new<I: AssetImporter>() -> Self {
         Self {
-            import: |ctx, reader, metadata| {
+            import: |mut ctx, reader, metadata| {
                 let f = async {
                     let metadata = metadata
                         .as_any()
                         .downcast_ref::<AssetMetadata<I::Settings>>()
                         .expect("AssetMetadata type mismatch");
 
-                    let asset = <I as AssetImporter>::import(ctx, reader, metadata)
+                    let asset = <I as AssetImporter>::import(&mut ctx, reader, metadata)
                         .await
                         .map_err(|e| Box::new(e) as BoxedError)?;
 
@@ -140,15 +176,20 @@ impl ErasedImporter {
                     let mut dependencies = vec![];
                     asset.dependencies(&mut dependencies);
 
-                    let meta = ArtifactMeta {
-                        id: metadata.id,
-                        ty: ctx.ty,
-                        path: ctx.path.clone().into_static(),
-                        import: ImportMeta::new(ctx.processor, checksum),
-                        dependencies,
-                    };
+                    let meta = ArtifactMeta::new(
+                        metadata.id,
+                        ctx.ty,
+                        ctx.path.clone().into_static(),
+                        ImportMeta::new(ctx.processor, checksum),
+                    )
+                    .with_dependencies(dependencies);
 
-                    Artifact::new(&asset, meta).map_err(|e| Box::new(e) as BoxedError)
+                    let mut artifacts =
+                        vec![Artifact::new(&asset, meta).map_err(|e| Box::new(e) as BoxedError)?];
+
+                    artifacts.extend(ctx.children);
+
+                    Ok(artifacts)
                 };
 
                 Box::pin(f)
@@ -166,10 +207,10 @@ impl ErasedImporter {
 
     pub fn import<'a>(
         &'a self,
-        ctx: &'a mut ImportContext<'a>,
+        ctx: ImportContext<'a>,
         reader: &'a mut dyn AsyncReader,
         metadata: &'a Box<dyn DynMetadata>,
-    ) -> AssetFuture<'a, Artifact, BoxedError> {
+    ) -> AssetFuture<'a, Vec<Artifact>, BoxedError> {
         (self.import)(ctx, reader, metadata)
     }
 

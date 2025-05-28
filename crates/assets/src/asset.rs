@@ -77,6 +77,8 @@ impl<A: Asset> AssetId<A> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ErasedId(uuid::Uuid);
 impl ErasedId {
+    pub const NONE: ErasedId = ErasedId(uuid::Uuid::from_u128(0));
+
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4())
     }
@@ -113,7 +115,7 @@ impl<A: Asset> Serialize for AssetId<A> {
     where
         S: serde::Serializer,
     {
-        self.0.as_u128().serialize(serializer)
+        ErasedId::serialize(&self.0.into(), serializer)
     }
 }
 
@@ -122,8 +124,9 @@ impl<'de, A: Asset> Deserialize<'de> for AssetId<A> {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = u128::deserialize(deserializer)?;
-        Ok(Self(uuid::Uuid::from_u128(value), Default::default()))
+        let value = String::deserialize(deserializer)?;
+        let id = uuid::Uuid::from_str(&value).map_err(serde::de::Error::custom)?;
+        Ok(Self(id, Default::default()))
     }
 }
 
