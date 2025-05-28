@@ -78,7 +78,7 @@ impl<'a> ImportContext<'a> {
             std::any::type_name::<A>()
         ));
 
-        let path = self.path.with_name(name.to_string()).into_static();
+        let path = self.path.with_name(name.to_string()).into_owned();
         let meta = ArtifactMeta::new_child(id, ty, path, self.id);
         let artifact = Artifact::new(&child, meta)?;
 
@@ -179,7 +179,7 @@ impl ErasedImporter {
                     let meta = ArtifactMeta::new(
                         metadata.id,
                         ctx.ty,
-                        ctx.path.clone().into_static(),
+                        ctx.path.clone().into_owned(),
                         ImportMeta::new(ctx.processor, checksum),
                     )
                     .with_dependencies(dependencies);

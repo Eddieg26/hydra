@@ -1,5 +1,5 @@
 use super::AssetDatabase;
-use crate::asset::{AssetAction, ErasedId};
+use crate::asset::{Asset, AssetAction, AssetId, ErasedId};
 use ecs::Command;
 use std::collections::HashSet;
 
@@ -56,4 +56,16 @@ impl Command for UnloadAssets {
             }
         }
     }
+}
+
+/// Event representing changes to an [`Asset`] in the [`AssetDatabase`].
+pub enum AssetEvent<A: Asset> {
+    /// An asset was added, modified, removed, or loaded.
+    Added { id: AssetId<A> },
+    /// An asset was modified.
+    Modified { id: AssetId<A> },
+    /// An asset was removed.
+    Removed { id: AssetId<A> },
+    /// An asset and its dependencies were loaded.
+    Loaded { id: AssetId<A> },
 }

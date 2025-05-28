@@ -138,11 +138,11 @@ impl AssetDatabase {
                         .import_file(path.clone(), source, config, library)
                         .await
                     {
-                        Ok(Some(path)) => import.push(path.into_static()),
+                        Ok(Some(path)) => import.push(path.into_owned()),
                         Ok(None) => continue,
                         Err(error) => {
                             let _ = events.send(ImportError::File(error).into()).await;
-                            errors.insert(path.into_static());
+                            errors.insert(path.into_owned());
                         }
                     }
                 }
@@ -416,7 +416,7 @@ impl AssetDatabase {
             };
 
             for child in meta.children.iter().filter_map(|id| library.get_path(*id)) {
-                paths.push(child.clone().into_static());
+                paths.push(child.clone().into_owned());
             }
 
             let _ = config.cache().remove_artifact(id).await;

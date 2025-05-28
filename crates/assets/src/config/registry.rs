@@ -1,5 +1,9 @@
-use crate::asset::{Asset, AssetAction, AssetType, Assets, ErasedAsset, ErasedId};
+use crate::{
+    asset::{Asset, AssetAction, AssetType, Assets, ErasedAsset, ErasedId},
+    io::{AssetIoError, deserialize},
+};
 use ecs::{SparseIndex, World, ext};
+use serde::Deserialize;
 use std::{any::TypeId, collections::HashMap, ops::Index};
 
 #[derive(Debug)]
@@ -9,6 +13,7 @@ pub struct AssetMeta {
 
     add: fn(&mut World, ErasedId, ErasedAsset),
     remove: fn(&mut World, ErasedId) -> Option<ErasedAsset>,
+    deserialize: Option<fn(&[u8]) -> Result<ErasedAsset, AssetIoError>>,
 }
 
 impl AssetMeta {
@@ -24,6 +29,7 @@ impl AssetMeta {
                 let assets = world.resource_mut::<Assets<A>>();
                 assets.remove(id).map(ErasedAsset::new)
             },
+            deserialize: None,
         }
     }
 
@@ -33,6 +39,14 @@ impl AssetMeta {
 
     pub fn remove(&self, world: &mut World, id: ErasedId) -> Option<ErasedAsset> {
         (self.remove)(world, id)
+    }
+
+    pub fn deserialize(&self, data: &[u8]) -> Option<Result<ErasedAsset, AssetIoError>> {
+        self.deserialize.map(|deserialize| deserialize(data))
+    }
+
+    pub(crate) fn set_deserialize<A: Asset + for<'de> Deserialize<'de>>(&mut self) {
+        self.deserialize = Some(|data: &[u8]| deserialize::<A>(data).map(ErasedAsset::new));
     }
 }
 
@@ -68,6 +82,15 @@ impl AssetRegistry {
                 self.map.insert(ty, index);
                 index
             }
+        }
+    }
+
+    pub(crate) fn set_deserialize<A: Asset + for<'de> Deserialize<'de>>(
+        &mut self,
+        index: AssetType,
+    ) {
+        if let Some(meta) = self.metas.get_mut(index.to_usize()) {
+            meta.set_deserialize::<A>();
         }
     }
 }

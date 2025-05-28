@@ -130,7 +130,7 @@ impl<'a> AssetPath<'a> {
         }
     }
 
-    pub fn into_static(self) -> AssetPath<'static> {
+    pub fn into_owned(self) -> AssetPath<'static> {
         AssetPath {
             source: self.source.into_owned(),
             path: self.path,

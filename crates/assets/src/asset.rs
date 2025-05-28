@@ -345,36 +345,6 @@ impl<A: Asset> Assets<A> {
 
 impl<A: Asset> Resource for Assets<A> {}
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum LoadPath<'a> {
-    Id(ErasedId),
-    Path(AssetPath<'a>),
-}
-
-impl<I: Into<ErasedId>> From<I> for LoadPath<'static> {
-    fn from(value: I) -> Self {
-        LoadPath::Id(value.into())
-    }
-}
-
-impl<'a> From<AssetPath<'a>> for LoadPath<'a> {
-    fn from(value: AssetPath<'a>) -> Self {
-        LoadPath::Path(value)
-    }
-}
-
-impl<'a> From<&'a str> for LoadPath<'a> {
-    fn from(value: &'a str) -> Self {
-        LoadPath::Path(AssetPath::from_str(value))
-    }
-}
-
-impl From<String> for LoadPath<'static> {
-    fn from(value: String) -> Self {
-        LoadPath::Path(AssetPath::from_string(value))
-    }
-}
-
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Folder {
     pub children: Vec<PathBuf>,

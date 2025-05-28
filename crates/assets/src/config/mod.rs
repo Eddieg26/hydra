@@ -43,7 +43,8 @@ impl AssetConfigBuilder {
 
     pub fn add_importer<I: AssetImporter>(&mut self) {
         self.importers.add::<I>();
-        self.register::<I::Asset>();
+        let ty = self.register::<I::Asset>();
+        self.registry.set_deserialize::<I::Asset>(ty);
     }
 
     pub fn add_processor<P: AssetProcessor>(&mut self) {

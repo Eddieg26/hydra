@@ -12,6 +12,24 @@ pub enum LoadState {
     Failed,
 }
 
+impl LoadState {
+    pub fn is_unloaded(self) -> bool {
+        matches!(self, LoadState::Unloaded)
+    }
+
+    pub fn is_loading(self) -> bool {
+        matches!(self, LoadState::Loading)
+    }
+
+    pub fn is_loaded(self) -> bool {
+        matches!(self, LoadState::Loaded)
+    }
+
+    pub fn is_failed(self) -> bool {
+        matches!(self, LoadState::Failed)
+    }
+}
+
 #[derive(Debug)]
 pub struct AssetState {
     ty: AssetType,

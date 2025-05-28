@@ -329,6 +329,14 @@ impl AssetCache {
         self.temp.join(id.to_string())
     }
 
+    pub async fn get_artifact(&self, id: ErasedId) -> Result<Artifact, AssetIoError> {
+        let path = self.get_artifact_path(id);
+        let mut data = vec![];
+        let mut reader = self.fs.reader(&path).await?;
+        AsyncReader::read_to_end(&mut reader, &mut data).await?;
+        deserialize::<Artifact>(&data)
+    }
+
     pub async fn get_artifact_reader(&self, id: ErasedId) -> Result<ArtifactReader, AssetIoError> {
         let path = self.get_artifact_path(id);
         self.fs.reader(&path).await.map(ArtifactReader::new)
@@ -336,8 +344,8 @@ impl AssetCache {
 
     pub async fn get_temp_artifact(&self, id: ErasedId) -> Result<Artifact, AssetIoError> {
         let path = self.get_temp_artifact_path(id);
-        let mut reader = self.fs.reader(&path).await?;
         let mut data = vec![];
+        let mut reader = self.fs.reader(&path).await?;
         AsyncReader::read_to_end(&mut reader, &mut data).await?;
 
         deserialize::<Artifact>(&data)
