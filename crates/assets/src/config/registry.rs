@@ -8,6 +8,7 @@ use std::{any::TypeId, collections::HashMap, ops::Index};
 
 #[derive(Debug)]
 pub struct AssetMeta {
+    pub ty: AssetType,
     pub name: &'static str,
     pub dependency_unload_action: Option<AssetAction>,
 
@@ -17,8 +18,9 @@ pub struct AssetMeta {
 }
 
 impl AssetMeta {
-    pub fn new<A: Asset>() -> Self {
+    pub fn new<A: Asset>(ty: AssetType) -> Self {
         Self {
+            ty,
             name: ext::short_type_name::<A>(),
             dependency_unload_action: A::DEPENDENCY_UNLOAD_ACTION,
             add: |world, id, asset| {
@@ -78,7 +80,7 @@ impl AssetRegistry {
             Some(index) => index,
             None => {
                 let index = AssetType::from_usize(self.metas.len());
-                self.metas.push(AssetMeta::new::<A>());
+                self.metas.push(AssetMeta::new::<A>(index));
                 self.map.insert(ty, index);
                 index
             }

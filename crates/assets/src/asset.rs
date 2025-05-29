@@ -30,7 +30,7 @@ impl AssetDependencies for HashSet<ErasedId> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AssetAction {
     Reload,
     Unload,

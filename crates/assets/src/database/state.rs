@@ -103,7 +103,7 @@ impl AssetState {
     pub fn is_fully_loaded(&self) -> bool {
         matches!(
             (self.state, self.dependency_state),
-            (LoadState::Loaded, LoadState::Loaded | LoadState::Failed)
+            (LoadState::Loaded, LoadState::Loaded)
         )
     }
 
@@ -145,6 +145,12 @@ impl AssetStates {
             .unwrap_or(LoadState::Unloaded)
     }
 
+    pub fn is_fully_loaded(&self, id: ErasedId) -> bool {
+        self.get(id)
+            .map(|state| state.is_fully_loaded())
+            .unwrap_or(false)
+    }
+
     pub fn loading(&mut self, id: ErasedId) {
         let mut state = self.states.remove(&id).unwrap_or_else(AssetState::new);
 
@@ -161,16 +167,13 @@ impl AssetStates {
         self.states.insert(id, state);
     }
 
-    pub fn loaded(
-        &mut self,
-        meta: &ArtifactMeta,
-        unload_action: Option<AssetAction>,
-    ) -> HashSet<ErasedId> {
+    pub fn loaded(&mut self, meta: &ArtifactMeta) -> HashSet<ErasedId> {
         let ArtifactMeta {
             id,
             ty,
             dependencies,
             parent,
+            unload_action,
             ..
         } = meta;
 
@@ -178,7 +181,7 @@ impl AssetStates {
 
         state.ty = *ty;
         state.state = LoadState::Loaded;
-        state.unload_action = unload_action;
+        state.unload_action = *unload_action;
         state.parent = *parent;
 
         for dependency in dependencies.iter().chain(parent.as_ref()) {
@@ -210,6 +213,7 @@ impl AssetStates {
             if let Some(state) = self.states.get_mut(dependent) {
                 state.loading.remove(id);
                 state.failed.remove(id);
+
                 state.update();
             }
         }
@@ -238,7 +242,7 @@ impl AssetStates {
         Some(state)
     }
 
-    pub fn failed(&mut self, id: ErasedId) -> HashSet<ErasedId> {
+    pub fn failed(&mut self, id: ErasedId) {
         let mut state = self.states.remove(&id).unwrap_or_else(AssetState::new);
         state.state = LoadState::Failed;
 
@@ -251,8 +255,6 @@ impl AssetStates {
         }
 
         self.states.insert(id, state);
-
-        self.finish(id)
     }
 
     fn finish(&mut self, id: ErasedId) -> HashSet<ErasedId> {
@@ -267,16 +269,26 @@ impl AssetStates {
 
             visited.insert(id);
 
-            let state = match self.states.get(&id) {
-                Some(state) => state,
-                None => continue,
+            let Some(dependents) = self
+                .states
+                .get(&id)
+                .and_then(|s| s.is_fully_loaded().then_some(s.dependents.clone()))
+            else {
+                continue;
             };
 
-            if state.dependencies.iter().all(|dep| finished.contains(dep)) {
-                finished.insert(id);
+            for dep in dependents {
+                let Some(dep_state) = self.states.get_mut(&dep) else {
+                    continue;
+                };
+
+                dep_state.loading.remove(&id);
+                dep_state.update();
+
+                stack.push(dep);
             }
 
-            stack.extend(&state.dependents);
+            finished.insert(id);
         }
 
         finished

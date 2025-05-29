@@ -1,9 +1,35 @@
 use super::AssetDatabase;
-use crate::asset::{Asset, AssetAction, AssetId, ErasedId};
+use crate::{
+    asset::{Asset, AssetAction, AssetId, ErasedAsset, ErasedId},
+    io::ArtifactMeta,
+};
 use ecs::Command;
 use std::collections::HashSet;
 
-pub struct UnloadAsset(ErasedId);
+pub struct AssetLoaded {
+    pub asset: ErasedAsset,
+    pub meta: ArtifactMeta,
+}
+
+impl Command for AssetLoaded {
+    fn execute(self, world: &mut ecs::World) {
+        let database = AssetDatabase::get();
+
+        if let Some(meta) = database.config.registry().get(self.meta.ty) {
+            meta.add(world, self.meta.id, self.asset);
+        };
+
+        let mut states = database.states.write_blocking();
+
+        let mut stack = vec![self.meta.id];
+
+        while let Some(id) = stack.pop() {
+            states.loaded(&self.meta);
+        }
+    }
+}
+
+pub struct UnloadAsset(pub ErasedId);
 
 impl Command for UnloadAsset {
     fn execute(self, world: &mut ecs::World) {

@@ -1,7 +1,7 @@
 use super::{
     AssetIoError, AssetPath, AsyncReader, ErasedFileSystem, FileSystem, deserialize, serialize,
 };
-use crate::asset::{Asset, AssetId, AssetType, ErasedId};
+use crate::asset::{Asset, AssetAction, AssetId, AssetType, ErasedId};
 use serde::{Deserialize, Serialize, ser::SerializeStruct};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
 use std::{
@@ -102,6 +102,7 @@ pub struct ArtifactMeta {
     pub dependencies: Vec<ErasedId>,
     pub children: Vec<ErasedId>,
     pub parent: Option<ErasedId>,
+    pub unload_action: Option<AssetAction>,
 }
 
 impl ArtifactMeta {
@@ -119,6 +120,7 @@ impl ArtifactMeta {
             dependencies: vec![],
             children: vec![],
             parent: None,
+            unload_action: None,
         }
     }
 
@@ -136,6 +138,7 @@ impl ArtifactMeta {
             dependencies: vec![],
             children: vec![],
             parent: Some(parent),
+            unload_action: None,
         }
     }
 
@@ -146,6 +149,11 @@ impl ArtifactMeta {
 
     pub fn with_children(mut self, children: Vec<ErasedId>) -> Self {
         self.children = children;
+        self
+    }
+
+    pub fn with_unload_action(mut self, action: impl Into<Option<AssetAction>>) -> Self {
+        self.unload_action = action.into();
         self
     }
 }

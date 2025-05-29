@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use super::{AssetDatabase, DatabaseEvent, state::AssetStates};
+use super::{AssetDatabase, DatabaseEvent, state::LoadState};
 use crate::{
     asset::{Asset, AssetId, ErasedAsset, ErasedId},
     config::AssetConfig,
@@ -8,7 +6,6 @@ use crate::{
 };
 use ecs::core::task::IoTaskPool;
 use serde::{Deserialize, Serialize};
-use smol::{channel::Sender, lock::RwLock};
 
 #[derive(thiserror::Error, Debug)]
 pub enum AssetLoadError {
@@ -76,24 +73,36 @@ impl AssetDatabase {
                 let mut ids = vec![id];
 
                 while let Some(id) = ids.pop() {
-                    if states.read().await.get_load_state(id).is_loading() {
+                    let mut states = states.write().await;
+
+                    if states.get_load_state(id).is_loading() {
                         continue;
                     }
+
+                    states.loading(id);
 
                     let (asset, meta) = match Self::load_internal(id, &config).await {
                         Ok(result) => result,
                         Err(error) => {
                             let _ = sender.send(DatabaseEvent::LoadError(error));
+                            states.failed(id);
                             continue;
                         }
                     };
 
+                    let loaded = states.loaded(&meta);
+
                     for dependency in &meta.dependencies {
-                        ids.push(*dependency);
+                        if matches!(
+                            states.get_load_state(*dependency),
+                            LoadState::Unloaded | LoadState::Failed
+                        ) {
+                            ids.push(*dependency);
+                        }
                     }
 
                     if let Some(parent) = meta.parent.and_then(|p| {
-                        let state = states.read_blocking().get_load_state(p);
+                        let state = states.get_load_state(p);
                         (state.is_unloaded() || state.is_failed()).then_some(p)
                     }) {
                         ids.push(parent);

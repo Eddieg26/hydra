@@ -73,13 +73,18 @@ impl<'a> ImportContext<'a> {
         name: impl ToString,
         child: A,
     ) -> Result<AssetId<A>, AssetIoError> {
-        let ty = self.registry.get_ty(TypeId::of::<A>()).expect(&format!(
-            "Asset type {} not registered",
-            std::any::type_name::<A>()
-        ));
+        let asset_meta = self
+            .registry
+            .get_ty(TypeId::of::<A>())
+            .and_then(|ty| self.registry.get(ty))
+            .expect(&format!(
+                "Asset type {} not registered",
+                std::any::type_name::<A>()
+            ));
 
         let path = self.path.with_name(name.to_string()).into_owned();
-        let meta = ArtifactMeta::new_child(id, ty, path, self.id);
+        let meta = ArtifactMeta::new_child(id, asset_meta.ty, path, self.id)
+            .with_unload_action(asset_meta.dependency_unload_action);
         let artifact = Artifact::new(&child, meta)?;
 
         self.children.push(artifact);
@@ -176,13 +181,19 @@ impl ErasedImporter {
                     let mut dependencies = vec![];
                     asset.dependencies(&mut dependencies);
 
+                    let unload_action = ctx
+                        .registry
+                        .get(ctx.ty)
+                        .and_then(|meta| meta.dependency_unload_action);
+
                     let meta = ArtifactMeta::new(
                         metadata.id,
                         ctx.ty,
                         ctx.path.clone().into_owned(),
                         ImportMeta::new(ctx.processor, checksum),
                     )
-                    .with_dependencies(dependencies);
+                    .with_dependencies(dependencies)
+                    .with_unload_action(unload_action);
 
                     let mut artifacts =
                         vec![Artifact::new(&asset, meta).map_err(|e| Box::new(e) as BoxedError)?];
