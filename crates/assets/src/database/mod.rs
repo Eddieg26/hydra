@@ -1,9 +1,10 @@
 use crate::{
-    asset::{ErasedAsset, ErasedId},
-    config::{AssetConfig, importer::ImportError},
-    io::{ArtifactMeta, AssetPath, cache::AssetLibrary},
+    asset::ErasedId,
+    config::{AssetConfig, AssetConfigBuilder, importer::ImportError},
+    io::{AssetPath, cache::AssetLibrary},
 };
-use ecs::EventWriter;
+use commands::AssetCommand;
+use ecs::{Commands, EventWriter, SystemArg};
 use load::AssetLoadError;
 use smol::{
     channel::{Receiver, Sender, unbounded},
@@ -12,19 +13,19 @@ use smol::{
 use state::AssetStates;
 use std::sync::{Arc, OnceLock};
 
-pub mod events;
+pub mod commands;
 pub mod import;
 pub mod load;
 pub mod state;
 
 static DB: OnceLock<AssetDatabase> = OnceLock::new();
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct AssetDatabase {
     config: Arc<AssetConfig>,
-    library: Arc<RwLock<AssetLibrary>>,
-    states: Arc<RwLock<AssetStates>>,
-    writer: Arc<RwLock<()>>,
+    library: RwLock<AssetLibrary>,
+    states: RwLock<AssetStates>,
+    writer: RwLock<()>,
     sender: Sender<DatabaseEvent>,
     receiver: Receiver<DatabaseEvent>,
 }
@@ -39,14 +40,18 @@ impl AssetDatabase {
         DB.get().expect("AssetDatabase not initialized")
     }
 
+    pub fn is_initialized() -> bool {
+        DB.get().is_some()
+    }
+
     fn new(config: AssetConfig) -> Self {
         let (sender, receiver) = unbounded();
 
         Self {
             config: Arc::new(config),
-            library: Arc::default(),
-            states: Arc::default(),
-            writer: Arc::default(),
+            library: RwLock::default(),
+            states: RwLock::default(),
+            writer: RwLock::default(),
             sender,
             receiver,
         }
@@ -67,28 +72,71 @@ impl AssetDatabase {
         self.library.read_blocking().get_path(id).cloned()
     }
 
-    pub fn update(&self, mut events: EventWriter<ImportError>) {
+    pub async fn send_event(&self, event: impl Into<DatabaseEvent>) {
+        let _ = self.sender.send(event.into()).await;
+    }
+
+    pub fn update(
+        &self,
+        mut import_errors: EventWriter<ImportError>,
+        mut load_errors: EventWriter<AssetLoadError>,
+        mut commands: Commands,
+    ) {
         while let Ok(event) = self.receiver.try_recv() {
             match event {
-                DatabaseEvent::ImportError(error) => events.send(error),
-                DatabaseEvent::AssetLoaded { asset, meta } => {}
-                DatabaseEvent::LoadError(error) => {}
+                DatabaseEvent::AssetCommand(command) => commands.add(command),
+                DatabaseEvent::ImportError(error) => import_errors.send(error),
+                DatabaseEvent::LoadError(error) => load_errors.send(error),
             }
         }
     }
 }
 
 pub enum DatabaseEvent {
-    AssetLoaded {
-        asset: ErasedAsset,
-        meta: ArtifactMeta,
-    },
+    AssetCommand(AssetCommand),
     ImportError(ImportError),
     LoadError(AssetLoadError),
 }
 
+impl From<AssetCommand> for DatabaseEvent {
+    fn from(value: AssetCommand) -> Self {
+        Self::AssetCommand(value)
+    }
+}
+
 impl From<ImportError> for DatabaseEvent {
     fn from(value: ImportError) -> Self {
-        DatabaseEvent::ImportError(value)
+        Self::ImportError(value)
+    }
+}
+
+impl From<AssetLoadError> for DatabaseEvent {
+    fn from(value: AssetLoadError) -> Self {
+        Self::LoadError(value)
+    }
+}
+
+unsafe impl SystemArg for &AssetDatabase {
+    type Item<'world, 'state> = &'static AssetDatabase;
+
+    type State = &'static AssetDatabase;
+
+    fn init(world: &mut ecs::World, _: &mut ecs::WorldAccess) -> Self::State {
+        if AssetDatabase::is_initialized() {
+            AssetDatabase::get()
+        } else if let Some(config) = world.remove_resource::<AssetConfigBuilder>() {
+            AssetDatabase::init(config.build());
+            AssetDatabase::get()
+        } else {
+            panic!("AssetDatabase not initialized and no AssetConfigBuilder found in world");
+        }
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        _: ecs::world::WorldCell<'world>,
+        _: &ecs::SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        state
     }
 }

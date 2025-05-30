@@ -1,5 +1,4 @@
-use crate::io::source::AssetPath;
-use ecs::{Resource, SparseIndex, core::BlobCell};
+use ecs::{Event, Resource, SparseIndex, core::BlobCell};
 use serde::{Deserialize, Serialize, de::Visitor, ser::SerializeStruct};
 use std::{
     collections::{HashMap, HashSet},
@@ -345,6 +344,20 @@ impl<A: Asset> Assets<A> {
 
 impl<A: Asset> Resource for Assets<A> {}
 
+/// Event representing changes to an [`Asset`] in the [`AssetDatabase`].
+pub enum AssetEvent<A: Asset> {
+    /// An asset was added, modified, removed, or loaded.
+    Added { id: AssetId<A> },
+    /// An asset was modified.
+    Modified { id: AssetId<A> },
+    /// An asset was removed.
+    Removed { id: AssetId<A>, asset: A },
+    /// An asset and its dependencies were loaded.
+    Loaded { id: AssetId<A> },
+}
+
+impl<A: Asset> Event for AssetEvent<A> {}
+
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Folder {
     pub children: Vec<PathBuf>,
@@ -369,5 +382,11 @@ impl ErasedAsset {
 
     pub fn into<A: Asset>(self) -> A {
         self.0.into_value()
+    }
+}
+
+impl<A: Asset> From<A> for ErasedAsset {
+    fn from(value: A) -> Self {
+        Self::new(value)
     }
 }

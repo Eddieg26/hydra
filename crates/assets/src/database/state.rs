@@ -1,7 +1,4 @@
-use crate::{
-    asset::{AssetAction, AssetType, ErasedId},
-    io::ArtifactMeta,
-};
+use crate::asset::{AssetAction, AssetType, ErasedId};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,53 +125,39 @@ impl AssetStates {
         self.states.insert(id, state);
     }
 
-    pub fn loaded(&mut self, meta: &ArtifactMeta) -> Vec<ErasedId> {
-        let ArtifactMeta {
-            id,
-            ty,
-            dependencies,
-            parent,
-            unload_action,
-            ..
-        } = meta;
-
-        let mut state = self.states.remove(id).unwrap_or_else(AssetState::new);
-
-        state.ty = *ty;
+    pub fn loaded(
+        &mut self,
+        id: ErasedId,
+        ty: AssetType,
+        dependencies: &Vec<ErasedId>,
+        parent: Option<ErasedId>,
+        unload_action: Option<AssetAction>,
+    ) -> Vec<(ErasedId, AssetType)> {
+        let mut state = self.states.remove(&id).unwrap_or_else(AssetState::new);
+        state.ty = ty;
         state.state = LoadState::Loaded;
-        state.unload_action = *unload_action;
-        state.parent = *parent;
+        state.unload_action = unload_action;
+        state.parent = parent;
 
-        for dependency in dependencies {
+        for dependency in dependencies.iter() {
             let dep_state = self.states.entry(*dependency).or_insert(AssetState::new());
-            dep_state.dependents.insert(*id);
+            dep_state.dependents.insert(id);
             state.dependency_status.insert(*dependency, dep_state.state);
+            state.dependencies.insert(*dependency);
         }
 
-        self.states.insert(*id, state);
+        if let Some(parent) = parent {
+            let parent_state = self.states.entry(parent).or_insert(AssetState::new());
+            parent_state.children.push(id);
+            state.dependency_status.insert(parent, parent_state.state);
+        }
 
-        match self.is_fully_loaded(id) {
-            true => self.finish(*id),
+        self.states.insert(id, state);
+
+        match self.is_fully_loaded(&id) {
+            true => self.finish(id),
             false => Vec::new(),
         }
-    }
-
-    fn is_fully_loaded(&self, id: &ErasedId) -> bool {
-        let mut stack = vec![id];
-
-        while let Some(id) = stack.pop() {
-            let Some(state) = self.get(id) else {
-                return false;
-            };
-
-            if !state.state.is_loaded() {
-                return false;
-            }
-
-            stack.extend(state.dependency_status().keys());
-        }
-
-        return true;
     }
 
     pub fn unload(&mut self, id: ErasedId) -> Option<AssetState> {
@@ -200,7 +183,7 @@ impl AssetStates {
         let mut state = self.states.remove(&id).unwrap_or_else(AssetState::new);
         state.state = LoadState::Failed;
 
-        for dependent in &state.dependents {
+        for dependent in state.dependents.iter().chain(state.children()) {
             let dependent = self.states.entry(*dependent).or_insert(AssetState::new());
             dependent.dependency_status.insert(id, LoadState::Failed);
         }
@@ -208,7 +191,25 @@ impl AssetStates {
         self.states.insert(id, state);
     }
 
-    fn finish(&mut self, id: ErasedId) -> Vec<ErasedId> {
+    pub fn is_fully_loaded(&self, id: &ErasedId) -> bool {
+        let mut stack = vec![id];
+
+        while let Some(id) = stack.pop() {
+            let Some(state) = self.get(id) else {
+                return false;
+            };
+
+            if !state.state.is_loaded() {
+                return false;
+            }
+
+            stack.extend(state.dependency_status().keys());
+        }
+
+        return true;
+    }
+
+    fn finish(&mut self, id: ErasedId) -> Vec<(ErasedId, AssetType)> {
         let mut visited = HashSet::new();
         let mut stack = vec![id];
         let mut finished = vec![];
@@ -220,13 +221,17 @@ impl AssetStates {
 
             visited.insert(id);
 
-            let dependents = match self.states.get(&id) {
-                Some(state) => state
-                    .dependents
-                    .iter()
-                    .chain(state.children())
-                    .copied()
-                    .collect::<Vec<_>>(),
+            let (ty, dependents) = match self.states.get(&id) {
+                Some(state) => {
+                    let dependents = state
+                        .dependents
+                        .iter()
+                        .chain(state.children())
+                        .copied()
+                        .collect::<Vec<_>>();
+
+                    (state.ty, dependents)
+                }
                 None => continue,
             };
 
@@ -242,7 +247,7 @@ impl AssetStates {
                 }
             }
 
-            finished.push(id);
+            finished.push((id, ty));
         }
 
         finished

@@ -1,10 +1,13 @@
-use super::{AssetDatabase, DatabaseEvent, state::LoadState};
+use super::{
+    AssetDatabase,
+    commands::{AssetCommand, LoadDependencies},
+};
 use crate::{
     asset::{Asset, AssetId, ErasedAsset, ErasedId},
     config::AssetConfig,
     io::{ArtifactMeta, AssetIoError, AssetPath},
 };
-use ecs::core::task::IoTaskPool;
+use ecs::{Event, core::task::IoTaskPool};
 use serde::{Deserialize, Serialize};
 
 #[derive(thiserror::Error, Debug)]
@@ -31,6 +34,8 @@ impl From<AssetIoError> for AssetLoadError {
     }
 }
 
+impl Event for AssetLoadError {}
+
 impl AssetDatabase {
     pub fn load<'a, A: Asset + for<'de> Deserialize<'de>>(
         &self,
@@ -55,25 +60,35 @@ impl AssetDatabase {
             }
         };
 
-        self.spawn_load_task(id);
+        self.spawn_load_task(id, true);
 
         Ok(id)
     }
 
-    fn spawn_load_task(&self, id: ErasedId) {
+    pub fn reload<'a>(&self, path: impl Into<LoadPath<'a>>) {
+        let load_path: LoadPath<'a> = path.into();
+        let id = match load_path {
+            LoadPath::Id(id) => id,
+            LoadPath::Path(path) => match self.get_id(path) {
+                Some(id) => id,
+                None => return,
+            },
+        };
+
+        self.spawn_load_task(id, false);
+    }
+
+    fn spawn_load_task(&self, id: ErasedId, load_dependencies: bool) {
         IoTaskPool::get()
             .spawn(async move {
-                let AssetDatabase {
-                    config,
-                    states,
-                    sender,
-                    ..
-                } = AssetDatabase::get();
+                let db = AssetDatabase::get();
+
+                let _writer = db.writer.read().await;
 
                 let mut ids = vec![id];
 
                 while let Some(id) = ids.pop() {
-                    let mut states = states.write().await;
+                    let mut states = db.states.write().await;
 
                     if states.get_load_state(id).is_loading() {
                         continue;
@@ -81,34 +96,37 @@ impl AssetDatabase {
 
                     states.loading(id);
 
-                    let (asset, meta) = match Self::load_internal(id, &config).await {
+                    let (asset, meta) = match Self::load_internal(id, &db.config).await {
                         Ok(result) => result,
                         Err(error) => {
-                            let _ = sender.send(DatabaseEvent::LoadError(error));
+                            db.send_event(error).await;
                             states.failed(id);
                             continue;
                         }
                     };
 
-                    let loaded = states.loaded(&meta);
+                    if load_dependencies {
+                        for dependency in meta.dependencies.iter().copied() {
+                            if !states.get_load_state(dependency).is_loaded() {
+                                ids.push(dependency);
+                            }
+                        }
 
-                    for dependency in &meta.dependencies {
-                        if matches!(
-                            states.get_load_state(*dependency),
-                            LoadState::Unloaded | LoadState::Failed
-                        ) {
-                            ids.push(*dependency);
+                        if let Some(parent) = meta
+                            .parent
+                            .and_then(|p| (!states.get_load_state(p).is_loaded()).then_some(p))
+                        {
+                            ids.push(parent);
                         }
                     }
 
-                    if let Some(parent) = meta.parent.and_then(|p| {
-                        let state = states.get_load_state(p);
-                        (state.is_unloaded() || state.is_failed()).then_some(p)
-                    }) {
-                        ids.push(parent);
-                    }
-
-                    let _ = sender.send(DatabaseEvent::AssetLoaded { asset, meta });
+                    db.send_event(AssetCommand::add(
+                        id,
+                        meta.ty,
+                        asset,
+                        LoadDependencies::new(meta.parent, meta.dependencies),
+                    ))
+                    .await;
                 }
             })
             .detach();

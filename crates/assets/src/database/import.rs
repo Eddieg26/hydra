@@ -1,8 +1,7 @@
-use super::{AssetDatabase, DatabaseEvent};
+use super::{AssetDatabase, DatabaseEvent, commands::AssetCommand};
 use crate::{
     asset::{AssetMetadata, ErasedId, Folder},
     config::{
-        AssetConfig,
         importer::{ImportContext, ImportError},
         processor::ProcessContext,
     },
@@ -15,78 +14,76 @@ use ecs::{
     IndexDag,
     core::{ImmutableIndexDag, task::IoTaskPool},
 };
-use smol::{channel::Sender, stream::StreamExt};
+use smol::stream::StreamExt;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Default)]
 pub struct ImportInfo {
     imported: Vec<AssetPath<'static>>,
     removed: Vec<AssetPath<'static>>,
-    errors: HashSet<AssetPath<'static>>,
+}
+
+impl ImportInfo {
+    pub fn new() -> Self {
+        Self {
+            imported: vec![],
+            removed: vec![],
+        }
+    }
+
+    pub fn extend(&mut self, other: Self) {
+        self.imported.extend(other.imported);
+        self.removed.extend(other.removed);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.imported.is_empty() && self.removed.is_empty()
+    }
 }
 
 impl AssetDatabase {
     pub fn import(&self) {
-        let db = self.clone();
+        let import = async {
+            let db = AssetDatabase::get();
 
-        let import = async move {
-            let AssetDatabase {
-                config,
-                library,
-                sender,
-                writer,
-                ..
-            } = &db;
+            let _writer = db.writer.write().await;
 
-            let _writer = writer.write().await;
-
-            if let Err(error) = config.cache().create_temp().await {
-                let _ = sender.send(DatabaseEvent::ImportError(ImportError::Unknown(error)));
+            if let Err(error) = db.config.cache().create_temp().await {
+                db.send_event(DatabaseEvent::ImportError(ImportError::Unknown(error)))
+                    .await;
                 return;
             }
 
             let mut skip = HashSet::new();
 
             loop {
-                let mut library = library.write().await;
-                let mut imported = vec![];
-                let mut removed = vec![];
+                let mut library = db.library.write().await;
+                let mut import_info = ImportInfo::new();
 
-                for (name, source) in config.sources().iter() {
-                    match db
-                        .import_source(name, source, config, &library, sender, &skip)
-                        .await
-                    {
-                        Ok(info) => {
-                            imported.extend(info.imported);
-                            removed.extend(info.removed);
-                            skip.extend(info.errors);
-                        }
+                for (name, source) in db.config.sources().iter() {
+                    match db.import_source(name, source, &library, &mut skip).await {
+                        Ok(source_info) => import_info.extend(source_info),
                         Err(error) => {
-                            let error = ImportError::Source {
-                                name: name.into_owned(),
-                                error,
-                            };
-
-                            let _ = sender.send(error.into()).await;
+                            let error = ImportError::from((name.into_owned(), error));
+                            db.send_event(error).await;
                         }
                     }
                 }
 
-                if imported.is_empty() && removed.is_empty() {
+                if import_info.is_empty() {
                     break;
                 }
 
-                db.remove_assets(removed, config, &mut library).await;
+                let ImportInfo { imported, removed } = import_info;
 
-                let process_list = db
-                    .import_assets(imported, config, &mut library, sender)
-                    .await;
+                db.remove_assets(removed, &mut library).await;
 
-                db.process_assets(process_list, config, &sender).await;
+                let process_list = db.import_assets(imported, &mut library).await;
+
+                db.process_assets(process_list).await;
             }
 
-            let _ = config.cache().delete_temp().await;
+            let _ = db.config.cache().delete_temp().await;
         };
 
         IoTaskPool::get().spawn(import).detach();
@@ -96,16 +93,13 @@ impl AssetDatabase {
         &'a self,
         name: &'a SourceName<'a>,
         source: &'a AssetSource,
-        config: &'a AssetConfig,
         library: &'a AssetLibrary,
-        events: &'a Sender<DatabaseEvent>,
-        skip: &'a HashSet<AssetPath<'static>>,
+        skip: &'a mut HashSet<AssetPath<'static>>,
     ) -> Result<ImportInfo, AssetIoError> {
         let path = AssetPath::new(name.clone(), "");
         let ImportInfo {
             mut imported,
             mut removed,
-            mut errors,
         } = self.import_dir(path, source).await?;
 
         let mut import = vec![];
@@ -122,7 +116,7 @@ impl AssetDatabase {
                         removed.extend(info.removed);
                     }
                     Err(error) => {
-                        let _ = events.send(ImportError::Folder(error).into()).await;
+                        self.send_event(ImportError::Folder(error)).await;
                     }
                 },
                 Ok(false) => {
@@ -130,24 +124,21 @@ impl AssetDatabase {
                         continue;
                     };
 
-                    if ext == "meta" || config.importers().get_by_ext(ext).is_none() {
+                    if ext == "meta" || self.config.importers().get_by_ext(ext).is_none() {
                         continue;
                     }
 
-                    match self
-                        .import_file(path.clone(), source, config, library)
-                        .await
-                    {
+                    match self.import_file(path.clone(), source, library).await {
                         Ok(Some(path)) => import.push(path.into_owned()),
                         Ok(None) => continue,
                         Err(error) => {
-                            let _ = events.send(ImportError::File(error).into()).await;
-                            errors.insert(path.into_owned());
+                            self.send_event(ImportError::File(error)).await;
+                            skip.insert(path.into_owned());
                         }
                     }
                 }
                 Err(error) => {
-                    let _ = events.send(ImportError::Unknown(error).into()).await;
+                    self.send_event(ImportError::Unknown(error)).await;
                 }
             }
         }
@@ -155,7 +146,6 @@ impl AssetDatabase {
         Ok(ImportInfo {
             imported: import,
             removed,
-            errors,
         })
     }
 
@@ -193,18 +183,13 @@ impl AssetDatabase {
 
         let _ = source.save_metadata(path.path(), &metadata).await;
 
-        Ok(ImportInfo {
-            imported,
-            removed,
-            errors: HashSet::new(),
-        })
+        Ok(ImportInfo { imported, removed })
     }
 
     async fn import_file<'a>(
         &'a self,
         path: AssetPath<'a>,
         source: &'a AssetSource,
-        config: &'a AssetConfig,
         library: &'a AssetLibrary,
     ) -> Result<Option<AssetPath<'a>>, AssetIoError> {
         let Some(id) = library.get_id(&path).copied() else {
@@ -216,7 +201,7 @@ impl AssetDatabase {
             return Ok(Some(path));
         }
 
-        let Ok(mut reader) = config.cache().get_artifact_reader(id).await else {
+        let Ok(mut reader) = self.config.cache().get_artifact_reader(id).await else {
             return Ok(Some(path));
         };
 
@@ -250,31 +235,29 @@ impl AssetDatabase {
     async fn import_assets<'a>(
         &'a self,
         paths: Vec<AssetPath<'static>>,
-        config: &'a AssetConfig,
         library: &'a mut AssetLibrary,
-        events: &'a Sender<DatabaseEvent>,
     ) -> ImmutableIndexDag<ErasedId> {
         let mut graph = IndexDag::new();
         let mut node_map = HashMap::new();
 
         for path in paths {
-            let source = config.sources().get(path.source()).unwrap();
+            let source = self.config.sources().get(path.source()).unwrap();
             let mut reader = match source.reader(path.path()).await {
                 Ok(reader) => reader,
                 Err(error) => {
-                    let _ = events.send(ImportError::LoadAsset(error).into()).await;
+                    self.send_event(ImportError::LoadAsset(error)).await;
                     continue;
                 }
             };
 
             let Some(importer) = path
                 .ext()
-                .and_then(|ext| config.importers().get_by_ext(ext))
+                .and_then(|ext| self.config.importers().get_by_ext(ext))
             else {
                 continue;
             };
 
-            let Some(ty) = config.registry().get_ty(importer.asset_type()) else {
+            let Some(ty) = self.config.registry().get_ty(importer.asset_type()) else {
                 continue;
             };
 
@@ -284,20 +267,25 @@ impl AssetDatabase {
                 .and_then(|data| importer.deserialize_metadata(&data))
                 .unwrap_or(importer.default_metadata());
 
-            let ctx =
-                ImportContext::new(metadata.erased_id(), ty, &path, source, config.registry());
+            let ctx = ImportContext::new(
+                metadata.erased_id(),
+                ty,
+                &path,
+                source,
+                self.config.registry(),
+            );
 
             let artifacts = match importer.import(ctx, &mut reader, &metadata).await {
                 Ok(artifacts) => artifacts,
                 Err(error) => {
-                    let _ = events.send(ImportError::ImportAsset(error).into()).await;
+                    self.send_event(ImportError::ImportAsset(error)).await;
                     continue;
                 }
             };
 
             for artifact in artifacts {
-                if let Err(error) = config.cache().save_temp_artifact(&artifact).await {
-                    let _ = events.send(ImportError::SaveAsset(error).into()).await;
+                if let Err(error) = self.config.cache().save_temp_artifact(&artifact).await {
+                    self.send_event(ImportError::SaveAsset(error)).await;
                     continue;
                 }
 
@@ -324,17 +312,12 @@ impl AssetDatabase {
         graph.into_immutable()
     }
 
-    async fn process_assets<'a>(
-        &'a self,
-        graph: ImmutableIndexDag<ErasedId>,
-        config: &'a AssetConfig,
-        events: &'a Sender<DatabaseEvent>,
-    ) {
+    async fn process_assets<'a>(&'a self, graph: ImmutableIndexDag<ErasedId>) {
         for id in graph.iter().copied() {
-            let mut artifact = match config.cache().get_temp_artifact(id).await {
+            let mut artifact = match self.config.cache().get_temp_artifact(id).await {
                 Ok(artifact) => artifact,
                 Err(error) => {
-                    let _ = events.send(ImportError::LoadArtifact(error).into()).await;
+                    self.send_event(ImportError::LoadArtifact(error)).await;
                     continue;
                 }
             };
@@ -345,25 +328,28 @@ impl AssetDatabase {
                     .meta
                     .path
                     .ext()
-                    .and_then(|ext| config.processors().get_default(ext)),
+                    .and_then(|ext| self.config.processors().get_default(ext)),
             };
 
             if let Some(processor) = processor {
-                let source = config.sources().get(artifact.path().source()).unwrap();
+                let source = self.config.sources().get(artifact.path().source()).unwrap();
                 let metadata = match source.read_metadata_bytes(artifact.path().path()).await {
                     Ok(metadata) => metadata,
                     Err(error) => {
-                        let _ = events.send(ImportError::LoadMetadata(error).into()).await;
+                        self.send_event(ImportError::LoadMetadata(error)).await;
                         continue;
                     }
                 };
 
-                let mut ctx = ProcessContext::new(config.cache());
-                let processor = config.processors()[processor];
+                let mut ctx = ProcessContext::new(self.config.cache());
+                let processor = self.config.processors()[processor];
                 match processor.process(&mut ctx, artifact.data(), metadata).await {
                     Ok(data) => {
-                        artifact.meta.ty =
-                            config.registry().get_ty(processor.output_asset()).unwrap();
+                        artifact.meta.ty = self
+                            .config
+                            .registry()
+                            .get_ty(processor.output_asset())
+                            .unwrap();
                         artifact.data = data;
 
                         let dependencies = ctx.dependencies.iter().map(|a| a.import.full_checksum);
@@ -378,14 +364,16 @@ impl AssetDatabase {
                             .collect();
                     }
                     Err(error) => {
-                        let _ = events.send(ImportError::ProcessAsset(error).into()).await;
+                        self.send_event(ImportError::ProcessAsset(error)).await;
                         continue;
                     }
                 }
             }
 
-            if let Err(error) = config.cache().save_artifact(&artifact).await {
-                let _ = events.send(ImportError::SaveAsset(error).into()).await;
+            if let Err(error) = self.config.cache().save_artifact(&artifact).await {
+                self.send_event(ImportError::SaveAsset(error)).await;
+            } else {
+                self.reload(id);
             }
         }
     }
@@ -393,25 +381,22 @@ impl AssetDatabase {
     async fn remove_assets<'a>(
         &'a self,
         mut paths: Vec<AssetPath<'static>>,
-        config: &'a AssetConfig,
         library: &'a mut AssetLibrary,
     ) {
-        let mut removed = vec![];
-
         while let Some(path) = paths.pop() {
             let Some(id) = library.remove_asset(&path) else {
                 continue;
             };
 
-            removed.push(id);
+            self.send_event(AssetCommand::remove(id)).await;
 
-            let Ok(reader) = config.cache().get_artifact_reader(id).await else {
-                let _ = config.cache().remove_artifact(id).await;
+            let Ok(reader) = self.config.cache().get_artifact_reader(id).await else {
+                let _ = self.config.cache().remove_artifact(id).await;
                 continue;
             };
 
             let Ok(meta) = reader.into_meta().await else {
-                let _ = config.cache().remove_artifact(id).await;
+                let _ = self.config.cache().remove_artifact(id).await;
                 continue;
             };
 
@@ -419,7 +404,7 @@ impl AssetDatabase {
                 paths.push(child.clone().into_owned());
             }
 
-            let _ = config.cache().remove_artifact(id).await;
+            let _ = self.config.cache().remove_artifact(id).await;
         }
     }
 

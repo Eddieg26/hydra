@@ -335,3 +335,12 @@ pub enum ImportError {
 }
 
 impl Event for ImportError {}
+
+impl From<(SourceName<'static>, AssetIoError)> for ImportError {
+    fn from(value: (SourceName<'static>, AssetIoError)) -> Self {
+        Self::Source {
+            name: value.0,
+            error: value.1,
+        }
+    }
+}

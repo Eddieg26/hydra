@@ -1,4 +1,4 @@
-use crate::{system::Removed, SparseIndex, core::Frame, impl_sparse_index_wrapper};
+use crate::{SparseIndex, core::Frame, impl_sparse_index_wrapper, system::Removed};
 use std::{
     any::TypeId,
     collections::HashMap,
@@ -304,6 +304,20 @@ impl World {
         C::remove(remover);
 
         Some(index)
+    }
+
+    pub fn send<E: Event>(&mut self, event: E) {
+        let events = self.resource_mut::<Events<E>>();
+        events.writer().send(event);
+    }
+
+    pub fn try_send<E: Event>(&mut self, event: E) -> bool {
+        if let Some(events) = self.try_resource_mut::<Events<E>>() {
+            events.writer().send(event);
+            true
+        } else {
+            false
+        }
     }
 
     pub fn entity_mut(&mut self, entity: Entity) -> EntityMut {

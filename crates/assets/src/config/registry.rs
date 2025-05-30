@@ -1,5 +1,5 @@
 use crate::{
-    asset::{Asset, AssetAction, AssetType, Assets, ErasedAsset, ErasedId},
+    asset::{Asset, AssetAction, AssetEvent, AssetType, Assets, ErasedAsset, ErasedId},
     io::{AssetIoError, deserialize},
 };
 use ecs::{SparseIndex, World, ext};
@@ -13,7 +13,9 @@ pub struct AssetMeta {
     pub dependency_unload_action: Option<AssetAction>,
 
     add: fn(&mut World, ErasedId, ErasedAsset),
-    remove: fn(&mut World, ErasedId) -> Option<ErasedAsset>,
+    remove: fn(&mut World, ErasedId) -> bool,
+    modified: fn(&mut World, ErasedId),
+    loaded: fn(&mut World, ErasedId),
     deserialize: Option<fn(&[u8]) -> Result<ErasedAsset, AssetIoError>>,
 }
 
@@ -24,12 +26,26 @@ impl AssetMeta {
             name: ext::short_type_name::<A>(),
             dependency_unload_action: A::DEPENDENCY_UNLOAD_ACTION,
             add: |world, id, asset| {
-                let assets = world.resource_mut::<Assets<A>>();
-                assets.insert(id, asset.into());
+                world.resource_mut::<Assets<A>>().insert(id, asset.into());
+                world.send(AssetEvent::<A>::Added { id: id.into() });
             },
             remove: |world, id| {
-                let assets = world.resource_mut::<Assets<A>>();
-                assets.remove(id).map(ErasedAsset::new)
+                if let Some(asset) = world.resource_mut::<Assets<A>>().remove(id) {
+                    world.send(AssetEvent::Removed {
+                        id: id.into(),
+                        asset,
+                    });
+
+                    true
+                }else {
+                    false
+                }
+            },
+            modified: |world, id| {
+                world.send(AssetEvent::<A>::Modified { id: id.into() });
+            },
+            loaded: |world, id| {
+                world.send(AssetEvent::<A>::Loaded { id: id.into() });
             },
             deserialize: None,
         }
@@ -39,8 +55,16 @@ impl AssetMeta {
         (self.add)(world, id, asset)
     }
 
-    pub fn remove(&self, world: &mut World, id: ErasedId) -> Option<ErasedAsset> {
+    pub fn remove(&self, world: &mut World, id: ErasedId) -> bool {
         (self.remove)(world, id)
+    }
+
+    pub fn modified(&self, world: &mut World, id: ErasedId) {
+        (self.modified)(world, id)
+    }
+
+    pub fn loaded(&self, world: &mut World, id: ErasedId) {
+        (self.loaded)(world, id)
     }
 
     pub fn deserialize(&self, data: &[u8]) -> Option<Result<ErasedAsset, AssetIoError>> {
