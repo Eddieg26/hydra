@@ -34,11 +34,9 @@ impl LoadState {
 pub struct AssetState {
     ty: AssetType,
     state: LoadState,
-    dependency_state: LoadState,
+    dependency_status: HashMap<ErasedId, LoadState>,
     dependencies: HashSet<ErasedId>,
     dependents: HashSet<ErasedId>,
-    loading: HashSet<ErasedId>,
-    failed: HashSet<ErasedId>,
     children: Vec<ErasedId>,
     parent: Option<ErasedId>,
     unload_action: Option<AssetAction>,
@@ -53,11 +51,9 @@ impl AssetState {
         Self {
             ty: AssetType::NONE,
             state,
-            dependency_state: LoadState::Unloaded,
+            dependency_status: HashMap::new(),
             dependencies: HashSet::new(),
             dependents: HashSet::new(),
-            loading: HashSet::new(),
-            failed: HashSet::new(),
             children: vec![],
             parent: None,
             unload_action: None,
@@ -72,8 +68,8 @@ impl AssetState {
         self.state
     }
 
-    pub fn dependency_state(&self) -> LoadState {
-        self.dependency_state
+    pub fn dependency_status(&self) -> &HashMap<ErasedId, LoadState> {
+        &self.dependency_status
     }
 
     pub fn dependencies(&self) -> &HashSet<ErasedId> {
@@ -84,14 +80,6 @@ impl AssetState {
         &self.dependents
     }
 
-    pub fn loading(&self) -> &HashSet<ErasedId> {
-        &self.loading
-    }
-
-    pub fn failed(&self) -> &HashSet<ErasedId> {
-        &self.failed
-    }
-
     pub fn parent(&self) -> Option<ErasedId> {
         self.parent
     }
@@ -100,25 +88,8 @@ impl AssetState {
         &self.children
     }
 
-    pub fn is_fully_loaded(&self) -> bool {
-        matches!(
-            (self.state, self.dependency_state),
-            (LoadState::Loaded, LoadState::Loaded)
-        )
-    }
-
     pub fn unload_action(&self) -> Option<AssetAction> {
         self.unload_action
-    }
-
-    pub fn update(&mut self) {
-        self.dependency_state = if self.loading.len() > 0 {
-            LoadState::Loading
-        } else if self.failed.len() > 0 {
-            LoadState::Failed
-        } else {
-            LoadState::Loaded
-        };
     }
 }
 
@@ -134,8 +105,8 @@ impl AssetStates {
         }
     }
 
-    pub fn get(&self, id: ErasedId) -> Option<&AssetState> {
-        self.states.get(&id)
+    pub fn get(&self, id: &ErasedId) -> Option<&AssetState> {
+        self.states.get(id)
     }
 
     pub fn get_load_state(&self, id: ErasedId) -> LoadState {
@@ -145,29 +116,19 @@ impl AssetStates {
             .unwrap_or(LoadState::Unloaded)
     }
 
-    pub fn is_fully_loaded(&self, id: ErasedId) -> bool {
-        self.get(id)
-            .map(|state| state.is_fully_loaded())
-            .unwrap_or(false)
-    }
-
     pub fn loading(&mut self, id: ErasedId) {
         let mut state = self.states.remove(&id).unwrap_or_else(AssetState::new);
-
         state.state = LoadState::Loading;
 
-        for dep in state.dependents.iter() {
-            if let Some(state) = self.states.get_mut(dep) {
-                state.loading.insert(id);
-                state.failed.remove(&id);
-                state.dependency_state = LoadState::Loading;
-            }
+        for dependent in &state.dependents {
+            let dependent = self.states.entry(*dependent).or_insert(AssetState::new());
+            dependent.dependency_status.insert(id, LoadState::Loading);
         }
 
         self.states.insert(id, state);
     }
 
-    pub fn loaded(&mut self, meta: &ArtifactMeta) -> HashSet<ErasedId> {
+    pub fn loaded(&mut self, meta: &ArtifactMeta) -> Vec<ErasedId> {
         let ArtifactMeta {
             id,
             ty,
@@ -184,58 +145,51 @@ impl AssetStates {
         state.unload_action = *unload_action;
         state.parent = *parent;
 
-        for dependency in dependencies.iter().chain(parent.as_ref()) {
-            match self.states.get_mut(dependency) {
-                Some(dep_state) => {
-                    dep_state.dependents.insert(*id);
-                    match dep_state.state {
-                        LoadState::Loading => state.loading.insert(*dependency),
-                        LoadState::Failed => state.failed.insert(*dependency),
-                        _ => continue,
-                    };
-                }
-                None => {
-                    let mut dep_state = AssetState::new();
-                    dep_state.dependents.insert(*id);
-                    state.loading.insert(*dependency);
-                    self.states.insert(*dependency, dep_state);
-                }
-            };
-
-            if Some(dependency) != parent.as_ref() {
-                state.dependencies.insert(*dependency);
-            }
-        }
-
-        state.update();
-
-        for dependent in &state.dependents {
-            if let Some(state) = self.states.get_mut(dependent) {
-                state.loading.remove(id);
-                state.failed.remove(id);
-
-                state.update();
-            }
+        for dependency in dependencies {
+            let dep_state = self.states.entry(*dependency).or_insert(AssetState::new());
+            dep_state.dependents.insert(*id);
+            state.dependency_status.insert(*dependency, dep_state.state);
         }
 
         self.states.insert(*id, state);
 
-        self.finish(*id)
+        match self.is_fully_loaded(id) {
+            true => self.finish(*id),
+            false => Vec::new(),
+        }
+    }
+
+    fn is_fully_loaded(&self, id: &ErasedId) -> bool {
+        let mut stack = vec![id];
+
+        while let Some(id) = stack.pop() {
+            let Some(state) = self.get(id) else {
+                return false;
+            };
+
+            if !state.state.is_loaded() {
+                return false;
+            }
+
+            stack.extend(state.dependency_status().keys());
+        }
+
+        return true;
     }
 
     pub fn unload(&mut self, id: ErasedId) -> Option<AssetState> {
         let mut state = self.states.remove(&id)?;
         state.state = LoadState::Unloaded;
 
-        for dep in &state.dependencies {
+        for dep in state.dependencies() {
             if let Some(state) = self.states.get_mut(dep) {
                 state.dependents.remove(&id);
             }
         }
 
-        for dep in &state.dependents {
+        for dep in state.dependents() {
             if let Some(state) = self.states.get_mut(dep) {
-                state.dependencies.remove(&id);
+                state.dependency_status.remove(&id);
             }
         }
 
@@ -246,21 +200,18 @@ impl AssetStates {
         let mut state = self.states.remove(&id).unwrap_or_else(AssetState::new);
         state.state = LoadState::Failed;
 
-        for dep in &state.dependents {
-            if let Some(state) = self.states.get_mut(dep) {
-                state.loading.remove(&id);
-                state.failed.insert(id);
-                state.update();
-            }
+        for dependent in &state.dependents {
+            let dependent = self.states.entry(*dependent).or_insert(AssetState::new());
+            dependent.dependency_status.insert(id, LoadState::Failed);
         }
 
         self.states.insert(id, state);
     }
 
-    fn finish(&mut self, id: ErasedId) -> HashSet<ErasedId> {
-        let mut finished = HashSet::new();
+    fn finish(&mut self, id: ErasedId) -> Vec<ErasedId> {
         let mut visited = HashSet::new();
         let mut stack = vec![id];
+        let mut finished = vec![];
 
         while let Some(id) = stack.pop() {
             if visited.contains(&id) {
@@ -269,26 +220,29 @@ impl AssetStates {
 
             visited.insert(id);
 
-            let Some(dependents) = self
-                .states
-                .get(&id)
-                .and_then(|s| s.is_fully_loaded().then_some(s.dependents.clone()))
-            else {
-                continue;
+            let dependents = match self.states.get(&id) {
+                Some(state) => state
+                    .dependents
+                    .iter()
+                    .chain(state.children())
+                    .copied()
+                    .collect::<Vec<_>>(),
+                None => continue,
             };
 
-            for dep in dependents {
-                let Some(dep_state) = self.states.get_mut(&dep) else {
+            for dependent in dependents {
+                let Some(state) = self.states.get_mut(&dependent) else {
                     continue;
                 };
 
-                dep_state.loading.remove(&id);
-                dep_state.update();
+                state.dependency_status.remove(&id);
 
-                stack.push(dep);
+                if state.dependency_status.is_empty() {
+                    stack.push(dependent);
+                }
             }
 
-            finished.insert(id);
+            finished.push(id);
         }
 
         finished

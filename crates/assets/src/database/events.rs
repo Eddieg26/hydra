@@ -18,14 +18,6 @@ impl Command for AssetLoaded {
         if let Some(meta) = database.config.registry().get(self.meta.ty) {
             meta.add(world, self.meta.id, self.asset);
         };
-
-        let mut states = database.states.write_blocking();
-
-        let mut stack = vec![self.meta.id];
-
-        while let Some(id) = stack.pop() {
-            states.loaded(&self.meta);
-        }
     }
 }
 
@@ -63,7 +55,7 @@ impl Command for UnloadAssets {
             meta.remove(world, id);
 
             for dependent in state.dependents() {
-                let Some(state) = states.get(*dependent) else {
+                let Some(state) = states.get(dependent) else {
                     continue;
                 };
 
