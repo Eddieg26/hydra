@@ -90,7 +90,7 @@ impl AssetDatabase {
         let load_path: LoadPath<'static> = path.into();
 
         let (sender, receiver) = futures::channel::oneshot::channel();
-        let result = LoadedId::new(receiver);
+        let result = LoadTask::new(receiver);
 
         IoTaskPool::get()
             .spawn(async move {
@@ -205,11 +205,11 @@ impl AssetDatabase {
     }
 }
 
-pub struct LoadedId {
+pub struct LoadTask {
     receiver: Arc<Mutex<Option<futures::channel::oneshot::Receiver<Result<ErasedId, LoadError>>>>>,
 }
 
-impl LoadedId {
+impl LoadTask {
     fn new(receiver: futures::channel::oneshot::Receiver<Result<ErasedId, LoadError>>) -> Self {
         Self {
             receiver: Arc::new(Mutex::new(Some(receiver))),
@@ -217,7 +217,7 @@ impl LoadedId {
     }
 }
 
-impl std::future::Future for LoadedId {
+impl std::future::Future for LoadTask {
     type Output = Result<ErasedId, LoadError>;
 
     fn poll(
@@ -372,9 +372,9 @@ mod tests {
 
         let db = AssetDatabase::init(config.build());
 
-        let id = db.load::<Text>("test.txt");
+        let task = db.load::<Text>("test.txt");
         smol::block_on(async move {
-            let id = id.await.unwrap();
+            let id = task.await.unwrap();
             let states = db.states.read().await;
             let state = states.get(&id.into()).unwrap();
             assert!(state.state().is_loaded(), "Asset should be loaded");

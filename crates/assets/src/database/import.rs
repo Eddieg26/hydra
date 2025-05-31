@@ -12,9 +12,12 @@ use crate::{
 };
 use ecs::{
     IndexDag,
-    core::{ImmutableIndexDag, task::IoTaskPool},
+    core::{
+        ImmutableIndexDag,
+        task::{IoTaskPool, Task},
+    },
 };
-use smol::stream::StreamExt;
+use smol::{future::FutureExt, stream::StreamExt};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Default)]
@@ -41,9 +44,60 @@ impl ImportInfo {
     }
 }
 
+pub struct ImportTask(Option<Task<()>>);
+
+impl ImportTask {
+    pub fn detach(mut self) {
+        if let Some(task) = self.0.take() {
+            task.detach();
+        }
+    }
+
+    pub async fn cancel(mut self) -> Option<()> {
+        if let Some(task) = self.0.take() {
+            task.cancel().await
+        } else {
+            None
+        }
+    }
+
+    pub fn is_finished(&self) -> bool {
+        if let Some(task) = &self.0 {
+            task.is_finished()
+        } else {
+            true
+        }
+    }
+}
+
+impl Future for ImportTask {
+    type Output = ();
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        if let Some(task) = self.0.as_mut() {
+            task.poll(cx)
+        } else {
+            std::task::Poll::Ready(())
+        }
+    }
+}
+
+impl Drop for ImportTask {
+    fn drop(&mut self) {
+        if let Some(task) = self.0.take() {
+            task.detach();
+        }
+    }
+}
+
 impl AssetDatabase {
-    pub fn import(&self) -> ecs::core::task::Task<()> {
-        IoTaskPool::get().spawn(AssetDatabase::get().import_inner())
+    pub fn import(&self) -> ImportTask {
+        ImportTask(Some(
+            IoTaskPool::get().spawn(AssetDatabase::get().import_inner()),
+        ))
     }
 
     pub(super) async fn import_inner<'a>(&'a self) {
