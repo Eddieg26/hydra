@@ -31,6 +31,15 @@ pub enum AssetIoError {
 
     #[error("Http error {0}")]
     Http(u16),
+
+    #[error("{0}")]
+    Unknown(String),
+}
+
+impl AssetIoError {
+    pub fn unknown(value: impl ToString) -> Self {
+        Self::Unknown(value.to_string())
+    }
 }
 
 impl From<std::io::Error> for AssetIoError {
@@ -103,16 +112,26 @@ pub trait FileSystem: Send + Sync + 'static {
     type Writer: AsyncWriter;
 
     fn root(&self) -> &Path;
-    fn reader(&self, path: &Path) -> impl Future<Output = Result<Self::Reader, AssetIoError>> + Send;
+    fn reader(
+        &self,
+        path: &Path,
+    ) -> impl Future<Output = Result<Self::Reader, AssetIoError>> + Send;
     fn read_dir(
         &self,
         path: &Path,
     ) -> impl Future<Output = Result<Box<dyn PathStream>, AssetIoError>> + Send;
     fn is_dir(&self, path: &Path) -> impl Future<Output = Result<bool, AssetIoError>> + Send;
-    fn writer(&self, path: &Path) -> impl Future<Output = Result<Self::Writer, AssetIoError>> + Send;
+    fn writer(
+        &self,
+        path: &Path,
+    ) -> impl Future<Output = Result<Self::Writer, AssetIoError>> + Send;
     fn create_dir(&self, path: &Path) -> impl Future<Output = Result<(), AssetIoError>> + Send;
     fn create_dir_all(&self, path: &Path) -> impl Future<Output = Result<(), AssetIoError>> + Send;
-    fn rename(&self, from: &Path, to: &Path) -> impl Future<Output = Result<(), AssetIoError>> + Send;
+    fn rename(
+        &self,
+        from: &Path,
+        to: &Path,
+    ) -> impl Future<Output = Result<(), AssetIoError>> + Send;
     fn remove(&self, path: &Path) -> impl Future<Output = Result<(), AssetIoError>> + Send;
     fn remove_dir(&self, path: &Path) -> impl Future<Output = Result<(), AssetIoError>> + Send;
     fn exists(&self, path: &Path) -> impl Future<Output = Result<bool, AssetIoError>> + Send;

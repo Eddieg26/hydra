@@ -42,51 +42,52 @@ impl ImportInfo {
 }
 
 impl AssetDatabase {
-    pub fn import(&self) {
-        let import = async {
-            let db = AssetDatabase::get();
+    pub fn import(&self) -> ecs::core::task::Task<()> {
+        IoTaskPool::get().spawn(AssetDatabase::get().import_inner())
+    }
 
-            let _writer = db.writer.write().await;
+    pub(super) async fn import_inner<'a>(&'a self) {
+        let mut writer = self.writer.write().await;
+        if writer.take().is_none() {
+            return;
+        }
 
-            if let Err(error) = db.config.cache().create_temp().await {
-                db.send_event(DatabaseEvent::ImportError(ImportError::Unknown(error)))
-                    .await;
-                return;
-            }
+        if let Err(error) = self.config.cache().create_temp().await {
+            self.send_event(DatabaseEvent::ImportError(ImportError::Unknown(error)))
+                .await;
+            return;
+        }
 
-            let mut skip = HashSet::new();
+        let mut skip = HashSet::new();
 
-            loop {
-                let mut library = db.library.write().await;
-                let mut import_info = ImportInfo::new();
+        loop {
+            let mut library = self.library.write().await;
+            let mut import_info = ImportInfo::new();
 
-                for (name, source) in db.config.sources().iter() {
-                    match db.import_source(name, source, &library, &mut skip).await {
-                        Ok(source_info) => import_info.extend(source_info),
-                        Err(error) => {
-                            let error = ImportError::from((name.into_owned(), error));
-                            db.send_event(error).await;
-                        }
+            for (name, source) in self.config.sources().iter() {
+                match self.import_source(name, source, &library, &mut skip).await {
+                    Ok(source_info) => import_info.extend(source_info),
+                    Err(error) => {
+                        let error = ImportError::from((name.into_owned(), error));
+                        self.send_event(error).await;
                     }
                 }
-
-                if import_info.is_empty() {
-                    break;
-                }
-
-                let ImportInfo { imported, removed } = import_info;
-
-                db.remove_assets(removed, &mut library).await;
-
-                let process_list = db.import_assets(imported, &mut library).await;
-
-                db.process_assets(process_list).await;
             }
 
-            let _ = db.config.cache().delete_temp().await;
-        };
+            if import_info.is_empty() {
+                break;
+            }
 
-        IoTaskPool::get().spawn(import).detach();
+            let ImportInfo { imported, removed } = import_info;
+
+            self.remove_assets(removed, &mut library).await;
+
+            let process_list = self.import_assets(imported, &mut library).await;
+
+            self.process_assets(process_list).await;
+        }
+
+        let _ = self.config.cache().delete_temp().await;
     }
 
     async fn import_source<'a>(
@@ -480,10 +481,9 @@ mod tests {
         config.add_importer::<Text>();
 
         let database = AssetDatabase::init(config.build());
-        database.import();
+        smol::block_on(database.import());
 
         let task = IoTaskPool::get().spawn(async move {
-            std::thread::sleep(std::time::Duration::from_nanos(500)); // Simulate some delay for the import to start
             let _reader = database.writer.read().await;
 
             let library = database.library.read().await;

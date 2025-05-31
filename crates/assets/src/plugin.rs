@@ -35,7 +35,6 @@ impl Plugin for AssetPlugin {
 
         let database = AssetDatabase::init(config.build());
         database.load_library();
-        database.import();
     }
 }
 

@@ -25,7 +25,7 @@ pub struct AssetDatabase {
     config: Arc<AssetConfig>,
     library: RwLock<AssetLibrary>,
     states: RwLock<AssetStates>,
-    writer: RwLock<()>,
+    writer: RwLock<Option<()>>,
     sender: Sender<DatabaseEvent>,
     receiver: Receiver<DatabaseEvent>,
 }
@@ -51,7 +51,7 @@ impl AssetDatabase {
             config: Arc::new(config),
             library: RwLock::default(),
             states: RwLock::default(),
-            writer: RwLock::default(),
+            writer: RwLock::new(Some(())),
             sender,
             receiver,
         }
@@ -81,7 +81,8 @@ impl AssetDatabase {
             .spawn(async {
                 let db = AssetDatabase::get();
 
-                let _writer = db.writer.write().await;
+                let mut writer = db.writer.write().await;
+                *writer = Some(());
 
                 let library = match db.config.cache().load_library().await {
                     Ok(lib) => lib,

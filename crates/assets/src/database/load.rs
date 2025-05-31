@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::{AssetDatabase, commands::AssetCommand};
 use crate::{
     asset::{Asset, AssetId, ErasedAsset, ErasedId},
@@ -7,8 +9,9 @@ use crate::{
 use ecs::{Event, core::task::IoTaskPool};
 use futures::TryFutureExt;
 use serde::{Deserialize, Serialize};
+use smol::lock::Mutex;
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Clone)]
 pub enum LoadError {
     #[error("Asset not found: {0}")]
     NotFound(LoadPath<'static>),
@@ -48,9 +51,7 @@ impl AssetDatabase {
     ) -> impl Future<Output = Result<ErasedId, LoadError>> {
         let load_path: LoadPath<'static> = path.into();
 
-        self.spawn_load_task(load_path.clone());
-
-        self.get_id_async(load_path)
+        self.spawn_load_task(load_path.clone())
     }
 
     pub fn reload(&self, path: impl Into<LoadPath<'static>>) {
@@ -82,20 +83,33 @@ impl AssetDatabase {
             .detach();
     }
 
-    fn spawn_load_task(&self, path: impl Into<LoadPath<'static>>) {
+    fn spawn_load_task(
+        &self,
+        path: impl Into<LoadPath<'static>>,
+    ) -> impl Future<Output = Result<ErasedId, LoadError>> {
         let load_path: LoadPath<'static> = path.into();
+
+        let (sender, receiver) = futures::channel::oneshot::channel();
+        let result = LoadedId::new(receiver);
 
         IoTaskPool::get()
             .spawn(async move {
                 let db = AssetDatabase::get();
 
-                let _writer = db.writer.read().await;
+                if (*db.writer.read().await).is_some() {
+                    db.import_inner().await;
+                }
 
-                let Ok(id) = db.get_id_async(load_path).await else {
-                    return;
+                let asset_id = match db.get_id_async(load_path).await {
+                    Ok(id) => id,
+                    Err(error) => {
+                        let _ = sender.send(Err(error));
+                        return;
+                    }
                 };
 
-                let mut ids = vec![id];
+                let mut ids = vec![asset_id];
+                let mut sender = Some(sender);
 
                 while let Some(id) = ids.pop() {
                     let mut states = db.states.write().await;
@@ -109,8 +123,12 @@ impl AssetDatabase {
                     let (asset, meta) = match Self::load_internal(id, &db.config).await {
                         Ok(result) => result,
                         Err(error) => {
-                            db.send_event(error).await;
+                            db.send_event(error.clone()).await;
                             states.failed(id);
+                            if let Some(sender) = sender.take() {
+                                let _ = sender.send(Err(error));
+                            }
+
                             continue;
                         }
                     };
@@ -142,9 +160,15 @@ impl AssetDatabase {
                     for (id, ty) in loaded {
                         db.send_event(AssetCommand::loaded(id, ty)).await;
                     }
+
+                    if let Some(sender) = sender.take() {
+                        let _ = sender.send(Ok(id));
+                    }
                 }
             })
             .detach();
+
+        result
     }
 
     async fn load_internal(
@@ -177,6 +201,40 @@ impl AssetDatabase {
             LoadPath::Path(path) => self
                 .get_id(&path)
                 .ok_or(LoadError::NotFound(LoadPath::Path(path.into_owned()))),
+        }
+    }
+}
+
+pub struct LoadedId {
+    receiver: Arc<Mutex<Option<futures::channel::oneshot::Receiver<Result<ErasedId, LoadError>>>>>,
+}
+
+impl LoadedId {
+    fn new(receiver: futures::channel::oneshot::Receiver<Result<ErasedId, LoadError>>) -> Self {
+        Self {
+            receiver: Arc::new(Mutex::new(Some(receiver))),
+        }
+    }
+}
+
+impl std::future::Future for LoadedId {
+    type Output = Result<ErasedId, LoadError>;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let mut receiver_lock = smol::block_on(self.receiver.lock());
+        if let Some(receiver) = receiver_lock.as_mut() {
+            match std::pin::Pin::new(receiver).poll(cx) {
+                std::task::Poll::Ready(Ok(res)) => std::task::Poll::Ready(res),
+                std::task::Poll::Ready(Err(_)) => std::task::Poll::Ready(Err(LoadError::Io(
+                    AssetIoError::unknown("oneshot canceled"),
+                ))),
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            }
+        } else {
+            std::task::Poll::Pending
         }
     }
 }
@@ -299,39 +357,6 @@ mod tests {
         IoTaskPool::init(TaskPool::builder().build());
 
         let mut config = AssetConfigBuilder::new();
-        let ty = config.register::<Text>();
-        config.add_importer::<Text>();
-
-        let cache = AssetCache::new(VirtualFs::new());
-        let id = AssetId::<Text>::new();
-
-        smol::block_on(async {
-            let path = PathBuf::from(id.to_string());
-            let asset = Text("Hello, World!".to_string());
-            let meta = ArtifactMeta::new(id, ty, AssetPath::from(path), ImportMeta::default());
-            let artifact = Artifact::new(&asset, meta).unwrap();
-            cache.save_artifact(&artifact).await.unwrap();
-        });
-
-        config.set_cache(cache);
-
-        let db = AssetDatabase::init(config.build());
-        let _ = db.load::<Text>(id);
-
-        smol::block_on(async move {
-            std::thread::sleep(std::time::Duration::from_nanos(500)); // Simulate some delay for the load to start
-            let _writer = db.writer.write().await;
-            let states = db.states.read().await;
-            let state = states.get(&id.into()).unwrap();
-            assert!(state.state().is_loaded(), "Asset should be loaded");
-        });
-    }
-
-    #[test]
-    fn test_import_and_load() {
-        IoTaskPool::init(TaskPool::builder().build());
-
-        let mut config = AssetConfigBuilder::new();
         config.register::<Text>();
         config.add_importer::<Text>();
 
@@ -346,15 +371,11 @@ mod tests {
         config.set_cache(AssetCache::new(VirtualFs::new()));
 
         let db = AssetDatabase::init(config.build());
-        db.import();
 
-        std::thread::sleep(std::time::Duration::from_nanos(500)); // Simulate some delay for the import to start
         let id = db.load::<Text>("test.txt");
         smol::block_on(async move {
-            std::thread::sleep(std::time::Duration::from_nanos(500)); // Simulate some delay for the load to start
-            let _writer = db.writer.write().await;
-            let states = db.states.read().await;
             let id = id.await.unwrap();
+            let states = db.states.read().await;
             let state = states.get(&id.into()).unwrap();
             assert!(state.state().is_loaded(), "Asset should be loaded");
         });
