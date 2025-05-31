@@ -1,7 +1,14 @@
 use crate::{
-    asset::{Asset, Assets},
-    config::{AssetConfigBuilder, importer::AssetImporter, processor::AssetProcessor},
-    database::{AssetDatabase, load::LoadPath},
+    asset::{Asset, AssetEvent, Assets},
+    config::{
+        AssetConfigBuilder,
+        importer::{AssetImporter, ImportError},
+        processor::AssetProcessor,
+    },
+    database::{
+        AssetDatabase,
+        load::{LoadError, LoadPath},
+    },
     io::{FileSystem, LocalFs, SourceName},
 };
 use ecs::app::{End, Plugin};
@@ -9,9 +16,15 @@ use ecs::app::{End, Plugin};
 pub struct AssetPlugin;
 
 impl Plugin for AssetPlugin {
+    fn name(&self) -> &'static str {
+        "AssetPlugin"
+    }
+
     fn setup(&mut self, app: &mut ecs::AppBuilder) {
         app.add_resource(AssetConfigBuilder::new());
         app.add_systems(End, AssetDatabase::update);
+        app.register_event::<ImportError>();
+        app.register_event::<LoadError>();
     }
 
     fn finish(&mut self, app: &mut ecs::AppBuilder) {
@@ -50,6 +63,7 @@ impl AssetAppExt for ecs::AppBuilder {
         if !config.is_registered::<A>() {
             config.register::<A>();
             self.add_resource(Assets::<A>::new());
+            self.register_event::<AssetEvent<A>>();
         }
 
         self

@@ -5,7 +5,7 @@ use crate::{
 };
 use commands::AssetCommand;
 use ecs::{Commands, EventWriter, SystemArg, core::task::IoTaskPool};
-use load::AssetLoadError;
+use load::LoadError;
 use smol::{
     channel::{Receiver, Sender, unbounded},
     lock::RwLock,
@@ -96,7 +96,7 @@ impl AssetDatabase {
     pub fn update(
         db: &AssetDatabase,
         mut import_errors: EventWriter<ImportError>,
-        mut load_errors: EventWriter<AssetLoadError>,
+        mut load_errors: EventWriter<LoadError>,
         mut commands: Commands,
     ) {
         while let Ok(event) = db.receiver.try_recv() {
@@ -112,7 +112,7 @@ impl AssetDatabase {
 pub enum DatabaseEvent {
     AssetCommand(AssetCommand),
     ImportError(ImportError),
-    LoadError(AssetLoadError),
+    LoadError(LoadError),
 }
 
 impl From<AssetCommand> for DatabaseEvent {
@@ -127,8 +127,8 @@ impl From<ImportError> for DatabaseEvent {
     }
 }
 
-impl From<AssetLoadError> for DatabaseEvent {
-    fn from(value: AssetLoadError) -> Self {
+impl From<LoadError> for DatabaseEvent {
+    fn from(value: LoadError) -> Self {
         Self::LoadError(value)
     }
 }

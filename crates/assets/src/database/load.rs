@@ -11,7 +11,7 @@ use ecs::{Event, core::task::IoTaskPool};
 use serde::{Deserialize, Serialize};
 
 #[derive(thiserror::Error, Debug)]
-pub enum AssetLoadError {
+pub enum LoadError {
     #[error("Asset not found: {0}")]
     NotFound(LoadPath<'static>),
     #[error("Failed to load asset: {0}")]
@@ -22,32 +22,32 @@ pub enum AssetLoadError {
     Deserialize(AssetIoError),
 }
 
-impl From<LoadPath<'_>> for AssetLoadError {
+impl From<LoadPath<'_>> for LoadError {
     fn from(path: LoadPath<'_>) -> Self {
-        AssetLoadError::NotFound(path.into_owned())
+        LoadError::NotFound(path.into_owned())
     }
 }
 
-impl From<AssetIoError> for AssetLoadError {
+impl From<AssetIoError> for LoadError {
     fn from(error: AssetIoError) -> Self {
-        AssetLoadError::Io(error)
+        LoadError::Io(error)
     }
 }
 
-impl Event for AssetLoadError {}
+impl Event for LoadError {}
 
 impl AssetDatabase {
     pub fn load<'a, A: Asset + for<'de> Deserialize<'de>>(
         &self,
         path: impl Into<LoadPath<'a>>,
-    ) -> Result<AssetId<A>, AssetLoadError> {
+    ) -> Result<AssetId<A>, LoadError> {
         self.load_erased(path).map(AssetId::from)
     }
 
     pub fn load_paths<'a>(
         &self,
         paths: impl IntoIterator<Item = impl Into<LoadPath<'a>>>,
-    ) -> Vec<Result<ErasedId, AssetLoadError>> {
+    ) -> Vec<Result<ErasedId, LoadError>> {
         let paths: Vec<LoadPath<'a>> = paths.into_iter().map(|p| p.into()).collect();
         if paths.is_empty() {
             return Vec::new();
@@ -64,10 +64,7 @@ impl AssetDatabase {
         ids
     }
 
-    pub fn load_erased<'a>(
-        &self,
-        path: impl Into<LoadPath<'a>>,
-    ) -> Result<ErasedId, AssetLoadError> {
+    pub fn load_erased<'a>(&self, path: impl Into<LoadPath<'a>>) -> Result<ErasedId, LoadError> {
         let load_path: LoadPath<'a> = path.into();
         let id = match load_path {
             LoadPath::Id(id) => id,
@@ -75,7 +72,7 @@ impl AssetDatabase {
                 if let Some(id) = self.get_id(path.clone()) {
                     id
                 } else {
-                    return Err(AssetLoadError::NotFound(LoadPath::Path(path.into_owned())));
+                    return Err(LoadError::NotFound(LoadPath::Path(path.into_owned())));
                 }
             }
         };
@@ -155,22 +152,22 @@ impl AssetDatabase {
     async fn load_internal(
         id: ErasedId,
         config: &AssetConfig,
-    ) -> Result<(ErasedAsset, ArtifactMeta), AssetLoadError> {
+    ) -> Result<(ErasedAsset, ArtifactMeta), LoadError> {
         let artifact = config
             .cache()
             .get_artifact(id)
             .await
-            .map_err(AssetLoadError::Io)?;
+            .map_err(LoadError::Io)?;
 
         let meta = config
             .registry()
             .get(artifact.ty())
-            .ok_or(AssetLoadError::NotRegistered(LoadPath::Id(id)))?;
+            .ok_or(LoadError::NotRegistered(LoadPath::Id(id)))?;
 
         let asset = match meta.deserialize(artifact.data()) {
             Some(Ok(asset)) => Ok(asset),
-            Some(Err(error)) => Err(AssetLoadError::Deserialize(error.into())),
-            None => Err(AssetLoadError::NotRegistered(LoadPath::Id(id))),
+            Some(Err(error)) => Err(LoadError::Deserialize(error.into())),
+            None => Err(LoadError::NotRegistered(LoadPath::Id(id))),
         }?;
 
         Ok((asset, artifact.meta))
