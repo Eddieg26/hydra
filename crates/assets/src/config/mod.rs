@@ -1,6 +1,5 @@
 use crate::{
     asset::{Asset, AssetType},
-    database::load::LoadPath,
     io::{
         AssetSource, FileSystem,
         cache::AssetCache,
@@ -26,7 +25,6 @@ pub struct AssetConfigBuilder {
     processors: AssetProcessors,
     sources: AssetSources,
     cache: AssetCache,
-    load_paths: Vec<LoadPath<'static>>,
 }
 
 impl AssetConfigBuilder {
@@ -37,7 +35,6 @@ impl AssetConfigBuilder {
             processors: AssetProcessors::new(),
             sources: AssetSources::new(),
             cache: AssetCache::new(LocalFs::new(".cache")),
-            load_paths: Vec::new(),
         }
     }
 
@@ -61,20 +58,8 @@ impl AssetConfigBuilder {
         self.sources.add(name.into(), fs);
     }
 
-    pub fn set_cache<F: FileSystem>(&mut self, fs: F) {
-        self.cache = AssetCache::new(fs);
-    }
-
-    pub fn add_load_path(&mut self, path: LoadPath<'static>) {
-        self.load_paths.push(path);
-    }
-
-    pub fn load_paths(&self) -> &[LoadPath<'static>] {
-        &self.load_paths
-    }
-
-    pub(crate) fn load_paths_mut(&mut self) -> &mut Vec<LoadPath<'static>> {
-        &mut self.load_paths
+    pub fn set_cache(&mut self, cache: AssetCache) {
+        self.cache = cache
     }
 
     pub fn is_registered<A: Asset>(&self) -> bool {

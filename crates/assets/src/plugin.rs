@@ -5,11 +5,8 @@ use crate::{
         importer::{AssetImporter, ImportError},
         processor::AssetProcessor,
     },
-    database::{
-        AssetDatabase,
-        load::{LoadError, LoadPath},
-    },
-    io::{FileSystem, LocalFs, SourceName},
+    database::{AssetDatabase, load::LoadError},
+    io::{AssetCache, FileSystem, LocalFs, SourceName},
 };
 use ecs::app::{End, Plugin};
 
@@ -36,11 +33,9 @@ impl Plugin for AssetPlugin {
             config.add_source(SourceName::Default, LocalFs::new("assets"));
         }
 
-        let load_paths = std::mem::take(config.load_paths_mut());
         let database = AssetDatabase::init(config.build());
         database.load_library();
         database.import();
-        database.load_paths(load_paths);
     }
 }
 
@@ -53,11 +48,41 @@ pub trait AssetAppExt {
         name: impl Into<SourceName<'static>>,
         source: S,
     ) -> &mut Self;
-    fn set_cache<S: FileSystem>(&mut self, fs: S) -> &mut Self;
-    fn load_asset(&mut self, path: impl Into<LoadPath<'static>>) -> &mut Self;
+    fn set_cache(&mut self, cache: AssetCache) -> &mut Self;
 }
 
 impl AssetAppExt for ecs::AppBuilder {
+    fn register_asset<A: Asset>(&mut self) -> &mut Self {
+        self.world_mut().register_asset::<A>();
+        self
+    }
+
+    fn add_importer<I: AssetImporter>(&mut self) -> &mut Self {
+        self.world_mut().add_importer::<I>();
+        self
+    }
+
+    fn add_processor<P: AssetProcessor>(&mut self) -> &mut Self {
+        self.world_mut().add_processor::<P>();
+        self
+    }
+
+    fn add_source<S: FileSystem>(
+        &mut self,
+        name: impl Into<SourceName<'static>>,
+        source: S,
+    ) -> &mut Self {
+        self.world_mut().add_source(name, source);
+        self
+    }
+
+    fn set_cache(&mut self, cache: AssetCache) -> &mut Self {
+        self.world_mut().set_cache(cache);
+        self
+    }
+}
+
+impl AssetAppExt for ecs::World {
     fn register_asset<A: Asset>(&mut self) -> &mut Self {
         let config = self.get_or_insert_resource(AssetConfigBuilder::new);
         if !config.is_registered::<A>() {
@@ -96,15 +121,9 @@ impl AssetAppExt for ecs::AppBuilder {
         self
     }
 
-    fn set_cache<S: FileSystem>(&mut self, fs: S) -> &mut Self {
+    fn set_cache(&mut self, cache: AssetCache) -> &mut Self {
         let config = self.get_or_insert_resource(AssetConfigBuilder::new);
-        config.set_cache(fs);
-        self
-    }
-
-    fn load_asset(&mut self, path: impl Into<LoadPath<'static>>) -> &mut Self {
-        let config = self.get_or_insert_resource(AssetConfigBuilder::new);
-        config.add_load_path(path.into());
+        config.set_cache(cache);
         self
     }
 }

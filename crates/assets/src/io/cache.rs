@@ -60,7 +60,7 @@ impl AssetLibrary {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ImportMeta {
     pub processor: Option<u32>,
     pub checksum: u32,

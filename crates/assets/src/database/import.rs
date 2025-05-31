@@ -372,7 +372,7 @@ impl AssetDatabase {
 
             if let Err(error) = self.config.cache().save_artifact(&artifact).await {
                 self.send_event(ImportError::SaveAsset(error)).await;
-            } else {
+            } else if self.states.read().await.get_load_state(id).can_reload() {
                 self.reload(id);
             }
         }
@@ -428,7 +428,7 @@ mod tests {
         asset::{Asset, DefaultSettings},
         config::{AssetConfigBuilder, importer::AssetImporter},
         database::AssetDatabase,
-        io::{AssetIoError, AssetPath, FileSystem, SourceName, VirtualFs},
+        io::{AssetCache, AssetIoError, AssetPath, FileSystem, SourceName, VirtualFs},
     };
     use ecs::core::task::{IoTaskPool, TaskPool};
     use serde::{Deserialize, Serialize};
@@ -475,7 +475,7 @@ mod tests {
         });
 
         let mut config = AssetConfigBuilder::new();
-        config.set_cache(VirtualFs::new());
+        config.set_cache(AssetCache::new(VirtualFs::new()));
         config.add_source(SourceName::Default, fs);
         config.add_importer::<Text>();
 

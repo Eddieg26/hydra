@@ -161,6 +161,14 @@ impl AppBuilder {
         })
     }
 
+    pub fn world(&self) -> &World {
+        &self.info().world
+    }
+
+    pub fn world_mut(&mut self) -> &mut World {
+        &mut self.info_mut().world
+    }
+
     pub fn components(&self) -> &Components {
         self.world().components()
     }
@@ -481,14 +489,6 @@ impl AppBuilder {
             AppType::Main { config, .. } => config,
             AppType::Sub { config, .. } => config,
         }
-    }
-
-    fn world(&self) -> &World {
-        &self.info().world
-    }
-
-    fn world_mut(&mut self) -> &mut World {
-        &mut self.info_mut().world
     }
 
     fn default_runner(mut apps: Apps) -> Apps {

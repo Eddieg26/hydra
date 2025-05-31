@@ -25,6 +25,10 @@ impl LoadState {
     pub fn is_failed(self) -> bool {
         matches!(self, LoadState::Failed)
     }
+
+    pub fn can_reload(self) -> bool {
+        matches!(self, LoadState::Loaded | LoadState::Failed)
+    }
 }
 
 #[derive(Debug)]

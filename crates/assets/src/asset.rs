@@ -73,6 +73,12 @@ impl<A: Asset> AssetId<A> {
     }
 }
 
+impl<A: Asset> ToString for AssetId<A> {
+    fn to_string(&self) -> String {
+        self.0.to_string()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ErasedId(uuid::Uuid);
 impl ErasedId {
