@@ -1,10 +1,9 @@
-use futures::{AsyncRead, AsyncWrite, Stream};
+use futures::{AsyncRead, AsyncWrite, Stream, future::BoxFuture};
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     future::Future,
     path::{Path, PathBuf},
-    pin::Pin,
     sync::Arc,
 };
 use thiserror::Error;
@@ -88,15 +87,18 @@ impl From<ron::error::SpannedError> for AssetIoError {
     }
 }
 
-pub type BoxedFuture<'a, T, E = AssetIoError> = Box<dyn Future<Output = Result<T, E>> + Send + 'a>;
-pub type AssetFuture<'a, T, E = AssetIoError> = Pin<BoxedFuture<'a, T, E>>;
-
 pub trait AsyncReader: AsyncRead + Send + Sync + Unpin {
-    fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> AssetFuture<'a, usize>;
+    fn read_to_end<'a>(
+        &'a mut self,
+        buf: &'a mut Vec<u8>,
+    ) -> BoxFuture<'a, Result<usize, AssetIoError>>;
 }
 
 impl AsyncReader for Box<dyn AsyncReader> {
-    fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> AssetFuture<'a, usize> {
+    fn read_to_end<'a>(
+        &'a mut self,
+        buf: &'a mut Vec<u8>,
+    ) -> BoxFuture<'a, Result<usize, AssetIoError>> {
         self.as_mut().read_to_end(buf)
     }
 }
@@ -139,16 +141,29 @@ pub trait FileSystem: Send + Sync + 'static {
 
 pub trait ErasedFileSystem: downcast_rs::Downcast + Send + Sync + 'static {
     fn root(&self) -> &Path;
-    fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AsyncReader>>;
-    fn read_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn PathStream>>;
-    fn is_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool>;
-    fn writer<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AsyncWriter>>;
-    fn create_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()>;
-    fn create_dir_all<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()>;
-    fn rename<'a>(&'a self, from: &'a Path, to: &'a Path) -> AssetFuture<'a, ()>;
-    fn remove<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()>;
-    fn remove_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()>;
-    fn exists<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool>;
+    fn reader<'a>(
+        &'a self,
+        path: &'a Path,
+    ) -> BoxFuture<'a, Result<Box<dyn AsyncReader>, AssetIoError>>;
+    fn read_dir<'a>(
+        &'a self,
+        path: &'a Path,
+    ) -> BoxFuture<'a, Result<Box<dyn PathStream>, AssetIoError>>;
+    fn is_dir<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, Result<bool, AssetIoError>>;
+    fn writer<'a>(
+        &'a self,
+        path: &'a Path,
+    ) -> BoxFuture<'a, Result<Box<dyn AsyncWriter>, AssetIoError>>;
+    fn create_dir<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, Result<(), AssetIoError>>;
+    fn create_dir_all<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, Result<(), AssetIoError>>;
+    fn rename<'a>(
+        &'a self,
+        from: &'a Path,
+        to: &'a Path,
+    ) -> BoxFuture<'a, Result<(), AssetIoError>>;
+    fn remove<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, Result<(), AssetIoError>>;
+    fn remove_dir<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, Result<(), AssetIoError>>;
+    fn exists<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, Result<bool, AssetIoError>>;
 }
 
 impl<T: FileSystem> ErasedFileSystem for T {
@@ -156,49 +171,62 @@ impl<T: FileSystem> ErasedFileSystem for T {
         FileSystem::root(self)
     }
 
-    fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AsyncReader>> {
+    fn reader<'a>(
+        &'a self,
+        path: &'a Path,
+    ) -> BoxFuture<'a, Result<Box<dyn AsyncReader>, AssetIoError>> {
         Box::pin(async {
             let reader = self.reader(path).await?;
             Ok(Box::new(reader) as Box<dyn AsyncReader>)
         })
     }
 
-    fn read_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn PathStream>> {
+    fn read_dir<'a>(
+        &'a self,
+        path: &'a Path,
+    ) -> BoxFuture<'a, Result<Box<dyn PathStream>, AssetIoError>> {
         Box::pin(async { self.read_dir(path).await })
     }
 
-    fn is_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool> {
+    fn is_dir<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, Result<bool, AssetIoError>> {
         Box::pin(async { self.is_dir(path).await })
     }
 
-    fn writer<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AsyncWriter>> {
+    fn writer<'a>(
+        &'a self,
+        path: &'a Path,
+    ) -> BoxFuture<'a, Result<Box<dyn AsyncWriter>, AssetIoError>> {
         Box::pin(async {
             let writer = self.writer(path).await?;
             Ok(Box::new(writer) as Box<dyn AsyncWriter>)
         })
     }
 
-    fn create_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()> {
+    fn create_dir<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, Result<(), AssetIoError>> {
         Box::pin(async { self.create_dir(path).await })
     }
 
-    fn create_dir_all<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()> {
+    fn create_dir_all<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, Result<(), AssetIoError>> {
         Box::pin(async { self.create_dir_all(path).await })
     }
 
-    fn rename<'a>(&'a self, from: &'a Path, to: &'a Path) -> AssetFuture<'a, ()> {
+    fn rename<'a>(
+        &'a self,
+        from: &'a Path,
+        to: &'a Path,
+    ) -> BoxFuture<'a, Result<(), AssetIoError>> {
         Box::pin(async { self.rename(from, to).await })
     }
 
-    fn remove<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()> {
+    fn remove<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, Result<(), AssetIoError>> {
         Box::pin(async { self.remove(path).await })
     }
 
-    fn remove_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()> {
+    fn remove_dir<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, Result<(), AssetIoError>> {
         Box::pin(async { self.remove_dir(path).await })
     }
 
-    fn exists<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool> {
+    fn exists<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, Result<bool, AssetIoError>> {
         Box::pin(async { self.exists(path).await })
     }
 }

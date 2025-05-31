@@ -1,5 +1,5 @@
 use super::{AssetIoError, AsyncReader, AsyncWriter, FileSystem, PathExt};
-use futures::{AsyncRead, AsyncWrite, StreamExt, executor::block_on};
+use futures::{AsyncRead, AsyncWrite, StreamExt, executor::block_on, future::BoxFuture};
 use smol::lock::RwLock;
 use std::{
     collections::HashMap,
@@ -97,7 +97,10 @@ impl AsyncRead for FileReader {
 }
 
 impl AsyncReader for FileReader {
-    fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> super::AssetFuture<'a, usize> {
+    fn read_to_end<'a>(
+        &'a mut self,
+        buf: &'a mut Vec<u8>,
+    ) -> BoxFuture<'a, Result<usize, AssetIoError>> {
         Box::pin(async move {
             let len = self.data.len();
             if self.position < len as u64 {

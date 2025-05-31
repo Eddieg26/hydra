@@ -2,11 +2,12 @@ use super::{BoxedError, registry::AssetRegistry};
 use crate::{
     asset::{Asset, AssetId, AssetMetadata, AssetType, ErasedId, Settings},
     io::{
-        Artifact, ArtifactMeta, AssetFuture, AssetIoError, AssetPath, AssetSource, AsyncReader,
-        ImportMeta, PathExt, SourceName, deserialize,
+        Artifact, ArtifactMeta, AssetIoError, AssetPath, AssetSource, AsyncReader, ImportMeta,
+        PathExt, SourceName, deserialize,
     },
 };
 use ecs::Event;
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use std::{
     any::TypeId,
@@ -145,7 +146,7 @@ pub struct ErasedImporter {
         ImportContext<'a>,
         &'a mut dyn AsyncReader,
         &'a Box<dyn DynMetadata>,
-    ) -> AssetFuture<'a, Vec<Artifact>, BoxedError>,
+    ) -> BoxFuture<'a, Result<Vec<Artifact>, BoxedError>>,
     deserialize_metadata: fn(&[u8]) -> Result<Box<dyn DynMetadata>, AssetIoError>,
     default_metadata: fn() -> Box<dyn DynMetadata>,
     type_id: fn() -> TypeId,
@@ -221,7 +222,7 @@ impl ErasedImporter {
         ctx: ImportContext<'a>,
         reader: &'a mut dyn AsyncReader,
         metadata: &'a Box<dyn DynMetadata>,
-    ) -> AssetFuture<'a, Vec<Artifact>, BoxedError> {
+    ) -> BoxFuture<'a, Result<Vec<Artifact>, BoxedError>> {
         (self.import)(ctx, reader, metadata)
     }
 

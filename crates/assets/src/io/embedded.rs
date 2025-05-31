@@ -1,6 +1,6 @@
-use super::{serialize, AssetIoError, AsyncReader, AsyncWriter, FileSystem, PathExt};
+use super::{AssetIoError, AsyncReader, AsyncWriter, FileSystem, PathExt, serialize};
 use crate::asset::{Asset, AssetMetadata, ErasedId, Settings};
-use futures::{AsyncRead, AsyncWrite};
+use futures::{AsyncRead, AsyncWrite, future::BoxFuture};
 use serde::Serialize;
 use smol::lock::RwLock;
 use std::{
@@ -85,7 +85,10 @@ impl AsyncRead for EmbeddedReader {
 }
 
 impl AsyncReader for EmbeddedReader {
-    fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> super::AssetFuture<'a, usize> {
+    fn read_to_end<'a>(
+        &'a mut self,
+        buf: &'a mut Vec<u8>,
+    ) -> BoxFuture<'a, Result<usize, AssetIoError>> {
         Box::pin(async move {
             let len = self.data.len();
             if self.position < len as u64 {

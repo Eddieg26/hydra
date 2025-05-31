@@ -1,9 +1,10 @@
 use super::{BoxedError, importer::AssetImporter};
 use crate::{
     asset::{Asset, AssetId, AssetMetadata},
-    io::{ArtifactMeta, AssetFuture, AssetIoError, cache::AssetCache, deserialize, serialize},
+    io::{ArtifactMeta, AssetIoError, cache::AssetCache, deserialize, serialize},
 };
 use ecs::IndexMap;
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use std::{any::TypeId, collections::HashMap};
 
@@ -51,7 +52,7 @@ pub struct ErasedProcesser {
         &'a mut ProcessContext,
         &'a [u8],
         Vec<u8>,
-    ) -> AssetFuture<'a, Vec<u8>, BoxedError>,
+    ) -> BoxFuture<'a, Result<Vec<u8>, BoxedError>>,
     output_asset: fn() -> TypeId,
 }
 
@@ -85,7 +86,7 @@ impl ErasedProcesser {
         ctx: &'a mut ProcessContext,
         asset: &'a [u8],
         metadata: Vec<u8>,
-    ) -> AssetFuture<'a, Vec<u8>, BoxedError> {
+    ) -> BoxFuture<'a, Result<Vec<u8>, BoxedError>> {
         (self.process)(ctx, asset, metadata)
     }
 

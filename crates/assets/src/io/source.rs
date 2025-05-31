@@ -1,6 +1,5 @@
 use super::{
-    AssetFuture, AssetIoError, AsyncReader, AsyncWriter, ErasedFileSystem, FileSystem, PathExt,
-    PathStream,
+    AssetIoError, AsyncReader, AsyncWriter, ErasedFileSystem, FileSystem, PathExt, PathStream,
 };
 use crate::{
     asset::{AssetMetadata, Settings},
@@ -240,8 +239,11 @@ impl AssetSource {
         self.io.as_ref()
     }
 
-    pub fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AsyncReader>> {
-        self.io.reader(path)
+    pub async fn reader<'a>(
+        &'a self,
+        path: &'a Path,
+    ) -> Result<Box<dyn AsyncReader>, AssetIoError> {
+        self.io.reader(path).await
     }
 
     pub async fn read_dir<'a>(
@@ -251,36 +253,39 @@ impl AssetSource {
         self.io.read_dir(path).await
     }
 
-    pub fn is_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool> {
-        self.io.is_dir(path)
+    pub async fn is_dir<'a>(&'a self, path: &'a Path) -> Result<bool, AssetIoError> {
+        self.io.is_dir(path).await
     }
 
-    pub fn writer<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AsyncWriter>> {
-        self.io.writer(path)
+    pub async fn writer<'a>(
+        &'a self,
+        path: &'a Path,
+    ) -> Result<Box<dyn AsyncWriter>, AssetIoError> {
+        self.io.writer(path).await
     }
 
-    pub fn rename<'a>(&'a self, from: &'a Path, to: &'a Path) -> AssetFuture<'a, ()> {
-        self.io.rename(from, to)
+    pub async fn rename<'a>(&'a self, from: &'a Path, to: &'a Path) -> Result<(), AssetIoError> {
+        self.io.rename(from, to).await
     }
 
-    pub fn create_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()> {
-        self.io.create_dir(path)
+    pub async fn create_dir<'a>(&'a self, path: &'a Path) -> Result<(), AssetIoError> {
+        self.io.create_dir(path).await
     }
 
-    pub fn create_dir_all<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()> {
-        self.io.create_dir_all(path)
+    pub async fn create_dir_all<'a>(&'a self, path: &'a Path) -> Result<(), AssetIoError> {
+        self.io.create_dir_all(path).await
     }
 
-    pub fn remove<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()> {
-        self.io.remove(path)
+    pub async fn remove<'a>(&'a self, path: &'a Path) -> Result<(), AssetIoError> {
+        self.io.remove(path).await
     }
 
-    pub fn remove_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()> {
-        self.io.remove_dir(path)
+    pub async fn remove_dir<'a>(&'a self, path: &'a Path) -> Result<(), AssetIoError> {
+        self.io.remove_dir(path).await
     }
 
-    pub fn exists<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool> {
-        self.io.exists(path)
+    pub async fn exists<'a>(&'a self, path: &'a Path) -> Result<bool, AssetIoError> {
+        self.io.exists(path).await
     }
 
     pub fn metadata_path(path: &Path) -> PathBuf {
@@ -360,8 +365,6 @@ impl AssetSources {
 
 impl std::fmt::Debug for AssetSources {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_map()
-            .key(&self.sources.keys().map(|k| k))
-            .finish()
+        f.debug_map().key(&self.sources.keys().map(|k| k)).finish()
     }
 }
