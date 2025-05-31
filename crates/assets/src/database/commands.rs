@@ -1,7 +1,7 @@
 use super::AssetDatabase;
-use crate::asset::{AssetAction, AssetType, ErasedAsset, ErasedId};
-use ecs::{Command, World};
-use std::collections::HashSet;
+use crate::asset::{Asset, AssetAction, AssetId, AssetType, ErasedAsset, ErasedId};
+use ecs::{Command, Commands, World};
+use std::{any::TypeId, collections::HashSet};
 
 pub struct LoadDependencies {
     pub parent: Option<ErasedId>,
@@ -145,5 +145,36 @@ impl AssetCommand {
                 }
             }
         }
+    }
+}
+
+pub trait AssetDatabaseCommands {
+    fn add_asset<A: Asset>(
+        &mut self,
+        id: AssetId<A>,
+        asset: A,
+        dependencies: Option<LoadDependencies>,
+    );
+    fn remove_asset<A: Asset>(&mut self, id: AssetId<A>);
+}
+
+impl AssetDatabaseCommands for Commands<'_, '_> {
+    fn add_asset<A: Asset>(
+        &mut self,
+        id: AssetId<A>,
+        asset: A,
+        dependencies: Option<LoadDependencies>,
+    ) {
+        let database = AssetDatabase::get();
+        let ty = database
+            .config
+            .registry()
+            .get_ty(TypeId::of::<A>())
+            .unwrap();
+        self.add(AssetCommand::add(id, ty, asset, dependencies));
+    }
+
+    fn remove_asset<A: Asset>(&mut self, id: AssetId<A>) {
+        self.add(AssetCommand::remove(id));
     }
 }

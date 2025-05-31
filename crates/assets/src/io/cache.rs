@@ -322,6 +322,10 @@ impl AssetCache {
         }
     }
 
+    pub fn fs(&self) -> &dyn ErasedFileSystem {
+        self.fs.as_ref()
+    }
+
     pub fn get_artifacts_path(&self) -> &Path {
         &self.artifacts
     }
@@ -417,9 +421,17 @@ impl AssetCache {
         writer.write(&data).await.map_err(AssetIoError::from)
     }
 
+    pub async fn create_root(&self) -> Result<(), AssetIoError> {
+        if !self.fs.exists(&self.temp).await? {
+            self.fs.create_dir_all(&self.temp).await
+        } else {
+            Ok(())
+        }
+    }
+
     pub async fn create_temp(&self) -> Result<(), AssetIoError> {
         if !self.fs.exists(&self.temp).await? {
-            self.fs.create_dir(&self.temp).await
+            self.fs.create_dir_all(&self.temp).await
         } else {
             Ok(())
         }
@@ -427,7 +439,7 @@ impl AssetCache {
 
     pub async fn delete_temp(&self) -> Result<(), AssetIoError> {
         if self.fs.exists(&self.temp).await? {
-            self.fs.remove_dir(&self.temp).await
+            self.fs.create_dir_all(&self.temp).await
         } else {
             Ok(())
         }

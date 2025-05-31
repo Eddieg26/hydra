@@ -18,7 +18,7 @@ use ecs::{
     },
 };
 use smol::{future::FutureExt, stream::StreamExt};
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, ops::Deref};
 
 #[derive(Default)]
 pub struct ImportInfo {
@@ -142,6 +142,7 @@ impl AssetDatabase {
         }
 
         let _ = self.config.cache().delete_temp().await;
+        let _ = self.config.cache().save_library(self.library.read().await.deref());
     }
 
     async fn import_source<'a>(

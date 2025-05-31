@@ -76,13 +76,21 @@ impl AssetDatabase {
         let _ = self.sender.send(event.into()).await;
     }
 
-    pub fn load_library(&self) {
+    pub fn setup(&self) {
         IoTaskPool::get()
             .spawn(async {
                 let db = AssetDatabase::get();
 
                 let mut writer = db.writer.write().await;
                 *writer = Some(());
+
+                for (_, source) in db.config.sources().iter() {
+                    if !source.exists("".as_ref()).await.unwrap_or(false) {
+                        let _ = source.create_dir_all("".as_ref()).await;
+                    }
+                }
+
+                let _ = db.config.cache().create_root().await;
 
                 let library = match db.config.cache().load_library().await {
                     Ok(lib) => lib,
