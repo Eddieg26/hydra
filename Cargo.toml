@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/Eddieg26/hydra"
 
 [workspace]
-members = ["crates/macros/*", "crates/ecs", "crates/assets", "examples/ecs/*"]
+members = ["crates/macros/*", "crates/ecs", "crates/asset", "examples/ecs/*"]
 
 
 [workspace.dependencies]
