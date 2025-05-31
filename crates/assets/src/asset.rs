@@ -350,6 +350,7 @@ impl<A: Asset> Assets<A> {
 
 impl<A: Asset> Resource for Assets<A> {}
 
+#[derive(Event)]
 /// Event representing changes to an [`Asset`] in the [`AssetDatabase`].
 pub enum AssetEvent<A: Asset> {
     /// An asset was added, modified, removed, or loaded.
@@ -361,8 +362,6 @@ pub enum AssetEvent<A: Asset> {
     /// An asset and its dependencies were loaded.
     Loaded { id: AssetId<A> },
 }
-
-impl<A: Asset> Event for AssetEvent<A> {}
 
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Folder {

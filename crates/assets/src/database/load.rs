@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use super::{AssetDatabase, commands::AssetCommand};
 use crate::{
     asset::{Asset, AssetId, ErasedAsset, ErasedId},
@@ -10,8 +8,9 @@ use ecs::{Event, core::task::IoTaskPool};
 use futures::TryFutureExt;
 use serde::{Deserialize, Serialize};
 use smol::lock::Mutex;
+use std::sync::Arc;
 
-#[derive(thiserror::Error, Debug, Clone)]
+#[derive(thiserror::Error, Debug, Clone, Event)]
 pub enum LoadError {
     #[error("Asset not found: {0}")]
     NotFound(LoadPath<'static>),
@@ -34,8 +33,6 @@ impl From<AssetIoError> for LoadError {
         LoadError::Io(error)
     }
 }
-
-impl Event for LoadError {}
 
 impl AssetDatabase {
     pub fn load<A: Asset + for<'de> Deserialize<'de>>(

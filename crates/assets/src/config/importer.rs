@@ -299,7 +299,7 @@ impl AssetImporters {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Event)]
 pub enum ImportError {
     #[error("{0}")]
     File(AssetIoError),
@@ -334,8 +334,6 @@ pub enum ImportError {
     #[error("{0}")]
     Unknown(AssetIoError),
 }
-
-impl Event for ImportError {}
 
 impl From<(SourceName<'static>, AssetIoError)> for ImportError {
     fn from(value: (SourceName<'static>, AssetIoError)) -> Self {

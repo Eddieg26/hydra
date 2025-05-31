@@ -28,3 +28,5 @@ pub use world::{
 pub mod prelude {
     pub use super::*;
 }
+
+pub use derive_ecs::Event;
