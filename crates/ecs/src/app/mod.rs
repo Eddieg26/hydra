@@ -10,8 +10,6 @@ use std::{
     hash::Hash,
 };
 
-pub mod phases;
-
 #[allow(unused_variables)]
 pub trait Plugin: 'static {
     fn name(&self) -> &'static str {
