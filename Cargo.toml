@@ -8,7 +8,8 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/Eddieg26/hydra"
 
 [workspace]
-members = ["crates/*", "examples/ecs/*"]
+members = ["crates/*", "examples/ecs/*", "crates/macros/*"]
+exclude = ["crates/macros"]
 
 [workspace.dependencies]
 fixedbitset = "0.5.7"
