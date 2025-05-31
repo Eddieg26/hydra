@@ -66,26 +66,26 @@ impl PartialEq for Box<dyn AppTag> {
 
 impl Eq for Box<dyn AppTag> {}
 
+#[derive(Phase)]
 pub struct Init;
-impl Phase for Init {}
 
+#[derive(Phase)]
 pub struct Run;
-impl Phase for Run {}
 
+#[derive(Phase)]
 pub struct Start;
-impl Phase for Start {}
 
+#[derive(Phase)]
 pub struct Update;
-impl Phase for Update {}
 
+#[derive(Phase)]
 pub struct End;
-impl Phase for End {}
 
+#[derive(Phase)]
 pub struct Extract;
-impl Phase for Extract {}
 
+#[derive(Phase)]
 pub struct Shutdown;
-impl Phase for Shutdown {}
 
 pub struct AppBuildInfo {
     world: World,
@@ -635,7 +635,7 @@ impl Apps {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Resource)]
 pub struct MainWorld(WorldCell<'static>);
 impl MainWorld {
     pub(crate) fn new(world: &mut World) -> Self {
@@ -658,18 +658,16 @@ impl std::ops::DerefMut for MainWorld {
     }
 }
 
-impl Resource for MainWorld {}
 unsafe impl Send for MainWorld {}
 unsafe impl Sync for MainWorld {}
 
 #[allow(unused_imports, dead_code)]
 mod tests {
-    use super::{App, AppTag, Plugin, Plugins};
-    use crate::Resource;
+    use super::{App, Plugin, Plugins};
+    use crate::{AppTag, Resource};
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Resource)]
     pub struct Value(usize);
-    impl Resource for Value {}
 
     pub struct PluginA;
     impl Plugin for PluginA {
@@ -710,8 +708,8 @@ mod tests {
         }
     }
 
+    #[derive(AppTag)]
     pub struct TestApp;
-    impl AppTag for TestApp {}
 
     #[test]
     fn build_plugins() {

@@ -19,6 +19,7 @@ pub mod registry;
 
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
+#[derive(Resource)]
 pub struct AssetConfigBuilder {
     registry: AssetRegistry,
     importers: AssetImporters,
@@ -81,7 +82,6 @@ impl AssetConfigBuilder {
     }
 }
 
-impl Resource for AssetConfigBuilder {}
 
 impl Default for AssetConfigBuilder {
     fn default() -> Self {

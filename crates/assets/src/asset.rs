@@ -292,6 +292,7 @@ impl<'de, T: Settings + Deserialize<'de>> Deserialize<'de> for AssetMetadata<T> 
     }
 }
 
+#[derive(Resource)]
 pub struct Assets<A: Asset> {
     assets: HashMap<AssetId<A>, A>,
 }
@@ -347,8 +348,6 @@ impl<A: Asset> Assets<A> {
         self.assets.clear();
     }
 }
-
-impl<A: Asset> Resource for Assets<A> {}
 
 #[derive(Event)]
 /// Event representing changes to an [`Asset`] in the [`AssetDatabase`].
