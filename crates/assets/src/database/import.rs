@@ -478,9 +478,8 @@ mod tests {
         config.set_cache(VirtualFs::new());
         config.add_source(SourceName::Default, fs);
         config.add_importer::<Text>();
-        AssetDatabase::init(config.build());
 
-        let database = AssetDatabase::get();
+        let database = AssetDatabase::init(config.build());
         database.import();
 
         let task = IoTaskPool::get().spawn(async move {

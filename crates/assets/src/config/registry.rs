@@ -37,7 +37,7 @@ impl AssetMeta {
                     });
 
                     true
-                }else {
+                } else {
                     false
                 }
             },
@@ -109,6 +109,10 @@ impl AssetRegistry {
                 index
             }
         }
+    }
+
+    pub fn contains(&self, ty: TypeId) -> bool {
+        self.map.contains_key(&ty)
     }
 
     pub(crate) fn set_deserialize<A: Asset + for<'de> Deserialize<'de>>(

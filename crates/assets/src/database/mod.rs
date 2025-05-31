@@ -4,7 +4,7 @@ use crate::{
     io::{AssetPath, cache::AssetLibrary},
 };
 use commands::AssetCommand;
-use ecs::{Commands, EventWriter, SystemArg};
+use ecs::{Commands, EventWriter, SystemArg, core::task::IoTaskPool};
 use load::AssetLoadError;
 use smol::{
     channel::{Receiver, Sender, unbounded},
@@ -31,13 +31,13 @@ pub struct AssetDatabase {
 }
 
 impl AssetDatabase {
-    pub fn init(config: AssetConfig) {
-        DB.set(AssetDatabase::new(config))
-            .expect("AssetDatabase already initialized");
+    pub fn init(config: AssetConfig) -> &'static AssetDatabase {
+        DB.get_or_init(|| Self::new(config))
     }
 
     pub fn get() -> &'static AssetDatabase {
-        DB.get().expect("AssetDatabase not initialized")
+        DB.get()
+            .expect("AssetDatabase not initialized. Make sure to add AssetPlugin to your app.")
     }
 
     pub fn is_initialized() -> bool {
@@ -76,13 +76,30 @@ impl AssetDatabase {
         let _ = self.sender.send(event.into()).await;
     }
 
+    pub fn load_library(&self) {
+        IoTaskPool::get()
+            .spawn(async {
+                let db = AssetDatabase::get();
+
+                let _writer = db.writer.write().await;
+
+                let library = match db.config.cache().load_library().await {
+                    Ok(lib) => lib,
+                    Err(_) => AssetLibrary::new(),
+                };
+
+                db.library.write().await.replace(library);
+            })
+            .detach();
+    }
+
     pub fn update(
-        &self,
+        db: &AssetDatabase,
         mut import_errors: EventWriter<ImportError>,
         mut load_errors: EventWriter<AssetLoadError>,
         mut commands: Commands,
     ) {
-        while let Ok(event) = self.receiver.try_recv() {
+        while let Ok(event) = db.receiver.try_recv() {
             match event {
                 DatabaseEvent::AssetCommand(command) => commands.add(command),
                 DatabaseEvent::ImportError(error) => import_errors.send(error),
@@ -125,8 +142,7 @@ unsafe impl SystemArg for &AssetDatabase {
         if AssetDatabase::is_initialized() {
             AssetDatabase::get()
         } else if let Some(config) = world.remove_resource::<AssetConfigBuilder>() {
-            AssetDatabase::init(config.build());
-            AssetDatabase::get()
+            AssetDatabase::init(config.build())
         } else {
             panic!("AssetDatabase not initialized and no AssetConfigBuilder found in world");
         }

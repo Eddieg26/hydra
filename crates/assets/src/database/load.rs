@@ -44,6 +44,26 @@ impl AssetDatabase {
         self.load_erased(path).map(AssetId::from)
     }
 
+    pub fn load_paths<'a>(
+        &self,
+        paths: impl IntoIterator<Item = impl Into<LoadPath<'a>>>,
+    ) -> Vec<Result<ErasedId, AssetLoadError>> {
+        let paths: Vec<LoadPath<'a>> = paths.into_iter().map(|p| p.into()).collect();
+        if paths.is_empty() {
+            return Vec::new();
+        }
+
+        let mut ids = Vec::with_capacity(paths.len());
+        for path in paths {
+            match self.load_erased(path) {
+                Ok(id) => ids.push(Ok(id)),
+                Err(error) => ids.push(Err(error)),
+            }
+        }
+
+        ids
+    }
+
     pub fn load_erased<'a>(
         &self,
         path: impl Into<LoadPath<'a>>,

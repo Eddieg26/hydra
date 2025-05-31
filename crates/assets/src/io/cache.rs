@@ -49,6 +49,11 @@ impl AssetLibrary {
         self.id_map.len()
     }
 
+    pub fn replace(&mut self, library: Self) {
+        self.id_map = library.id_map;
+        self.path_map = library.path_map;
+    }
+
     pub fn clear(&mut self) {
         self.id_map.clear();
         self.path_map.clear();

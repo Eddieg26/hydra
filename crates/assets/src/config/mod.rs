@@ -1,7 +1,8 @@
 use crate::{
     asset::{Asset, AssetType},
+    database::load::LoadPath,
     io::{
-        FileSystem,
+        AssetSource, FileSystem,
         cache::AssetCache,
         local::LocalFs,
         source::{AssetSources, SourceName},
@@ -11,6 +12,7 @@ use ecs::Resource;
 use importer::{AssetImporter, AssetImporters};
 use processor::{AssetProcessor, AssetProcessors};
 use registry::AssetRegistry;
+use std::any::TypeId;
 
 pub mod importer;
 pub mod processor;
@@ -24,6 +26,7 @@ pub struct AssetConfigBuilder {
     processors: AssetProcessors,
     sources: AssetSources,
     cache: AssetCache,
+    load_paths: Vec<LoadPath<'static>>,
 }
 
 impl AssetConfigBuilder {
@@ -34,6 +37,7 @@ impl AssetConfigBuilder {
             processors: AssetProcessors::new(),
             sources: AssetSources::new(),
             cache: AssetCache::new(LocalFs::new(".cache")),
+            load_paths: Vec::new(),
         }
     }
 
@@ -61,6 +65,26 @@ impl AssetConfigBuilder {
         self.cache = AssetCache::new(fs);
     }
 
+    pub fn add_load_path(&mut self, path: LoadPath<'static>) {
+        self.load_paths.push(path);
+    }
+
+    pub fn load_paths(&self) -> &[LoadPath<'static>] {
+        &self.load_paths
+    }
+
+    pub(crate) fn load_paths_mut(&mut self) -> &mut Vec<LoadPath<'static>> {
+        &mut self.load_paths
+    }
+
+    pub fn is_registered<A: Asset>(&self) -> bool {
+        self.registry.contains(TypeId::of::<A>())
+    }
+
+    pub fn source(&self, name: &SourceName<'static>) -> Option<&AssetSource> {
+        self.sources.get(name)
+    }
+
     pub fn build(self) -> AssetConfig {
         AssetConfig {
             registry: self.registry,
@@ -74,6 +98,12 @@ impl AssetConfigBuilder {
 
 impl Resource for AssetConfigBuilder {}
 
+impl Default for AssetConfigBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug)]
 pub struct AssetConfig {
     registry: AssetRegistry,
@@ -86,6 +116,10 @@ pub struct AssetConfig {
 impl AssetConfig {
     pub fn registry(&self) -> &AssetRegistry {
         &self.registry
+    }
+
+    pub fn is_registered(&self, ty: AssetType) -> bool {
+        self.registry.get(ty).is_some()
     }
 
     pub fn importers(&self) -> &AssetImporters {
