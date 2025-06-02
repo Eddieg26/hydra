@@ -257,6 +257,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "const_panic"
+version = "0.2.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2459fc9262a1aa204eb4b5764ad4f189caec88aea9634389c0a25f8be7f6265e"
+
+[[package]]
 name = "constant_time_eq"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -292,6 +298,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive-encase"
+version = "0.1.0"
+dependencies = [
+ "encase_derive_impl",
+ "macro-utils",
+]
+
+[[package]]
 name = "downcast-rs"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -308,6 +322,37 @@ dependencies = [
  "indexmap",
  "smol",
  "threadpool",
+]
+
+[[package]]
+name = "encase"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e5ed952f01ce6a4feb6a2bc434995d420a99d91a5487502539451b42502bc73"
+dependencies = [
+ "const_panic",
+ "encase_derive",
+ "thiserror",
+]
+
+[[package]]
+name = "encase_derive"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fabf87a1be72212203c863fa3de2e62fd125204cea5e3f9b024a6f39f1af3ae"
+dependencies = [
+ "encase_derive_impl",
+]
+
+[[package]]
+name = "encase_derive_impl"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bac88a17c6aaa8f92e2cbb8a161ff6ccd88eac93878d4109727100016399a0c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -490,6 +535,14 @@ name = "hermit-abi"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fbf6a919d6cf397374f7dfeeea91d974c7c0a7221d0d0f4f20d859d329e53fcc"
+
+[[package]]
+name = "hydra-encase"
+version = "0.1.0"
+dependencies = [
+ "derive-encase",
+ "encase",
+]
 
 [[package]]
 name = "hydra-engine"

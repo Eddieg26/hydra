@@ -1,0 +1,8 @@
+[package]
+name = "hydra-encase"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+encase = "0.11.0"
+derive-encase = { path = "../macros/derive-encase" }
