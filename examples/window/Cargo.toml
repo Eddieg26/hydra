@@ -1,0 +1,8 @@
+[package]
+name = "window-example"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ecs = { path = "../../crates/ecs" }
+window = { path = "../../crates/window" }

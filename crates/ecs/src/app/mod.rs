@@ -357,6 +357,19 @@ impl AppBuilder {
         self
     }
 
+    pub fn set_runner(&mut self, f: impl Fn(Apps) -> Apps + 'static) -> &mut Self {
+        match &mut self.0 {
+            AppType::Main { runner, .. } => runner.replace(Box::new(f)),
+            AppType::Sub { .. } => panic!("Cannot set runner for a sub app"),
+        };
+        self
+    }
+
+    pub fn run(&mut self) {
+        let mut apps = self.build();
+        apps.run();
+    }
+
     pub fn build(&mut self) -> Apps {
         if self.is_building() {
             panic!("AppBuilder is already building. You cannot call build() multiple times.");
@@ -536,6 +549,15 @@ pub struct App {
 }
 
 impl App {
+    pub fn empty() -> Self {
+        let mut world = World::new();
+        let systems = Schedule::new(RunMode::Sequential)
+            .build(&mut world)
+            .unwrap();
+
+        App { world, systems }
+    }
+
     pub fn new() -> AppBuilder {
         AppBuilder::new()
     }
@@ -577,6 +599,14 @@ pub struct Apps {
 }
 
 impl Apps {
+    pub fn empty() -> Self {
+        Self {
+            main: App::empty(),
+            sub: Vec::new(),
+            tasks: Vec::new(),
+        }
+    }
+
     fn new(main: App, sub: Vec<App>) -> Self {
         Self {
             main,
@@ -587,6 +617,10 @@ impl Apps {
 
     pub fn world(&self) -> &World {
         &self.main.world
+    }
+
+    pub fn world_mut(&mut self) -> &mut World {
+        &mut self.main.world
     }
 
     pub fn init(&mut self) {
