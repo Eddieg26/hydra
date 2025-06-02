@@ -18,7 +18,10 @@ use ecs::{
     },
 };
 use smol::{future::FutureExt, stream::StreamExt};
-use std::{collections::{HashMap, HashSet}, ops::Deref};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Deref,
+};
 
 #[derive(Default)]
 pub struct ImportInfo {
@@ -142,7 +145,10 @@ impl AssetDatabase {
         }
 
         let _ = self.config.cache().delete_temp().await;
-        let _ = self.config.cache().save_library(self.library.read().await.deref());
+        let _ = self
+            .config
+            .cache()
+            .save_library(self.library.read().await.deref());
     }
 
     async fn import_source<'a>(
@@ -481,7 +487,7 @@ impl AssetDatabase {
 #[allow(unused_imports, dead_code)]
 mod tests {
     use crate::{
-        asset::{Asset, DefaultSettings},
+        Asset, DefaultSettings,
         config::{AssetConfigBuilder, importer::AssetImporter},
         database::AssetDatabase,
         io::{AssetCache, AssetIoError, AssetPath, FileSystem, SourceName, VirtualFs},
@@ -490,10 +496,8 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use smol::io::{AsyncReadExt, AsyncWriteExt};
 
-    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Asset)]
     pub struct Text(String);
-
-    impl Asset for Text {}
 
     impl AssetImporter for Text {
         type Asset = Self;

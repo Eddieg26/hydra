@@ -464,7 +464,7 @@ pub struct LoadedAsset<A: Asset> {
 #[allow(unused_imports, dead_code)]
 mod tests {
     use crate::{
-        asset::{Asset, AssetType, ErasedId},
+        Asset, AssetType, ErasedId,
         io::{
             Artifact, ArtifactMeta, AssetPath, ImportMeta, SourceName, VirtualFs, deserialize,
             serialize,
@@ -474,13 +474,11 @@ mod tests {
 
     use super::AssetCache;
 
-    #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+    #[derive(Serialize, Deserialize, Asset, Debug, PartialEq, Eq)]
     struct TestAsset {
         id: u32,
         name: String,
     }
-
-    impl Asset for TestAsset {}
 
     #[test]
     fn test_serialize_artifact() {

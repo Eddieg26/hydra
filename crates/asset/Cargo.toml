@@ -12,6 +12,7 @@ futures = { workspace = true }
 smol = { workspace = true }
 downcast-rs = { workspace = true }
 thiserror = { workspace = true }
+bincode = { version = "2.0.1", features = ["serde"] }
+derive-asset = { path = "../macros/derive-asset" }
 blake3 = "1.8.2"
 crc32fast = "=1.0.3"
-bincode = { version = "2.0.1", features = ["serde"] }

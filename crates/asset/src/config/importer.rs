@@ -2,9 +2,8 @@ use super::{BoxedError, registry::AssetRegistry};
 use crate::{
     asset::{Asset, AssetId, AssetMetadata, AssetType, ErasedId, Settings},
     io::{
-        Artifact, ArtifactMeta, AssetIoError, AssetPath, AssetSource, AsyncReader, ImportMeta,
-        PathExt, SourceName, deserialize,
-    },
+        deserialize, Artifact, ArtifactMeta, AssetIoError, AssetPath, AssetSource, AsyncReader, ImportMeta, PathExt, SourceName
+    }, AssetDependency,
 };
 use ecs::Event;
 use futures::future::BoxFuture;
@@ -180,7 +179,7 @@ impl ErasedImporter {
                     };
 
                     let mut dependencies = vec![];
-                    asset.dependencies(&mut dependencies);
+                    asset.get(&mut dependencies);
 
                     let unload_action = ctx
                         .registry

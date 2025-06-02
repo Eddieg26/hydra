@@ -21,6 +21,7 @@ dependencies = [
  "bincode",
  "blake3",
  "crc32fast",
+ "derive-asset",
  "downcast-rs",
  "ecs",
  "futures",

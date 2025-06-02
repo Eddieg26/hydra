@@ -7,25 +7,44 @@ use std::{
     str::FromStr,
 };
 
-pub trait AssetDependencies: Send + Sync {
-    fn add(&mut self, id: impl Into<ErasedId>);
+pub trait AssetDependencyReader {
+    fn read(&mut self, id: impl Into<ErasedId>);
 }
 
-impl AssetDependencies for Vec<ErasedId> {
-    fn add(&mut self, id: impl Into<ErasedId>) {
-        self.push(id.into());
+impl AssetDependencyReader for Vec<ErasedId> {
+    fn read(&mut self, id: impl Into<ErasedId>) {
+        let id = id.into();
+        self.push(id);
     }
 }
 
-impl<A: Asset> AssetDependencies for Vec<AssetId<A>> {
-    fn add(&mut self, id: impl Into<ErasedId>) {
-        self.push(AssetId::<A>::from(id.into()));
-    }
-}
-
-impl AssetDependencies for HashSet<ErasedId> {
-    fn add(&mut self, id: impl Into<ErasedId>) {
+impl AssetDependencyReader for HashSet<ErasedId> {
+    fn read(&mut self, id: impl Into<ErasedId>) {
         self.insert(id.into());
+    }
+}
+
+pub trait AssetDependency: Send + Sync {
+    fn get<R: AssetDependencyReader>(&self, reader: &mut R);
+}
+
+impl<I: IntoErasedId + Send + Sync + Copy> AssetDependency for Vec<I> {
+    fn get<R: AssetDependencyReader>(&self, reader: &mut R) {
+        for id in self
+            .iter()
+            .copied()
+            .filter_map(IntoErasedId::into_erased_id)
+        {
+            reader.read(id);
+        }
+    }
+}
+
+impl<I: IntoErasedId + Send + Sync + Copy> AssetDependency for I {
+    fn get<W: AssetDependencyReader>(&self, writer: &mut W) {
+        if let Some(id) = self.into_erased_id() {
+            writer.read(id);
+        }
     }
 }
 
@@ -35,15 +54,8 @@ pub enum AssetAction {
     Unload,
 }
 
-pub trait Asset: Send + Sync + 'static {
+pub trait Asset: AssetDependency + Send + Sync + 'static {
     const DEPENDENCY_UNLOAD_ACTION: Option<AssetAction> = None;
-
-    fn dependencies(&self, _dependencies: &mut impl AssetDependencies) {}
-}
-
-pub enum AssetDependency {
-    Import(ErasedId),
-    Load(ErasedId),
 }
 
 pub trait Settings: Default + Send + Sync + 'static {}
@@ -170,6 +182,12 @@ impl<A: Asset> From<ErasedId> for AssetId<A> {
     }
 }
 
+impl<A: Asset> From<&ErasedId> for AssetId<A> {
+    fn from(value: &ErasedId) -> Self {
+        Self(value.0, Default::default())
+    }
+}
+
 impl<A: Asset> From<uuid::Uuid> for AssetId<A> {
     fn from(value: uuid::Uuid) -> Self {
         Self(value, Default::default())
@@ -182,9 +200,43 @@ impl<A: Asset> From<AssetId<A>> for ErasedId {
     }
 }
 
+impl<A: Asset> From<&AssetId<A>> for ErasedId {
+    fn from(value: &AssetId<A>) -> Self {
+        ErasedId(value.0)
+    }
+}
+
 impl From<uuid::Uuid> for ErasedId {
     fn from(value: uuid::Uuid) -> Self {
         Self(value)
+    }
+}
+
+trait IntoErasedId {
+    fn into_erased_id(self) -> Option<ErasedId>;
+}
+
+impl IntoErasedId for ErasedId {
+    fn into_erased_id(self) -> Option<ErasedId> {
+        Some(self)
+    }
+}
+
+impl IntoErasedId for Option<ErasedId> {
+    fn into_erased_id(self) -> Option<ErasedId> {
+        self
+    }
+}
+
+impl<A: Asset> IntoErasedId for AssetId<A> {
+    fn into_erased_id(self) -> Option<ErasedId> {
+        Some(self.0.into())
+    }
+}
+
+impl<A: Asset> IntoErasedId for Option<AssetId<A>> {
+    fn into_erased_id(self) -> Option<ErasedId> {
+        self.map(ErasedId::from)
     }
 }
 
@@ -349,6 +401,8 @@ impl<A: Asset> Assets<A> {
     }
 }
 
+pub struct Test;
+
 #[derive(Event)]
 /// Event representing changes to an [`Asset`] in the [`AssetDatabase`].
 pub enum AssetEvent<A: Asset> {
@@ -369,6 +423,9 @@ pub struct Folder {
 
 impl Asset for Folder {}
 impl Settings for Folder {}
+impl AssetDependency for Folder {
+    fn get<W: AssetDependencyReader>(&self, _: &mut W) {}
+}
 
 pub struct ErasedAsset(BlobCell);
 impl ErasedAsset {

@@ -1,5 +1,5 @@
 use crate::{
-    asset::{Asset, AssetEvent, Assets},
+    Asset, AssetEvent, Assets,
     config::{
         AssetConfigBuilder,
         importer::{AssetImporter, ImportError},
@@ -123,6 +123,7 @@ impl AssetAppExt for ecs::World {
     fn set_cache(&mut self, cache: AssetCache) -> &mut Self {
         let config = self.get_or_insert_resource(AssetConfigBuilder::new);
         config.set_cache(cache);
+
         self
     }
 }

@@ -303,7 +303,7 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::{
-        asset::{Asset, AssetId, AssetMetadata, DefaultSettings},
+        Asset, AssetId, AssetMetadata, DefaultSettings,
         config::{AssetConfigBuilder, importer::AssetImporter},
         database::AssetDatabase,
         io::{
@@ -319,10 +319,8 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use smol::io::{AsyncReadExt, AsyncWriteExt};
 
-    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[derive(Debug, PartialEq, Eq, Asset, Serialize, Deserialize)]
     pub struct Text(String);
-
-    impl Asset for Text {}
 
     impl AssetImporter for Text {
         type Asset = Self;
