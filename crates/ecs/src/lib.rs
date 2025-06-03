@@ -29,4 +29,4 @@ pub mod prelude {
     pub use super::*;
 }
 
-pub use derive_ecs::{AppTag, Component, Event, Phase, Resource, WorldMode};
+pub use derive_ecs::{AppTag, Component, Event, Phase, Resource, WorldMode, ComponentKit};

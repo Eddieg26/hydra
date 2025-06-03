@@ -4,6 +4,8 @@ use macro_utils::{
 };
 use proc_macro::TokenStream;
 
+mod kit;
+
 #[proc_macro_derive(Event)]
 pub fn derive_event(input: TokenStream) -> TokenStream {
     let mut input = syn::parse_macro_input!(input as syn::DeriveInput);
@@ -48,6 +50,14 @@ pub fn derive_app_tag(input: TokenStream) -> TokenStream {
 pub fn derive_phase(input: TokenStream) -> TokenStream {
     let mut input = syn::parse_macro_input!(input as syn::DeriveInput);
     derive_marker(&mut input, "ecs", "Phase")
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+#[proc_macro_derive(ComponentKit)]
+pub fn derive_component_kit(input: TokenStream) -> TokenStream {
+    let mut input = syn::parse_macro_input!(input as syn::DeriveInput);
+    kit::expand_derive_component_kit(&mut input)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
