@@ -26,16 +26,16 @@ pub trait Plugin: 'static {
     fn finish(&mut self, app: &mut AppBuilder) {}
 }
 
-pub trait Plugins {
+pub trait PluginCollection {
     fn add_plugin<P: Plugin>(&mut self, plugin: P) -> &mut Self;
 }
 
 pub trait PluginKit {
-    fn get<P: Plugins>(self, plugins: &mut P);
+    fn get<P: PluginCollection>(self, plugins: &mut P);
 }
 
 impl<T: Plugin> PluginKit for T {
-    fn get<P: Plugins>(self, plugins: &mut P) {
+    fn get<P: PluginCollection>(self, plugins: &mut P) {
         plugins.add_plugin(self);
     }
 }
@@ -520,7 +520,7 @@ impl Default for AppBuilder {
     }
 }
 
-impl Plugins for AppBuilder {
+impl PluginCollection for AppBuilder {
     fn add_plugin<P: Plugin>(&mut self, mut plugin: P) -> &mut Self {
         if !self.info().registered.contains(plugin.name()) {
             self.info_mut().registered.insert(plugin.name());
@@ -697,7 +697,7 @@ unsafe impl Sync for MainWorld {}
 
 #[allow(unused_imports, dead_code)]
 mod tests {
-    use super::{App, Plugin, Plugins};
+    use super::{App, Plugin, PluginCollection};
     use crate::{AppTag, Resource};
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Resource)]

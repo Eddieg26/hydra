@@ -139,20 +139,20 @@ impl Components {
     }
 }
 
-pub trait ComponentWriter<'a> {
+pub trait ComponentWriter {
     fn write<C: Component>(&mut self, component: C);
 }
 
-pub trait ComponentRemover<'a> {
+pub trait ComponentRemover {
     fn remove<C: Component>(&mut self);
 }
 
 pub trait ComponentKit: Send + Sync + 'static {
     fn ids(components: &mut Components) -> Vec<ComponentId>;
 
-    fn get<'a>(self, writer: impl ComponentWriter<'a>);
+    fn get<W: ComponentWriter>(self, writer: &mut W);
 
-    fn remove<'a>(remover: impl ComponentRemover<'a>);
+    fn remove<R: ComponentRemover>(remover: &mut R);
 }
 
 impl<C: Component> ComponentKit for C {
@@ -161,11 +161,11 @@ impl<C: Component> ComponentKit for C {
         vec![id]
     }
 
-    fn get<'a>(self, mut writer: impl ComponentWriter<'a>) {
+    fn get<W: ComponentWriter>(self, writer: &mut W) {
         writer.write(self);
     }
 
-    fn remove<'a>(mut remover: impl ComponentRemover<'a>) {
+    fn remove<R: ComponentRemover>(remover: &mut R) {
         remover.remove::<Self>();
     }
 }

@@ -5,7 +5,10 @@ pub mod hierarchy;
 pub mod system;
 pub mod world;
 
-pub use app::{App, AppBuildInfo, AppBuilder, AppTag, Apps};
+pub use app::{
+    App, AppBuildInfo, AppBuilder, AppTag, Apps, End, Extract, Init, Plugin, PluginCollection,
+    PluginKit, Run, Shutdown, Start, Update,
+};
 pub use commands::{
     Command, CommandBuffer, Commands, EnterMode, EntityCommand, EntityCommands, ExecuteCommand,
     ExitMode, entity::*,
@@ -29,4 +32,4 @@ pub mod prelude {
     pub use super::*;
 }
 
-pub use derive_ecs::{AppTag, Component, Event, Phase, Resource, WorldMode, ComponentKit};
+pub use derive_ecs::{AppTag, Component, ComponentKit, Event, Phase, Resource, WorldMode};

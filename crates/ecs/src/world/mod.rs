@@ -279,7 +279,7 @@ impl World {
             components: Row,
         }
 
-        impl<'a> ComponentRemover<'a> for Remover<'a> {
+        impl<'a> ComponentRemover for Remover<'a> {
             fn remove<C: Component>(&mut self) {
                 let id = unsafe { self.world.components().get_id_unchecked::<C>() };
                 if let Some(cell) = self.components.remove(id) {
@@ -295,13 +295,13 @@ impl World {
 
         let (index, components) = self.archetypes.remove_components::<C>(entity)?;
 
-        let remover = Remover {
+        let mut remover = Remover {
             world: self,
             entity,
             components,
         };
 
-        C::remove(remover);
+        C::remove(&mut remover);
 
         Some(index)
     }

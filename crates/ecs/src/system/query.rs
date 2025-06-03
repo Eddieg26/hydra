@@ -940,26 +940,10 @@ mod tests {
     struct Name(&'static str);
     impl Component for Name {}
 
-    #[derive(Debug, Default, PartialEq, Eq)]
+    #[derive(Debug, Default, PartialEq, Eq, ComponentKit)]
     struct Person {
         age: Age,
         name: Name,
-    }
-
-    impl ComponentKit for Person {
-        fn ids(components: &mut Components) -> Vec<super::ComponentId> {
-            vec![components.register::<Age>(), components.register::<Name>()]
-        }
-
-        fn get<'a>(self, mut writer: impl ComponentWriter<'a>) {
-            writer.write(self.age);
-            writer.write(self.name);
-        }
-
-        fn remove<'a>(mut remover: impl ComponentRemover<'a>) {
-            remover.remove::<Age>();
-            remover.remove::<Name>();
-        }
     }
 
     #[test]

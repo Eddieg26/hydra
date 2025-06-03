@@ -308,7 +308,7 @@ impl Archetypes {
                 frame: Frame,
             }
 
-            impl<'a> ComponentWriter<'a> for ComponentModifier<'a> {
+            impl<'a> ComponentWriter for ComponentModifier<'a> {
                 fn write<C: Component>(&mut self, component: C) {
                     let id = self.components.next().map(ComponentId::from_usize).unwrap();
                     self.table.get_column_mut(id).unwrap().replace::<C>(
@@ -319,14 +319,14 @@ impl Archetypes {
                 }
             }
 
-            let writer = ComponentModifier {
+            let mut writer = ComponentModifier {
                 table,
                 components: bits.ones(),
                 index,
                 frame,
             };
 
-            components.get(writer);
+            components.get(&mut writer);
 
             EntityIndex::new(archetype, index)
         } else {
@@ -340,20 +340,20 @@ impl Archetypes {
                 frame: Frame,
             }
 
-            impl<'a> ComponentWriter<'a> for ComponentAdder<'a> {
+            impl<'a> ComponentWriter for ComponentAdder<'a> {
                 fn write<C: Component>(&mut self, component: C) {
                     let id = self.components.next().map(ComponentId::from_usize).unwrap();
                     self.row.insert(id, component, self.frame);
                 }
             }
 
-            let writer = ComponentAdder {
+            let mut writer = ComponentAdder {
                 row: &mut row,
                 components: bits.ones(),
                 frame,
             };
 
-            components.get(writer);
+            components.get(&mut writer);
 
             let index = table.add_entity(entity, row);
 
@@ -584,15 +584,13 @@ impl From<ArchetypeAccess> for ArchetypeQuery {
 
 #[allow(unused_imports, dead_code)]
 mod tests {
-    use std::hash::{DefaultHasher, Hash, Hasher};
-
+    use super::{ArchetypeEdgeId, Archetypes};
     use crate::{
         ArchetypeAccess, ArchetypeQuery, ComponentId, ComponentKit, SparseIndex,
         core::Frame,
         world::{Component, Entity, Row},
     };
-
-    use super::{ArchetypeEdgeId, Archetypes};
+    use std::hash::{DefaultHasher, Hash, Hasher};
 
     #[derive(Debug, PartialEq, Eq)]
     struct Age(u32);
@@ -602,7 +600,7 @@ mod tests {
     struct Name(&'static str);
     impl Component for Name {}
 
-    #[derive(Debug, PartialEq, Eq)]
+    #[derive(Debug, PartialEq, Eq, ComponentKit)]
     struct Person {
         age: Age,
         name: Name,
@@ -614,22 +612,6 @@ mod tests {
                 age: Age(0),
                 name: Name("Bob"),
             }
-        }
-    }
-
-    impl ComponentKit for Person {
-        fn ids(components: &mut crate::Components) -> Vec<crate::ComponentId> {
-            vec![components.register::<Age>(), components.register::<Name>()]
-        }
-
-        fn get<'a>(self, mut writer: impl crate::world::ComponentWriter<'a>) {
-            writer.write(self.age);
-            writer.write(self.name);
-        }
-
-        fn remove<'a>(mut remover: impl crate::world::ComponentRemover<'a>) {
-            remover.remove::<Age>();
-            remover.remove::<Name>();
         }
     }
 

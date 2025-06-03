@@ -21,10 +21,7 @@ pub fn expand_derive_component_kit(input: &mut DeriveInput) -> syn::Result<Token
     };
 
     let get_fields = fields.members();
-    let ty_fields = fields
-        .iter()
-        .map(|f| f.ty.clone())
-        .collect::<Vec<_>>();
+    let ty_fields = fields.iter().map(|f| f.ty.clone()).collect::<Vec<_>>();
 
     Ok(quote! {
         impl #impl_generics #ecs_crate::ComponentKit for #name #type_generics #where_clause {
@@ -34,11 +31,11 @@ pub fn expand_derive_component_kit(input: &mut DeriveInput) -> syn::Result<Token
                 ids
             }
 
-            fn get<'a>(self, mut writer: impl #ecs_crate::world::ComponentWriter<'a>) {
+            fn get<W: #ecs_crate::world::ComponentWriter>(self, writer: &mut W) {
                 #(writer.write(self.#get_fields);)*
             }
 
-            fn remove<'a>(mut remover: impl #ecs_crate::world::ComponentRemover<'a>) {
+            fn remove<R: #ecs_crate::world::ComponentRemover>(remover: &mut R) {
                 #(remover.remove::<#ty_fields>();)*
             }
         }

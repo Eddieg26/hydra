@@ -1,6 +1,8 @@
 use ecs::{Component, ComponentKit};
 use math::{Affine3A, Vec2, Vec3};
 
+pub mod plugin;
+
 #[derive(Component)]
 pub struct Transform {
     pub translation: Vec3,
