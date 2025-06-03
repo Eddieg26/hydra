@@ -1,0 +1,7 @@
+[package]
+name = "transform"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+math = { version = "0.1.0", path = "../math" }

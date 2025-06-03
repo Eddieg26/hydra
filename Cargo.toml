@@ -14,8 +14,10 @@ members = [
     "crates/ecs",
     "crates/encase",
     "crates/math",
+    "crates/transform",
     "crates/window",
-    "examples/ecs/*", "examples/window",
+    "examples/ecs/*",
+    "examples/window",
 ]
 
 
