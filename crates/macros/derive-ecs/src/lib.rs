@@ -62,3 +62,11 @@ pub fn derive_component_kit(input: TokenStream) -> TokenStream {
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
+
+#[proc_macro_derive(PluginKit)]
+pub fn derive_plugin_kit(input: TokenStream) -> TokenStream {
+    let mut input = syn::parse_macro_input!(input as syn::DeriveInput);
+    plugin::expand_derive_plugin_kit(&mut input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
