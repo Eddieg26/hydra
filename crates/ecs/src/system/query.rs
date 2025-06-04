@@ -659,13 +659,13 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> Query<'w, 's, Q, F> {
         F::filter(&filter, entity, row)
     }
 
-    pub fn get_item<'a>(&'a self, entity: Entity) -> Result<Option<Q::Item<'a>>, ()> {
+    pub fn get_item<'a>(&'a self, entity: Entity) -> Option<Q::Item<'a>> {
         let archetype = match unsafe { self.world.get() }
             .archetypes
             .entity_archetype(entity)
         {
             Some(archetype) => archetype,
-            None => return Err(()),
+            None => return None,
         };
 
         let mut state = QueryIterState::new(self, archetype);
@@ -673,8 +673,8 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> Query<'w, 's, Q, F> {
         let row = archetype.table().get_entity_row(entity).unwrap();
 
         match F::filter(&state.filter, entity, row) {
-            true => Ok(Some(Q::get(&mut state.data, entity, row))),
-            false => Ok(None),
+            true => Some(Q::get(&mut state.data, entity, row)),
+            false => None,
         }
     }
 }

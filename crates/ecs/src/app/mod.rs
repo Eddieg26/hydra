@@ -76,7 +76,13 @@ pub struct Run;
 pub struct Start;
 
 #[derive(Phase)]
+pub struct PreUpdate;
+
+#[derive(Phase)]
 pub struct Update;
+
+#[derive(Phase)]
+pub struct PostUpdate;
 
 #[derive(Phase)]
 pub struct End;
@@ -108,7 +114,9 @@ impl AppBuildInfo {
         self.schedule.add_phase(Init);
         self.schedule.add_phase(Run);
         self.schedule.add_sub_phase(Run, Start);
+        self.schedule.add_sub_phase(Run, PreUpdate);
         self.schedule.add_sub_phase(Run, Update);
+        self.schedule.add_sub_phase(Run, PostUpdate);
         self.schedule.add_sub_phase(Run, End);
         self.schedule.add_phase(Shutdown);
     }

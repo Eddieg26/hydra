@@ -123,10 +123,7 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> HierarchyExt<Q, F> for Query<'w, 's, Q
         let world = unsafe { self.world.get() };
         let parent = world.get_component::<Parent>(entity)?.get();
 
-        match self.get_item(parent) {
-            Ok(item) => item,
-            Err(_) => None,
-        }
+        self.get_item(parent)
     }
 
     fn children(&self, entity: Entity) -> ChildIter<Q, F> {
@@ -177,8 +174,8 @@ impl<'a, Q: BaseQuery, F: BaseFilter, P: Fn(&Entity, &Entity) -> bool> Iterator
         }
 
         match self.query.get_item(entity) {
-            Ok(result) => result,
-            Err(_) => return self.next(),
+            Some(result) => Some(result),
+            None => return self.next(),
         }
     }
 }
@@ -316,8 +313,8 @@ impl<'a, Q: BaseQuery, F: BaseFilter> Iterator for DescendentIter<'a, Q, F> {
         }
 
         match self.query.get_item(entity) {
-            Ok(result) => result,
-            Err(_) => return self.next(),
+            Some(result) => Some(result),
+            None => return self.next(),
         }
     }
 }
