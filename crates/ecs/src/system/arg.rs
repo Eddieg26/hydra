@@ -1,6 +1,6 @@
 use super::{IntoSystemConfig, SystemConfig, SystemMeta};
 use crate::{
-    CommandBuffer, Commands, Event, EventReader, EventWriter, Events, ModeId, WorldAccess,
+    Event, EventReader, EventWriter, Events, ModeId, WorldAccess,
     world::{
         Cloned, Entities, EventStorage, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell,
     },
@@ -96,28 +96,6 @@ unsafe impl SystemArg for &Entities {
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
         unsafe { world.get().entities() }
-    }
-}
-
-unsafe impl SystemArg for Commands<'_, '_> {
-    type Item<'world, 'state> = Commands<'world, 'state>;
-
-    type State = CommandBuffer;
-
-    fn init(_: &mut World, _: &mut WorldAccess) -> Self::State {
-        CommandBuffer::new()
-    }
-
-    fn update(state: &mut Self::State, world: &mut World) {
-        CommandBuffer::execute(state, world);
-    }
-
-    unsafe fn get<'world, 'state>(
-        state: &'state mut Self::State,
-        _: super::WorldCell<'world>,
-        _: &crate::system::SystemMeta,
-    ) -> Self::Item<'world, 'state> {
-        Commands::new(state)
     }
 }
 

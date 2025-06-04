@@ -14,10 +14,6 @@ use ecs::{AppBuilder, app::Plugin};
 pub struct WindowPlugin;
 
 impl Plugin for WindowPlugin {
-    fn name(&self) -> &'static str {
-        "Window"
-    }
-
     fn setup(&mut self, app: &mut AppBuilder) {
         app.register_event::<WindowCreated>()
             .register_event::<WindowClosed>()

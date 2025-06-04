@@ -122,8 +122,24 @@ impl AppBuildInfo {
     }
 
     pub fn add_sub_phases(&mut self) {
+        self.schedule.add_phase(Init);
         self.schedule.add_phase(Run);
         self.schedule.add_phase(Extract);
+        self.schedule.add_phase(Shutdown);
+    }
+
+    pub fn into_app(mut self, main: Option<MainWorld>) -> App {
+        if let Some(main) = main {
+            self.world.add_resource(main);
+        }
+        let systems = self.schedule.build(&mut self.world).unwrap();
+
+        self.world.remove_resource::<MainWorld>();
+
+        App {
+            world: self.world,
+            systems,
+        }
     }
 }
 
@@ -290,8 +306,8 @@ impl AppBuilder {
         self
     }
 
-    pub fn add_sub_phase(&mut self, phase: impl Phase, target: impl Phase) -> &mut Self {
-        self.info_mut().schedule.add_sub_phase(phase, target);
+    pub fn add_sub_phase(&mut self, main: impl Phase, sub: impl Phase) -> &mut Self {
+        self.info_mut().schedule.add_sub_phase(main, sub);
         self
     }
 
@@ -402,7 +418,7 @@ impl AppBuilder {
                 main.build_plugins();
 
                 let AppType::Main {
-                    config,
+                    mut config,
                     secondary,
                     runner,
                     task_pool_settings,
@@ -414,16 +430,18 @@ impl AppBuilder {
 
                 task_pool_settings.init_task_pools();
 
-                let main = App::from(config);
                 let sub = secondary
                     .into_values()
-                    .map(|mut app| {
-                        app.info_mut().add_sub_phases();
-                        app.build_plugins();
+                    .map(|mut builder| {
+                        builder.info_mut().add_sub_phases();
+                        builder.build_plugins();
 
-                        App::from(app.into_build_info())
+                        let main_world = MainWorld::new(&mut config.world);
+                        builder.into_build_info().into_app(Some(main_world))
                     })
                     .collect::<Vec<_>>();
+
+                let main = config.into_app(None);
 
                 match runner {
                     Some(runner) => runner(Apps::new(main, sub)),
@@ -444,7 +462,7 @@ impl AppBuilder {
                 builder.build_plugins();
                 builder.task_pool_settings().init_task_pools();
 
-                let app = App::from(builder.into_build_info());
+                let app = builder.into_build_info().into_app(None);
                 Apps::new(app, vec![])
             }
         }
@@ -541,16 +559,6 @@ impl PluginCollection for AppBuilder {
     }
 }
 
-impl From<AppBuildInfo> for App {
-    fn from(mut value: AppBuildInfo) -> Self {
-        let systems = value.schedule.build(&mut value.world).unwrap();
-        App {
-            world: value.world,
-            systems,
-        }
-    }
-}
-
 pub struct App {
     world: World,
     systems: Systems,
@@ -587,9 +595,9 @@ impl App {
         self.world.update();
     }
 
-    fn extract(&mut self, main: MainWorld) {
+    pub fn run_sub(&mut self, phase: impl Phase, main: MainWorld) {
         self.world.add_resource(main);
-        self.run(Extract);
+        self.run(phase);
         self.world.remove_resource::<MainWorld>();
     }
 
@@ -633,6 +641,10 @@ impl Apps {
 
     pub fn init(&mut self) {
         self.main.run(Init);
+        let main = MainWorld::new(&mut self.main.world);
+        for app in &mut self.sub {
+            app.run_sub(Init, main);
+        }
     }
 
     pub fn run(&mut self) {
@@ -648,7 +660,7 @@ impl Apps {
             .sub
             .drain(..)
             .filter_map(|mut app| {
-                app.extract(main);
+                app.run_sub(Extract, main);
 
                 if app.is_send() {
                     tasks.push(CpuTaskPool::get().spawn(async move { app.run_once(Run) }));
@@ -674,6 +686,10 @@ impl Apps {
 
     pub fn shutdown(&mut self) {
         self.main.run(Shutdown);
+        let main = MainWorld::new(&mut self.main.world);
+        for app in &mut self.sub {
+            app.run_sub(Shutdown, main);
+        }
     }
 }
 
@@ -733,16 +749,42 @@ unsafe impl<S: SystemArg> SystemArg for Main<'_, '_, S> {
     type State = S::State;
 
     fn init(world: &mut World, access: &mut crate::WorldAccess) -> Self::State {
-        S::init(world, access)
+        let main = world.resource_mut::<MainWorld>();
+        S::init(main, access)
     }
 
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
-        world: WorldCell<'world>,
+        mut world: WorldCell<'world>,
         system: &crate::SystemMeta,
     ) -> Self::Item<'world, 'state> {
-        let arg = unsafe { S::get(state, world, system) };
+        let main = unsafe { world.get_mut().resource_mut::<MainWorld>().cell() };
+        let arg = unsafe { S::get(state, main, system) };
         Main(arg)
+    }
+
+    fn update(state: &mut Self::State, world: &mut World) {
+        let main = world.resource_mut::<MainWorld>();
+        S::update(state, main);
+    }
+
+    unsafe fn validate(
+        state: &Self::State,
+        mut world: WorldCell,
+        system: &crate::SystemMeta,
+    ) -> bool {
+        unsafe {
+            let main = world.get_mut().resource_mut::<MainWorld>().cell();
+            S::validate(state, main, system)
+        }
+    }
+
+    fn exclusive() -> bool {
+        S::exclusive()
+    }
+
+    fn send() -> bool {
+        S::send()
     }
 }
 

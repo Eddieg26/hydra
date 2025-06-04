@@ -1,8 +1,10 @@
 use crate::device::RenderDevice;
-use ecs::{Command, Resource, app::MainWorld};
+use ecs::{
+    app::{Main, MainWorld}, commands::AddResource, Commands, NonSend, Resource, SystemArg, World
+};
 use std::sync::Arc;
 use wgpu::{PresentMode, SurfaceConfiguration, SurfaceTargetUnsafe, rwh::HandleError};
-use window::{Window, app::AppExit};
+use window::{Window, app::WindowCommandsExt};
 
 #[derive(Debug)]
 pub enum RenderSurfaceError {
@@ -143,39 +145,43 @@ impl RenderSurface {
         self.config.height = height;
         self.surface.configure(device, &self.config);
     }
-}
 
-pub struct ExtractSurface;
+    pub(crate) fn create_surface(
+        window: Main<NonSend<Window>>,
+        main: Main<&World>,
+        mut commands: Commands,
+        mut main_commands: Main<Commands>,
+    ) {
+        let window = main.non_send_resource::<Window>();
+        println!("{:?}", window.size());
+        // println!("{:?}", window.size());
+        // let (surface, adapter) = match smol::block_on(RenderSurface::new(&window)) {
+        //     Ok(result) => result,
+        //     Err(error) => return main_commands.exit_error(error),
+        // };
 
-impl Command for ExtractSurface {
-    fn execute(self, world: &mut ecs::world::World) {
-        let Some(window) = world
-            .try_resource::<MainWorld>()
-            .and_then(|w| w.try_non_send_resource::<Window>())
-        else {
-            return;
+        // let device = match smol::block_on(RenderDevice::new(&adapter)) {
+        //     Ok(device) => device,
+        //     Err(error) => return main_commands.exit_error(error),
+        // };
+
+        // surface.configure(&device);
+
+        // commands.add(AddResource::from(surface));
+        // commands.add(AddResource::from(device));
+    }
+
+    pub(crate) fn queue_surface(
+        surface: &RenderSurface,
+        surface_texture: &mut RenderSurfaceTexture,
+    ) {
+        if let Ok(texture) = surface.texture() {
+            surface_texture.set(texture);
         };
+    }
 
-        let (surface, adapter) = match smol::block_on(RenderSurface::new(window)) {
-            Ok(surface) => surface,
-            Err(error) => {
-                world.add_resource(AppExit::error(error));
-                return;
-            }
-        };
-
-        let device = match smol::block_on(RenderDevice::new(&adapter)) {
-            Ok(device) => device,
-            Err(error) => {
-                world.add_resource(AppExit::error(error));
-                return;
-            }
-        };
-
-        surface.configure(&device);
-
-        world.add_resource(surface);
-        world.add_resource(device);
+    pub(crate) fn present_surface(surface_texture: &mut RenderSurfaceTexture) {
+        surface_texture.present();
     }
 }
 
@@ -199,18 +205,5 @@ impl RenderSurfaceTexture {
         if let Some(surface) = self.0.take() {
             surface.present();
         }
-    }
-
-    pub(crate) fn queue_surface(
-        surface: &RenderSurface,
-        surface_texture: &mut RenderSurfaceTexture,
-    ) {
-        if let Ok(texture) = surface.texture() {
-            surface_texture.set(texture);
-        };
-    }
-
-    pub(crate) fn present_surface(surface_texture: &mut RenderSurfaceTexture) {
-        surface_texture.present();
     }
 }

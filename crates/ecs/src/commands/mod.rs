@@ -1,6 +1,6 @@
 use std::any::TypeId;
 
-use crate::{Entity, Resource, World, WorldMode};
+use crate::{Entity, Resource, SystemArg, World, WorldAccess, WorldMode, world::WorldCell};
 
 pub mod entity;
 
@@ -158,7 +158,35 @@ impl<'world, 'state> Commands<'world, 'state> {
     }
 }
 
+unsafe impl SystemArg for Commands<'_, '_> {
+    type Item<'world, 'state> = Commands<'world, 'state>;
+
+    type State = CommandBuffer;
+
+    fn init(_: &mut World, _: &mut WorldAccess) -> Self::State {
+        CommandBuffer::new()
+    }
+
+    fn update(state: &mut Self::State, world: &mut World) {
+        CommandBuffer::execute(state, world);
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        _: WorldCell<'world>,
+        _: &crate::system::SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        Commands::new(state)
+    }
+}
+
 pub struct AddResource<R: Resource + Send>(R);
+impl<R: Resource + Send> From<R> for AddResource<R> {
+    fn from(value: R) -> Self {
+        Self(value)
+    }
+}
+
 impl<R: Resource + Send> Command for AddResource<R> {
     fn execute(self, world: &mut World) {
         world.add_resource(self.0);

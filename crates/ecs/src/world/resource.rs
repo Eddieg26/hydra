@@ -10,6 +10,7 @@ pub trait Resource: Sized + 'static {}
 pub struct ResourceId(pub(crate) u32);
 impl_sparse_index_wrapper!(ResourceId);
 
+#[derive(Debug)]
 pub struct ResourceMeta {
     name: &'static str,
     status: ObjectStatus,
@@ -33,7 +34,11 @@ impl ResourceMeta {
             offset,
             size: std::mem::size_of::<R>(),
             drop: |ptr| unsafe { std::ptr::drop_in_place(ptr as *mut R) },
-            owner: None,
+            owner: if !SEND {
+                Some(std::thread::current().id())
+            } else {
+                None
+            },
         }
     }
 

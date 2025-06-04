@@ -20,6 +20,7 @@ pub struct Queue;
 
 #[derive(Phase)]
 pub struct QueueViews;
+
 #[derive(Phase)]
 pub struct QueueDraws;
 
