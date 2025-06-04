@@ -10,5 +10,6 @@ math = { path = "../math" }
 window = { path = "../window" }
 transform = { path = "../transform" }
 hydra-encase = { path = "../encase" }
+smol = { workspace = true }
 serde = { workspace = true }
 wgpu = { workspace = true, features = ["spirv", "glsl", "serde"] }

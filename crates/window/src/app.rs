@@ -91,7 +91,8 @@ impl ApplicationHandler for WindowApp {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if let Some(_) = self.update() {
+        if let Some(ext) = self.update() {
+            println!("Application exit: {}", ext);
             event_loop.exit();
         }
     }
