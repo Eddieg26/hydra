@@ -146,6 +146,10 @@ impl<'world, 'state> Commands<'world, 'state> {
         self.commands.add(command);
     }
 
+    pub fn add_buffer(&mut self, commands: CommandBuffer) {
+        self.commands.extend(commands);
+    }
+
     pub fn entity(&mut self, entity: Entity) -> EntityCommands {
         EntityCommands {
             entity,

@@ -451,6 +451,10 @@ pub mod unlifetime {
         pub fn get_mut(&mut self) -> &mut ArgItem<'w, 's, S> {
             &mut self.0
         }
+
+        pub fn into_inner(self) -> ArgItem<'w, 's, S> {
+            self.0
+        }
     }
 
     impl<'w, 's, S: SystemArg> std::ops::Deref for StaticArg<'w, 's, S> {

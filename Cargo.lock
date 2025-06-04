@@ -356,6 +356,20 @@ name = "bytemuck"
 version = "1.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9134a6ef01ce4b366b50689c94f82c14bc72bc5d0386829828a2e2752ef7958c"
+dependencies = [
+ "bytemuck_derive",
+]
+
+[[package]]
+name = "bytemuck_derive"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3fa76293b4f7bb636ab88fd78228235b5248b4d05cc589aed610f954af5d7c7a"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "bytes"
@@ -863,6 +877,7 @@ version = "0.30.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b46b9ca4690308844c644e7c634d68792467260e051c8543e0c7871662b3ba7"
 dependencies = [
+ "bytemuck",
  "serde",
 ]
 
@@ -1699,12 +1714,15 @@ name = "render"
 version = "0.1.0"
 dependencies = [
  "asset",
+ "bitflags 2.9.1",
+ "bytemuck",
  "ecs",
  "hydra-encase",
  "math",
  "serde",
  "smol",
  "transform",
+ "uuid",
  "wgpu",
  "window",
 ]

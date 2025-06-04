@@ -1,6 +1,6 @@
 use crate::{
-    Component, Components, Entities, Event, EventRegistry, IntoSystemConfigs, Phase, Resource,
-    Resources, RunMode, Schedule, Systems, World, WorldMode,
+    ArgItem, Component, Components, Entities, Event, EventRegistry, IntoSystemConfigs, Phase,
+    Resource, Resources, RunMode, Schedule, SystemArg, Systems, World, WorldMode,
     core::task::{CpuTaskPool, Task, TaskPoolSettings},
     ext,
     world::{Archetypes, WorldCell},
@@ -702,6 +702,49 @@ impl std::ops::DerefMut for MainWorld {
 
 unsafe impl Send for MainWorld {}
 unsafe impl Sync for MainWorld {}
+
+pub struct Main<'w, 's, S: SystemArg>(ArgItem<'w, 's, S>);
+impl<'w, 's, S: SystemArg> Main<'w, 's, S> {
+    pub fn new(arg: ArgItem<'w, 's, S>) -> Self {
+        Self(arg)
+    }
+
+    pub fn into_inner(self) -> ArgItem<'w, 's, S> {
+        self.0
+    }
+}
+
+impl<'w, 's, S: SystemArg> std::ops::Deref for Main<'w, 's, S> {
+    type Target = ArgItem<'w, 's, S>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'w, 's, S: SystemArg> std::ops::DerefMut for Main<'w, 's, S> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+unsafe impl<S: SystemArg> SystemArg for Main<'_, '_, S> {
+    type Item<'w, 's> = Main<'w, 's, S>;
+    type State = S::State;
+
+    fn init(world: &mut World, access: &mut crate::WorldAccess) -> Self::State {
+        S::init(world, access)
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        world: WorldCell<'world>,
+        system: &crate::SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        let arg = unsafe { S::get(state, world, system) };
+        Main(arg)
+    }
+}
 
 #[allow(unused_imports, dead_code)]
 mod tests {

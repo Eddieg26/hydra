@@ -83,6 +83,10 @@ impl<A: Asset> AssetId<A> {
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4(), Default::default())
     }
+
+    pub fn uuid(&self) -> &uuid::Uuid {
+        &self.0
+    }
 }
 
 impl<A: Asset> ToString for AssetId<A> {
@@ -98,6 +102,10 @@ impl ErasedId {
 
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4())
+    }
+
+    pub fn uuid(&self) -> &uuid::Uuid {
+        &self.0
     }
 }
 

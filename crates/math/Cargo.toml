@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-glam = { version = "0.30.3", features = ["serde"] }
+glam = { version = "0.30.3", features = ["serde", "bytemuck"] }
 serde = { workspace = true, features = ["derive"] }
