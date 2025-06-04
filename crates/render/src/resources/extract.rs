@@ -350,16 +350,13 @@ impl ResourceExtractors {
         });
     }
 
-    pub fn take(&mut self) -> CommandBuffer {
+    pub(crate) fn prepare(extractors: &mut ResourceExtractors, mut commands: Commands) {
         let mut buffer = CommandBuffer::new();
-        self.0
+        extractors.0
             .drain()
             .for_each(|(_, commands)| buffer.extend(commands));
-        buffer
-    }
 
-    pub(crate) fn process(extractors: &mut ResourceExtractors, mut commands: Commands) {
-        commands.add_buffer(extractors.take());
+        commands.add_buffer(buffer);
     }
 }
 

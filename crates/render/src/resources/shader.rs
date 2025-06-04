@@ -180,7 +180,7 @@ impl AssetImporter for ShaderSource {
     async fn import(
         ctx: &mut ImportContext<'_>,
         reader: &mut dyn AsyncReader,
-        metadata: &AssetMetadata<Self::Settings>,
+        _: &AssetMetadata<Self::Settings>,
     ) -> Result<Self::Asset, Self::Error> {
         use wgpu::naga::{front::*, valid::*};
 
