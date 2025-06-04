@@ -1,4 +1,6 @@
-use crate::{Entity, World, WorldMode};
+use std::any::TypeId;
+
+use crate::{Entity, Resource, World, WorldMode};
 
 pub mod entity;
 
@@ -148,6 +150,28 @@ impl<'world, 'state> Commands<'world, 'state> {
         EntityCommands {
             entity,
             buffer: self.commands,
+        }
+    }
+}
+
+pub struct AddResource<R: Resource + Send>(R);
+impl<R: Resource + Send> Command for AddResource<R> {
+    fn execute(self, world: &mut World) {
+        world.add_resource(self.0);
+    }
+}
+
+pub struct RemoveResource(TypeId);
+impl RemoveResource {
+    pub fn new<R: Resource>() -> Self {
+        Self(TypeId::of::<R>())
+    }
+}
+
+impl Command for RemoveResource {
+    fn execute(self, world: &mut World) {
+        if let Some(id) = world.resources.get_id_dynamic(&self.0) {
+            world.resources.remove_by_id(id, world.frame);
         }
     }
 }

@@ -1,3 +1,5 @@
+use std::error::Error;
+
 use crate::{
     events::{
         AxisMotion, CursorEntered, CursorLeft, CursorMoved, DoubleTapGesture, DroppedFile,
@@ -8,7 +10,7 @@ use crate::{
     },
     window::{Window, WindowConfig},
 };
-use ecs::{Apps, Event, Events};
+use ecs::{Apps, Command, Commands, Event, Events, Resource};
 use winit::{
     application::ApplicationHandler,
     error::EventLoopError,
@@ -30,8 +32,9 @@ impl WindowApp {
         self.apps.init();
     }
 
-    pub fn update(&mut self) {
+    pub fn update(&mut self) -> Option<AppExit> {
         self.apps.run();
+        self.apps.world_mut().remove_resource::<AppExit>()
     }
 
     pub fn shutdown(&mut self) {
@@ -87,8 +90,10 @@ impl ApplicationHandler for WindowApp {
         }
     }
 
-    fn about_to_wait(&mut self, _: &ActiveEventLoop) {
-        self.update()
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(_) = self.update() {
+            event_loop.exit();
+        }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, window: WindowId, event: WindowEvent) {
@@ -196,3 +201,61 @@ impl std::fmt::Display for AppRunError {
 }
 
 impl std::error::Error for AppRunError {}
+
+#[derive(Debug, Resource)]
+pub enum AppExit {
+    Success,
+    Error(Box<dyn Error + Send + Sync>),
+}
+
+impl AppExit {
+    pub fn success() -> Self {
+        AppExit::Success
+    }
+
+    pub fn error<E: Error + Send + Sync + 'static>(error: E) -> Self {
+        AppExit::Error(Box::new(error))
+    }
+
+    pub fn is_success(&self) -> bool {
+        matches!(self, AppExit::Success)
+    }
+
+    pub fn is_error(&self) -> bool {
+        matches!(self, AppExit::Error(_))
+    }
+}
+
+impl std::fmt::Display for AppExit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AppExit::Success => write!(f, "Application exited successfully"),
+            AppExit::Error(e) => write!(f, "Application exited with error: {}", e),
+        }
+    }
+}
+
+impl Error for AppExit {}
+
+impl Command for AppExit {
+    fn execute(self, world: &mut ecs::World) {
+        world.add_resource(self);
+    }
+}
+
+pub trait WindowCommandsExt {
+    fn exit(&mut self, exit: AppExit);
+
+    fn exit_success(&mut self) {
+        self.exit(AppExit::success());
+    }
+    fn exit_error<E: Error + Send + Sync + 'static>(&mut self, error: E) {
+        self.exit(AppExit::error(error));
+    }
+}
+
+impl WindowCommandsExt for Commands<'_, '_> {
+    fn exit(&mut self, exit: AppExit) {
+        self.add(exit);
+    }
+}

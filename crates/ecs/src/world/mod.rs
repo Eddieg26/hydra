@@ -217,6 +217,10 @@ impl World {
         self.resources.remove::<R>(self.frame)
     }
 
+    pub fn remove_resource_by_id(&mut self, id: ResourceId) -> Option<Vec<u8>> {
+        self.resources.remove_by_id(id, self.frame)
+    }
+
     pub unsafe fn cell(&self) -> WorldCell {
         unsafe { WorldCell::new(self) }
     }

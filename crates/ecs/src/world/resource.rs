@@ -168,6 +168,10 @@ impl Resources {
         self.index.get(&id).copied()
     }
 
+    pub fn get_id_dynamic(&self, ty: &TypeId) -> Option<ResourceId> {
+        self.index.get(ty).copied()
+    }
+
     pub fn get<R: Resource>(&self, id: ResourceId) -> Option<&R> {
         let id = id.to_usize();
         let meta = self.meta.get(id)?;
@@ -197,19 +201,27 @@ impl Resources {
     }
 
     pub fn remove<R: Resource>(&mut self, frame: Frame) -> Option<R> {
-        let id = TypeId::of::<R>();
-        let id = self.index.get(&id).copied()?;
-        let meta = self.meta.get_mut(id.to_usize())?;
+        let data = self.remove_by_id(self.get_id::<R>()?, frame)?;
+        let resource = unsafe { std::ptr::read(data.as_ptr() as *const R) };
+        std::mem::forget(data); // Prevent double free
+
+        return Some(resource);
+    }
+
+    pub fn remove_by_id(&mut self, id: ResourceId, frame: Frame) -> Option<Vec<u8>> {
+        let id = id.to_usize();
+        let meta = self.meta.get_mut(id)?;
         if !meta.exists || !meta.has_access() {
             return None;
         }
         meta.exists = false;
         meta.removed = frame;
 
-        let data = &mut self.data[meta.offset..meta.offset + meta.size];
-        let resource = unsafe { std::ptr::read(data.as_mut_ptr() as *const R) };
+        let data = self
+            .data
+            .splice(meta.offset..meta.offset + meta.size, vec![0; meta.size]);
 
-        return Some(resource);
+        Some(data.collect())
     }
 
     pub fn contains<R: Resource>(&self) -> bool {
