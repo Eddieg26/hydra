@@ -26,8 +26,8 @@ impl Plugin for RenderPlugin {
             .add_sub_phase(Run, PostRender)
             .add_sub_phase(Run, Present)
             .add_systems(Init, RenderSurface::create_surface)
-            // .add_systems(Queue, RenderSurface::queue_surface)
-            // .add_systems(Present, RenderSurface::present_surface)
+            .add_systems(Queue, RenderSurface::queue_surface)
+            .add_systems(Present, RenderSurface::present_surface)
             .add_resource(RenderSurfaceTexture::new());
     }
 }

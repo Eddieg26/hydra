@@ -1,7 +1,5 @@
 use crate::device::RenderDevice;
-use ecs::{
-    app::{Main, MainWorld}, commands::AddResource, Commands, NonSend, Resource, SystemArg, World
-};
+use ecs::{Commands, NonSend, Resource, app::Main, commands::AddResource};
 use std::sync::Arc;
 use wgpu::{PresentMode, SurfaceConfiguration, SurfaceTargetUnsafe, rwh::HandleError};
 use window::{Window, app::WindowCommandsExt};
@@ -148,27 +146,23 @@ impl RenderSurface {
 
     pub(crate) fn create_surface(
         window: Main<NonSend<Window>>,
-        main: Main<&World>,
         mut commands: Commands,
         mut main_commands: Main<Commands>,
     ) {
-        let window = main.non_send_resource::<Window>();
-        println!("{:?}", window.size());
-        // println!("{:?}", window.size());
-        // let (surface, adapter) = match smol::block_on(RenderSurface::new(&window)) {
-        //     Ok(result) => result,
-        //     Err(error) => return main_commands.exit_error(error),
-        // };
+        let (surface, adapter) = match smol::block_on(RenderSurface::new(&window)) {
+            Ok(result) => result,
+            Err(error) => return main_commands.exit_error(error),
+        };
 
-        // let device = match smol::block_on(RenderDevice::new(&adapter)) {
-        //     Ok(device) => device,
-        //     Err(error) => return main_commands.exit_error(error),
-        // };
+        let device = match smol::block_on(RenderDevice::new(&adapter)) {
+            Ok(device) => device,
+            Err(error) => return main_commands.exit_error(error),
+        };
 
-        // surface.configure(&device);
+        surface.configure(&device);
 
-        // commands.add(AddResource::from(surface));
-        // commands.add(AddResource::from(device));
+        commands.add(AddResource::from(surface));
+        commands.add(AddResource::from(device));
     }
 
     pub(crate) fn queue_surface(
