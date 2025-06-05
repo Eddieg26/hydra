@@ -115,7 +115,13 @@ unsafe impl<R: Resource + Send> SystemArg for &R {
         world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
-        unsafe { world.get() }.resources().get::<R>(*state).unwrap()
+        unsafe { world.get() }
+            .resources()
+            .get::<R>(*state)
+            .expect(&format!(
+                "Resource of type {} not found",
+                std::any::type_name::<R>(),
+            ))
     }
 }
 

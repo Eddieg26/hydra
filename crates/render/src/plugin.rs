@@ -4,11 +4,12 @@ use crate::{
         Render, RenderApp,
     },
     resources::{
-        AssetExtractors, PipelineCache, RenderAssetExtractor, RenderAssets, RenderResource,
-        ResourceExtractors,
+        AssetExtractors, ExtractInfo, Fallbacks, Mesh, PipelineCache, RenderAssetExtractor,
+        RenderAssets, RenderResource, RenderTexture, ResourceExtractors, ShaderSource, Texture,
     },
     surface::{RenderSurface, RenderSurfaceTexture},
 };
+use asset::plugin::AssetAppExt;
 use ecs::{AppBuilder, Extract, Init, Plugin, Run};
 use window::plugin::WindowPlugin;
 
@@ -28,12 +29,19 @@ impl Plugin for RenderPlugin {
             .add_sub_phase(Run, PostRender)
             .add_sub_phase(Run, Present)
             .add_systems(Init, RenderSurface::create_surface)
+            .add_systems(Extract, RenderSurface::resize_surface)
             .add_systems(Queue, RenderSurface::queue_surface)
             .add_systems(Present, RenderSurface::present_surface)
             .add_resource(RenderSurfaceTexture::new())
             .add_resource(AssetExtractors::default())
             .add_resource(ResourceExtractors::default())
             .add_resource(PipelineCache::default());
+
+        app.extract_render_resource::<Fallbacks>()
+            .extract_render_asset::<ShaderSource>()
+            .extract_render_asset::<Mesh>()
+            .extract_render_asset::<Texture>()
+            .extract_render_asset::<RenderTexture>();
     }
 
     fn finish(&mut self, app: &mut AppBuilder) {
@@ -73,7 +81,11 @@ impl RenderAppExt for AppBuilder {
             app.add_resource(RenderAssets::<R::RenderAsset>::new());
         }
 
-        self
+        if !app.resources().contains::<ExtractInfo<R>>() {
+            app.add_resource(ExtractInfo::<R>::new());
+        }
+
+        self.register_asset::<R>()
     }
 
     fn extract_render_resource<R: RenderResource>(&mut self) -> &mut Self {

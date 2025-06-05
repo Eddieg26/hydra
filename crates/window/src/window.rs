@@ -78,7 +78,7 @@ impl Default for WindowConfig {
             width: 800,
             height: 600,
             title: String::from("hydra"),
-            resizable: false,
+            resizable: true,
             visible: true,
             blur: false,
             transparent: false,

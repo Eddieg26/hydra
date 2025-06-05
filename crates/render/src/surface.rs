@@ -165,6 +165,17 @@ impl RenderSurface {
         commands.add(AddResource::from(device));
     }
 
+    pub(crate) fn resize_surface(
+        window: Main<NonSend<Window>>,
+        surface: &mut RenderSurface,
+        device: &RenderDevice,
+    ) {
+        let size = window.size();
+        if size.width != surface.width() || size.height != surface.height() {
+            surface.resize(device, size.width, size.height);
+        }
+    }
+
     pub(crate) fn queue_surface(
         surface: &RenderSurface,
         surface_texture: &mut RenderSurfaceTexture,
