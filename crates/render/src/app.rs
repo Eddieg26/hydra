@@ -7,12 +7,6 @@ impl AppTag for RenderApp {}
 pub struct Process;
 
 #[derive(Phase)]
-pub struct ProcessResources;
-
-#[derive(Phase)]
-pub struct ProcessAssets;
-
-#[derive(Phase)]
 pub struct ProcessPipelines;
 
 #[derive(Phase)]

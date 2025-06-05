@@ -424,6 +424,17 @@ pub enum AssetEvent<A: Asset> {
     Loaded { id: AssetId<A> },
 }
 
+impl<A: Asset> AssetEvent<A> {
+    pub fn id(&self) -> AssetId<A> {
+        match self {
+            AssetEvent::Added { id } => *id,
+            AssetEvent::Modified { id } => *id,
+            AssetEvent::Removed { id, .. } => *id,
+            AssetEvent::Loaded { id } => *id,
+        }
+    }
+}
+
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Folder {
     pub children: Vec<PathBuf>,

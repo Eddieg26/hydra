@@ -60,6 +60,10 @@ impl SystemConfig {
         &self.dependencies
     }
 
+    pub fn add_dependency(&mut self, id: SystemId) {
+        self.dependencies.insert(id);
+    }
+
     pub fn into_node(self, world: &mut World) -> SystemNode {
         let mut access = WorldAccess::new();
         let state = (self.init)(world, &mut access);
@@ -162,6 +166,12 @@ impl SystemConfigs {
             SystemConfigs::Config(config) => config,
             SystemConfigs::Configs(configs) => &configs[0],
         }
+    }
+}
+
+impl IntoSystemConfig<()> for SystemConfig {
+    fn config(self) -> SystemConfig {
+        self
     }
 }
 

@@ -164,6 +164,12 @@ impl<N> IndexDag<N> {
     }
 }
 
+impl<N> Default for IndexDag<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct DagValues<N> {
     pub nodes: Vec<N>,
     pub dependents: Vec<FixedBitSet>,
