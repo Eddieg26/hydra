@@ -17,4 +17,6 @@ pub mod wgpu {
     pub use wgpu::*;
 }
 
-pub use derive_render::AsBinding;
+pub use encase::*;
+
+pub use derive_render::{AsBinding, ShaderType};

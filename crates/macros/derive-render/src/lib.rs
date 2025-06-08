@@ -1,4 +1,8 @@
-use macro_utils::syn::{self};
+use encase_derive_impl::implement;
+use macro_utils::{
+    syn::{self},
+    workspace::get_crate_path,
+};
 use proc_macro::TokenStream;
 
 mod expand;
@@ -10,3 +14,5 @@ pub fn derive_create_bind_group(input: proc_macro::TokenStream) -> TokenStream {
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
+
+implement!(get_crate_path("render").into());

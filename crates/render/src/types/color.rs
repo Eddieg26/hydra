@@ -1,4 +1,4 @@
-use hydra_encase::ShaderType;
+use encase::ShaderType;
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, ShaderType)]
 #[repr(C)]

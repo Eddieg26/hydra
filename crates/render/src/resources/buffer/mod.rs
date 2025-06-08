@@ -10,8 +10,6 @@ pub mod uniform;
 pub mod vertex;
 
 pub use index::*;
-pub use storage::*;
-pub use uniform::*;
 pub use vertex::*;
 
 pub type BufferId = AtomicId<Buffer>;

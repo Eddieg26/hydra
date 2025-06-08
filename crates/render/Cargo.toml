@@ -9,12 +9,12 @@ asset = { path = "../asset" }
 math = { path = "../math" }
 window = { path = "../window" }
 transform = { path = "../transform" }
-hydra-encase = { path = "../encase" }
 derive-render = { path = "../macros/derive-render" }
-bytemuck = { workspace = true, features = ["derive"]}
+bytemuck = { workspace = true, features = ["derive"] }
 bitflags = { workspace = true }
 smol = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true }
 downcast-rs = { workspace = true }
 wgpu = { workspace = true, features = ["spirv", "glsl", "serde"] }
+encase = "0.11.0"

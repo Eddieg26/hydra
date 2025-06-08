@@ -12,7 +12,6 @@ members = [
     "crates/macros/*",
     "crates/asset",
     "crates/ecs",
-    "crates/encase",
     "crates/math",
     "crates/render",
     "crates/transform",

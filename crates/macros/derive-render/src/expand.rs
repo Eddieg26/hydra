@@ -102,8 +102,8 @@ pub fn expand_create_bind_group(input: &mut DeriveInput) -> Result<TokenStream> 
     let tokens = quote! {
         impl #impl_generics #render::resources::AsBinding for #name #ty_generics #where_clause {
             type Arg = (
-                #ecs::system::unlifetime::ReadRes<#render::RenderAssets<#render::GpuTexture>>,
-                #ecs::system::unlifetime::ReadRes<#render::Fallbacks>,
+                #ecs::system::unlifetime::Read<#render::RenderAssets<#render::GpuTexture>>,
+                #ecs::system::unlifetime::Read<#render::Fallbacks>,
             );
 
             fn label() -> Option< &'static str> {
@@ -116,18 +116,17 @@ pub fn expand_create_bind_group(input: &mut DeriveInput) -> Result<TokenStream> 
                 layout: &#render::BindGroupLayout,
                 arg: &#ecs::system::ArgItem<Self::Arg>
             ) -> Result<#render::BindGroup, #render::CreateBindGroupError> {
-                use #render::{BindGroupBuilder, AsOptionalId, UniformBuffer, GpuTexture, TextureDimension, wgpu::TextureViewDimension};
+                use #render::{BindGroupBuilder, AsOptionalId, uniform::UniformBuffer, GpuTexture, ShaderType, TextureDimension, wgpu::TextureViewDimension};
                 let (textures, fallbacks) = arg;
                 #binding_def
             }
 
             fn create_bind_group_layout(device: &#render::RenderDevice)  -> #render::BindGroupLayout {
-                use #render::{BindGroupLayoutBuilder,wgpu::{TextureSampleType, TextureViewDimension, SamplerBindingType, ShaderStages}};
+                use #render::{BindGroupLayoutBuilder, wgpu::{TextureSampleType, TextureViewDimension, SamplerBindingType, ShaderStages}};
                 #layout_def
             }
         }
-    }
-    .into();
+    };
 
     Ok(tokens)
 }

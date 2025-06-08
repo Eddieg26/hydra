@@ -13,9 +13,8 @@ pub fn expand_derive_asset(input: &mut syn::DeriveInput) -> syn::Result<TokenStr
 
     let mut attributes = input.attrs.iter();
     let action = match attributes.next().map(AssetAction::parse) {
-        Some(Ok(action)) => quote::quote! { Some(#asset_crate::#action) },
-        Some(Err(error)) => return Err(error),
-        None => quote::quote! { None },
+        Some(Some(action)) => quote::quote! { Some(#asset_crate::#action) },
+        _ => quote::quote! { None },
     };
 
     if attributes.next().is_some() {
@@ -51,16 +50,13 @@ impl AssetAction {
     const RELOAD: Symbol = Symbol::new("reload");
     const UNLOAD: Symbol = Symbol::new("unload");
 
-    fn parse(attribute: &Attribute) -> syn::Result<TokenStream> {
+    fn parse(attribute: &Attribute) -> Option<TokenStream> {
         if attribute.path().is_ident(&Self::RELOAD) {
-            Ok(quote::quote! { AssetAction::Reload})
+            Some(quote::quote! { AssetAction::Reload})
         } else if attribute.path().is_ident(&Self::UNLOAD) {
-            Ok(quote::quote! { AssetAction::Unload})
+            Some(quote::quote! { AssetAction::Unload})
         } else {
-            return Err(syn::Error::new(
-                attribute.span(),
-                "Expected 'reload' or 'unload' attribute",
-            ));
+            None
         }
     }
 }

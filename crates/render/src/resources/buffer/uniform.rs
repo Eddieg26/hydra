@@ -1,6 +1,6 @@
 use super::Buffer;
 use crate::{device::RenderDevice, resources::Label};
-use hydra_encase::{
+use encase::{
     DynamicUniformBuffer as EncaseDynamicUniformBuffer, ShaderType,
     UniformBuffer as EncaseUniformBuffer,
     internal::{AlignmentValue, WriteInto},

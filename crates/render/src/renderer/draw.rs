@@ -5,7 +5,7 @@ use crate::{
         BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, BlendMode, Buffer,
         DepthWrite, FragmentState, Material, MaterialBinding, MaterialLayout, Mesh, MeshLayout,
         PipelineCache, PipelineId, RenderAssets, RenderMesh, RenderMode, RenderPipelineDesc,
-        RenderResource, Shader, UniformBufferArray, VertexState,
+        RenderResource, Shader, VertexState, uniform::UniformBufferArray,
     },
     surface::RenderSurface,
 };
@@ -17,7 +17,7 @@ use ecs::{
     query::With,
     system::unlifetime::{Read, SCommands, SQuery, Write},
 };
-use hydra_encase::{ShaderType, private::WriteInto};
+use encase::{ShaderType, private::WriteInto};
 use std::{any::TypeId, collections::HashMap, ops::Range};
 use transform::GlobalTransform;
 use wgpu::{BufferUsages, ColorTargetState, ShaderStages, VertexFormat, VertexStepMode};
@@ -70,8 +70,7 @@ impl<T: TransformData> MeshDataBuffer<T> {
 
     pub fn push(&mut self, data: T) -> u32 {
         let offset = self.offset;
-        let mut writer =
-            hydra_encase::internal::Writer::new(&data, &mut self.data, offset).unwrap();
+        let mut writer = encase::internal::Writer::new(&data, &mut self.data, offset).unwrap();
         data.write_into(&mut writer);
 
         self.offset += Self::SIZE;
