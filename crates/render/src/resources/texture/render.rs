@@ -1,9 +1,12 @@
-use crate::{device::RenderDevice, resources::{ExtractError, RenderAssetExtractor}, surface::RenderSurface};
+use super::{FilterMode, GpuTexture, Sampler, SamplerDesc, WrapMode};
+use crate::{
+    device::RenderDevice,
+    resources::{ExtractError, RenderAssetExtractor},
+    surface::RenderSurface,
+};
 use asset::Asset;
 use ecs::system::unlifetime::Read;
 use std::sync::Arc;
-
-use super::{FilterMode, GpuTexture, Sampler, SamplerDesc, WrapMode};
 
 #[derive(Clone, Copy, Debug, Asset, serde::Serialize, serde::Deserialize)]
 pub struct RenderTexture {
@@ -53,7 +56,7 @@ impl RenderAssetExtractor for RenderTexture {
 
     fn extract(
         asset: Self,
-        arg: &mut ecs::prelude::ArgItem<Self::Arg>,
+        arg: &mut ecs::ArgItem<Self::Arg>,
     ) -> Result<Self::RenderAsset, ExtractError<Self>> {
         let (device, surface) = arg;
 

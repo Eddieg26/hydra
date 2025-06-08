@@ -1,0 +1,12 @@
+[package]
+name = "derive-render"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "derive_render"
+proc-macro = true
+
+[dependencies]
+macro-utils = { path = "../utils" }
+bitflags = { workspace = true }

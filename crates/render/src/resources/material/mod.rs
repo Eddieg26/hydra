@@ -141,7 +141,7 @@ impl<M: Material> RenderAssetExtractor for M {
 
     fn extract(
         asset: Self,
-        arg: &mut ecs::prelude::ArgItem<Self::Arg>,
+        arg: &mut ecs::ArgItem<Self::Arg>,
     ) -> Result<Self::RenderAsset, super::ExtractError<Self>> {
         let (device, layout, arg) = arg;
         let layout = match layout.as_ref() {

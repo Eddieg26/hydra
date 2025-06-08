@@ -4,8 +4,9 @@ use crate::{
         Render, RenderApp,
     },
     renderer::{
-        Draw, DrawItem, DrawMode, DrawPipeline, ExtractedDraws, ExtractedViews, MeshDataBuffer,
-        MeshPipeline, RenderGraph, RenderGraphPass, SubGraph, View, ViewBuffer, ViewDrawCalls,
+        Camera, Draw, DrawItem, DrawMode, DrawPipeline, EntityCameras, ExtractedDraws,
+        ExtractedViews, MeshDataBuffer, MeshPipeline, RenderGraph, RenderGraphPass, SubGraph, View,
+        ViewBuffer, ViewDrawCalls,
     },
     resources::{
         AssetExtractors, ExtractInfo, Fallbacks, Material, MaterialLayout, Mesh, PipelineCache,
@@ -38,13 +39,15 @@ impl Plugin for RenderPlugin {
             .add_systems(Queue, RenderSurface::queue_surface)
             .add_systems(Render, RenderGraph::run_graph)
             .add_systems(Present, RenderSurface::present_surface)
+            .add_systems(Extract, EntityCameras::extract)
             .add_resource(RenderGraph::new())
             .add_resource(RenderSurfaceTexture::new())
             .add_resource(AssetExtractors::default())
             .add_resource(ResourceExtractors::default())
             .add_resource(PipelineCache::default());
 
-        app.extract_render_resource::<Fallbacks>()
+        app.register::<Camera>()
+            .extract_render_resource::<Fallbacks>()
             .extract_render_asset::<ShaderSource>()
             .extract_render_asset::<Mesh>()
             .extract_render_asset::<Texture>()

@@ -563,6 +563,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive-render"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.9.1",
+ "macro-utils",
+]
+
+[[package]]
 name = "dispatch"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1716,6 +1724,7 @@ dependencies = [
  "asset",
  "bitflags 2.9.1",
  "bytemuck",
+ "derive-render",
  "downcast-rs 2.0.1",
  "ecs",
  "hydra-encase",
@@ -1732,6 +1741,7 @@ dependencies = [
 name = "render-example"
 version = "0.1.0"
 dependencies = [
+ "asset",
  "ecs",
  "render",
  "window",
