@@ -1,0 +1,606 @@
+use crate::{
+    device::RenderDevice,
+    renderer::{Camera, RenderContext, RenderState},
+    resources::{
+        BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, BlendMode, Buffer,
+        DepthWrite, FragmentState, Material, MaterialBinding, MaterialLayout, MaterialPhase, Mesh,
+        MeshLayout, PipelineCache, PipelineId, RenderAssets, RenderMesh, RenderPipelineDesc,
+        RenderResource, Shader, UniformBufferArray, VertexState,
+    },
+    surface::RenderSurface,
+};
+use asset::{AssetId, ErasedId};
+use ecs::{
+    Component, Entity, IndexMap, Resource, SystemArg,
+    app::Main,
+    commands::AddResource,
+    query::With,
+    system::unlifetime::{Read, SCommands, SQuery, Write},
+};
+use hydra_encase::{ShaderType, private::WriteInto};
+use std::{any::TypeId, collections::HashMap, ops::Range};
+use transform::GlobalTransform;
+use wgpu::{BufferUsages, ColorTargetState, ShaderStages, VertexFormat, VertexStepMode};
+
+pub trait TransformData: Send + Sync + ShaderType + WriteInto + 'static {
+    fn transform(&self) -> &[f32; 16];
+}
+
+pub trait View: Component + Clone + 'static {
+    type Data: TransformData;
+
+    fn data(&self, transform: &GlobalTransform) -> Self::Data;
+}
+
+#[derive(Resource)]
+pub struct MeshDataBuffer<T: TransformData> {
+    buffer: Buffer,
+    data: Vec<u8>,
+    offset: usize,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<T: TransformData> MeshDataBuffer<T> {
+    const SIZE: usize = std::mem::size_of::<T>();
+
+    pub fn new(device: &RenderDevice) -> Self {
+        let data = vec![0u8; std::mem::size_of::<T>()];
+        let buffer = Buffer::with_data(
+            device,
+            &data,
+            BufferUsages::VERTEX | BufferUsages::COPY_DST,
+            None,
+        );
+
+        Self {
+            buffer,
+            data,
+            offset: 0,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    pub fn buffer(&self) -> &Buffer {
+        &self.buffer
+    }
+
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    pub fn push(&mut self, data: T) -> u32 {
+        let offset = self.offset;
+        let mut writer =
+            hydra_encase::internal::Writer::new(&data, &mut self.data, offset).unwrap();
+        data.write_into(&mut writer);
+
+        self.offset += Self::SIZE;
+
+        (offset / Self::SIZE) as u32
+    }
+
+    pub fn append(&mut self, mut data: Vec<T>) -> Range<u32> {
+        let offset = self.offset;
+        data.drain(..).for_each(|data| {
+            self.push(data);
+        });
+        (offset / Self::SIZE) as u32..(self.offset / Self::SIZE) as u32
+    }
+
+    pub fn clear(&mut self) {
+        self.data.clear();
+        self.offset = 0;
+    }
+
+    pub fn update(&mut self, device: &RenderDevice) {
+        let size = self.data.len() as u64;
+        if size > self.buffer.size() {
+            self.buffer.update(device, &self.data);
+        } else if size > 0 && size < self.buffer.size() / 2 {
+            self.buffer.resize_with_data(device, &self.data);
+        } else if size > 0 {
+            self.buffer.update(device, &self.data);
+        } else {
+            self.buffer.resize(device, Self::SIZE as u64);
+        }
+    }
+
+    pub(crate) fn process(device: &RenderDevice, buffer: &mut MeshDataBuffer<T>) {
+        buffer.update(&device);
+    }
+
+    pub(crate) fn clear_buffer(buffer: &mut MeshDataBuffer<T>) {
+        buffer.clear();
+    }
+}
+
+pub struct ExtractedView<V: View> {
+    pub entity: Entity,
+    pub view: V,
+    pub data: V::Data,
+}
+
+#[derive(Resource)]
+pub struct ExtractedViews<V: View>(Vec<ExtractedView<V>>);
+
+impl<V: View> ExtractedView<V> {
+    pub(crate) fn extract(
+        cameras: Main<SQuery<(Entity, &GlobalTransform, &V), With<Camera>>>,
+        views: &mut ExtractedViews<V>,
+    ) {
+        for (entity, transform, view) in cameras.iter() {
+            let data = view.data(transform);
+            views.0.push(ExtractedView {
+                entity,
+                view: view.clone(),
+                data,
+            });
+        }
+    }
+
+    pub(crate) fn queue(views: &mut ExtractedViews<V>, buffer: &mut ViewBuffer<V>) {
+        for view in views.0.drain(..) {
+            buffer.queue(view.entity, view.view, view.data);
+        }
+    }
+}
+
+pub struct QueuedView<V: View> {
+    pub view: V,
+    pub data: V::Data,
+    pub dynamic_index: u32,
+}
+
+#[derive(Resource)]
+pub struct ViewBuffer<V: View> {
+    views: HashMap<Entity, QueuedView<V>>,
+    buffer: UniformBufferArray<V::Data>,
+    bind_group: BindGroup,
+    bind_group_layout: BindGroupLayout,
+}
+
+impl<V: View> ViewBuffer<V> {
+    pub fn new(device: &RenderDevice) -> Self {
+        let buffer = UniformBufferArray::new(device, None, Some(BufferUsages::COPY_DST));
+
+        let bind_group_layout = BindGroupLayoutBuilder::new()
+            .with_uniform(0, ShaderStages::all(), true, None, None)
+            .build(device);
+
+        let bind_group = BindGroupBuilder::new(&bind_group_layout)
+            .with_uniform(0, buffer.as_ref(), 0, None)
+            .build(device);
+
+        Self {
+            views: HashMap::new(),
+            buffer,
+            bind_group,
+            bind_group_layout,
+        }
+    }
+
+    pub fn get(&self, entity: Entity) -> Option<&QueuedView<V>> {
+        self.views.get(&entity)
+    }
+
+    pub fn buffer(&self) -> &UniformBufferArray<V::Data> {
+        &self.buffer
+    }
+
+    pub fn bind_group(&self) -> &BindGroup {
+        &self.bind_group
+    }
+
+    pub fn layout(&self) -> &BindGroupLayout {
+        &self.bind_group_layout
+    }
+
+    pub fn update(&mut self, device: &RenderDevice) {
+        if self.buffer.update(device).is_some() {
+            self.bind_group = BindGroupBuilder::new(&self.bind_group_layout)
+                .with_uniform(0, self.buffer.as_ref(), 0, None)
+                .build(device);
+        }
+    }
+
+    pub fn queue(&mut self, entity: Entity, view: V, data: V::Data) {
+        let dynamic_index = self.buffer.push(&data);
+        self.views.insert(
+            entity,
+            QueuedView {
+                view,
+                data,
+                dynamic_index,
+            },
+        );
+    }
+
+    pub fn clear(&mut self) {
+        self.views.clear();
+        self.buffer.clear();
+    }
+
+    pub(crate) fn process(device: &RenderDevice, buffer: &mut ViewBuffer<V>) {
+        buffer.update(device);
+    }
+
+    pub(crate) fn clear_buffer(buffer: &mut ViewBuffer<V>) {
+        buffer.clear();
+    }
+}
+
+pub trait MeshPipeline {
+    type View: View;
+    type Mesh: TransformData;
+
+    fn primitive_state() -> wgpu::PrimitiveState {
+        wgpu::PrimitiveState::default()
+    }
+
+    fn formats() -> &'static [VertexFormat];
+
+    fn instance_formats() -> &'static [VertexFormat] {
+        &[]
+    }
+
+    fn shader() -> impl Into<AssetId<Shader>>;
+}
+
+pub type DrawMesh<D> = <<D as Draw>::Pipeline as MeshPipeline>::Mesh;
+pub type DrawView<D> = <D as Draw>::View;
+pub type PhaseItem<M> = <<M as Material>::Phase as MaterialPhase>::Item;
+
+pub trait Draw: Component + Clone {
+    type View: View;
+    type Material: Material;
+    type Pipeline: MeshPipeline<View = Self::View>;
+
+    const BATCH: bool = true;
+
+    fn material(&self) -> AssetId<Self::Material>;
+
+    fn mesh(&self) -> AssetId<Mesh>;
+
+    fn data(&self, transform: &GlobalTransform) -> DrawMesh<Self>;
+
+    fn phase_item(&self, view: &QueuedView<Self::View>) -> PhaseItem<Self::Material>;
+}
+
+pub struct ExtractedDraw<D: Draw> {
+    entity: Entity,
+    draw: D,
+    transform: GlobalTransform,
+}
+
+pub struct ExtractedDraws<D: Draw>(Vec<ExtractedDraw<D>>);
+
+impl<D: Draw> ExtractedDraws<D> {
+    pub fn extract(
+        query: Main<SQuery<(Entity, &GlobalTransform, &D)>>,
+        draws: &mut ExtractedDraws<D>,
+    ) {
+        for (entity, transform, draw) in query.iter() {
+            draws.0.push(ExtractedDraw {
+                entity,
+                draw: draw.clone(),
+                transform: *transform,
+            });
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BatchKey {
+    pub material: ErasedId,
+    pub mesh: AssetId<Mesh>,
+}
+
+pub struct DrawCall<V: View, P: MaterialPhase> {
+    pub key: BatchKey,
+    pub instances: Range<u32>,
+    pub item: P::Item,
+    pub function: DrawFunctionId<V>,
+}
+
+pub struct ViewDrawCalls<V: View, P: MaterialPhase>(
+    pub(crate) HashMap<Entity, Vec<DrawCall<V, P>>>,
+    std::marker::PhantomData<V>,
+);
+
+impl<V: View, P: MaterialPhase> ViewDrawCalls<V, P> {
+    pub(crate) fn queue<D: Draw<View = V>>(
+        draws: &mut ExtractedDraws<D>,
+        views: &mut ViewDrawCalls<V, P>,
+        mesh_buffer: &mut MeshDataBuffer<DrawMesh<D>>,
+        view_buffer: &ViewBuffer<V>,
+        function: DrawId<D>,
+    ) where
+        D::Material: Material<Phase = P>,
+    {
+        let function = function.0;
+
+        for (entity, view) in view_buffer.views.iter() {
+            if D::BATCH && P::mode() == BlendMode::Opaque {
+                let mut batches = HashMap::new();
+
+                for (index, extracted) in draws.0.iter().enumerate() {
+                    let key = BatchKey {
+                        material: extracted.draw.material().into(),
+                        mesh: extracted.draw.mesh(),
+                    };
+
+                    let (draw_index, data) = batches.entry(key).or_insert((index, vec![]));
+                    data.push(extracted.draw.data(&extracted.transform));
+
+                    *draw_index = (*draw_index).min(index)
+                }
+
+                let draw_calls = batches.drain().map(|(key, (draw_index, data))| {
+                    let instances = mesh_buffer.append(data);
+                    let item = draws.0[draw_index].draw.phase_item(view);
+
+                    DrawCall::<V, P> {
+                        key,
+                        item,
+                        instances,
+                        function,
+                    }
+                });
+
+                views.0.entry(*entity).or_default().extend(draw_calls);
+            } else {
+                let draw_calls = draws.0.iter().map(|extracted| {
+                    let offset = mesh_buffer.push(extracted.draw.data(&extracted.transform));
+
+                    let key = BatchKey {
+                        material: extracted.draw.material().into(),
+                        mesh: extracted.draw.mesh(),
+                    };
+
+                    let item = extracted.draw.phase_item(view);
+                    let instances = offset..(offset + 1);
+
+                    DrawCall::<V, P> {
+                        key,
+                        item,
+                        instances,
+                        function,
+                    }
+                });
+
+                views.0.entry(*entity).or_default().extend(draw_calls);
+            }
+        }
+    }
+
+    pub(crate) fn sort(view_draws: &mut ViewDrawCalls<V, P>) {
+        for calls in view_draws.0.values_mut() {
+            calls.sort_by_key(|call| call.item);
+        }
+    }
+
+    pub(crate) fn clear_draws(view_draws: &mut ViewDrawCalls<V, P>) {
+        view_draws.0.clear();
+    }
+}
+
+#[derive(Resource)]
+pub struct DrawPipeline<D: Draw>(PipelineId, std::marker::PhantomData<D>);
+impl<D: Draw> std::ops::Deref for DrawPipeline<D> {
+    type Target = PipelineId;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<D: Draw> RenderResource for DrawPipeline<D> {
+    type Arg = (
+        Write<PipelineCache>,
+        Read<RenderDevice>,
+        Read<RenderSurface>,
+        Option<Read<ViewBuffer<DrawView<D>>>>,
+        Option<Write<MaterialLayout<D::Material>>>,
+        SCommands,
+    );
+
+    fn extract(arg: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::resources::ExtractError<()>> {
+        let (cache, device, surface, views, layout, mut commands) = arg;
+
+        let Some(views) = views else {
+            return Err(crate::resources::ExtractError::Retry(()));
+        };
+
+        let layout = match layout {
+            Some(layout) => layout.clone(),
+            None => {
+                let layout = MaterialLayout::<D::Material>::new(&device);
+                commands.add(AddResource::from(layout.clone()));
+
+                layout
+            }
+        };
+
+        let vertex_shader: AssetId<Shader> = D::Pipeline::shader().into();
+        let fragment_shader: AssetId<Shader> = D::Material::shader().into();
+
+        assert!(
+            !D::Pipeline::formats().is_empty(),
+            "Mesh pipeline must have at least one vertex format"
+        );
+
+        let mut buffers = vec![];
+        buffers.push(MeshLayout::into_vertex_buffer_layout(
+            0,
+            D::Pipeline::formats(),
+            VertexStepMode::Vertex,
+        ));
+
+        if !D::Pipeline::instance_formats().is_empty() {
+            let layout = MeshLayout::into_vertex_buffer_layout(
+                D::Pipeline::formats().len() as u32,
+                D::Pipeline::instance_formats(),
+                VertexStepMode::Instance,
+            );
+
+            buffers.push(layout);
+        }
+
+        let id = cache.queue_render_pipeline(RenderPipelineDesc {
+            label: None,
+            layout: vec![views.layout().clone(), layout.as_ref().clone()],
+            vertex: VertexState {
+                shader: vertex_shader.into(),
+                entry: "main".into(),
+                buffers,
+            },
+            fragment: Some(FragmentState {
+                shader: fragment_shader.into(),
+                entry: "main".into(),
+                targets: vec![Some(ColorTargetState {
+                    format: surface.format(),
+                    blend: Some(<D::Material as Material>::Phase::mode().into()),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: D::Pipeline::primitive_state(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: surface.depth_format(),
+                depth_write_enabled: matches!(
+                    <D::Material as Material>::Phase::depth_write(),
+                    DepthWrite::On
+                ),
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            push_constants: vec![],
+        });
+
+        Ok(Self(id, Default::default()))
+    }
+}
+
+pub struct DrawFunctionId<V: View>(usize, std::marker::PhantomData<V>);
+
+impl<V: View> std::ops::Deref for DrawFunctionId<V> {
+    type Target = usize;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<V: View> From<usize> for DrawFunctionId<V> {
+    fn from(value: usize) -> Self {
+        Self(value, Default::default())
+    }
+}
+
+impl<V: View> Clone for DrawFunctionId<V> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), self.1.clone())
+    }
+}
+
+impl<V: View> Copy for DrawFunctionId<V> {}
+
+struct DrawId<D: Draw>(DrawFunctionId<D::View>);
+
+unsafe impl<D: Draw> SystemArg for DrawId<D> {
+    type Item<'world, 'state> = DrawId<D>;
+
+    type State = DrawFunctionId<D::View>;
+
+    fn init(world: &mut ecs::World, _: &mut ecs::WorldAccess) -> Self::State {
+        let functions = world.resource_mut::<DrawFunctions<D::View>>();
+        functions.register::<D>()
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        _: ecs::world::WorldCell<'world>,
+        _: &ecs::SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        Self(*state)
+    }
+}
+
+pub type DrawFunction<V> = fn(
+    &mut RenderState,
+    &RenderContext,
+    &RenderAssets<RenderMesh>,
+    &ViewBuffer<V>,
+    &QueuedView<V>,
+    &BatchKey,
+    Range<u32>,
+);
+
+#[derive(Default, Resource)]
+pub struct DrawFunctions<V: View>(IndexMap<TypeId, DrawFunction<V>>);
+
+impl<V: View> DrawFunctions<V> {
+    pub fn register<D: Draw<View = V>>(&mut self) -> DrawFunctionId<V> {
+        let ty = TypeId::of::<D>();
+        if let Some(id) = self.0.get_index_of(&ty).map(DrawFunctionId::<V>::from) {
+            return id;
+        };
+
+        let id = DrawFunctionId(self.0.len(), Default::default());
+
+        let f: DrawFunction<V> = |state, ctx, meshes, view_buffer, view, key, instances| {
+            const VIEW_GROUP: u32 = 0;
+            const MATERIAL_GROUP: u32 = 1;
+            const VERTEX_BUFFER_SLOT: u32 = 0;
+            const INSTANCE_BUFFER_SLOT: u32 = 1;
+
+            let mesh_data = ctx.world().resource::<MeshDataBuffer<DrawMesh<D>>>();
+
+            let mesh = match meshes.get(&(key.mesh).into()) {
+                Some(mesh) => mesh,
+                None => return,
+            };
+
+            let materials = ctx
+                .world()
+                .resource::<RenderAssets<MaterialBinding<D::Material>>>();
+
+            let material = match materials.get(&(key.material.into())) {
+                Some(material) => material,
+                None => return,
+            };
+
+            let Some(pipeline) = ctx
+                .world()
+                .try_resource::<DrawPipeline<D>>()
+                .and_then(|id| ctx.get_render_pipeline(id))
+            else {
+                return;
+            };
+
+            let vertices = 0..mesh.vertex_count() as u32;
+            let indices = 0..mesh.index_count() as u32;
+
+            state.set_pipeline(pipeline);
+            state.set_bind_group(VIEW_GROUP, view_buffer.bind_group(), &[view.dynamic_index]);
+            state.set_bind_group(MATERIAL_GROUP, material, &[]);
+            state.set_vertex_buffer(VERTEX_BUFFER_SLOT, mesh.vertex_buffer().slice(..));
+            state.set_vertex_buffer(INSTANCE_BUFFER_SLOT, mesh_data.buffer().slice(..));
+
+            match mesh.index_buffer() {
+                Some(buffer) => {
+                    state.set_index_buffer(buffer.slice(..));
+                    state.draw_indexed(indices, vertices.start as i32, instances);
+                }
+                None => {
+                    state.draw(vertices, instances);
+                }
+            }
+        };
+
+        self.0.insert(ty, f);
+
+        id
+    }
+}

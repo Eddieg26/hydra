@@ -1716,6 +1716,7 @@ dependencies = [
  "asset",
  "bitflags 2.9.1",
  "bytemuck",
+ "downcast-rs 2.0.1",
  "ecs",
  "hydra-encase",
  "math",

@@ -1,7 +1,6 @@
 use crate::device::RenderDevice;
 use asset::{
-    Asset, AssetId, AssetMetadata, DefaultSettings, ErasedId,
-    database::load::LoadPath,
+    Asset, AssetMetadata, DefaultSettings,
     importer::{AssetImporter, ImportContext},
     io::{AssetIoError, AsyncReader},
 };
@@ -52,9 +51,8 @@ pub enum ShaderSource {
     },
 }
 
-#[derive(Asset, serde::Serialize)]
+#[derive(Asset)]
 pub struct Shader {
-    #[serde(skip)]
     module: Arc<wgpu::ShaderModule>,
 }
 impl Shader {
@@ -265,52 +263,6 @@ impl AssetImporter for ShaderSource {
 
     fn extensions() -> &'static [&'static str] {
         &["spv", "wgsl", "vert", "frag", "comp"]
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum ShaderPath {
-    Id(AssetId<Shader>),
-    Path(&'static str),
-}
-
-impl ShaderPath {
-    pub fn new(path: impl Into<Self>) -> Self {
-        path.into()
-    }
-}
-
-impl From<&'static str> for ShaderPath {
-    fn from(path: &'static str) -> Self {
-        Self::Path(path)
-    }
-}
-
-impl From<AssetId<Shader>> for ShaderPath {
-    fn from(id: AssetId<Shader>) -> Self {
-        Self::Id(id)
-    }
-}
-
-impl From<ErasedId> for ShaderPath {
-    fn from(id: ErasedId) -> Self {
-        Self::Id(id.into())
-    }
-}
-
-impl From<uuid::Uuid> for ShaderPath {
-    fn from(value: uuid::Uuid) -> Self {
-        let id = AssetId::<Shader>::from(value);
-        Self::Id(id)
-    }
-}
-
-impl Into<LoadPath<'static>> for ShaderPath {
-    fn into(self) -> LoadPath<'static> {
-        match self {
-            ShaderPath::Id(id) => LoadPath::Id(id.into()),
-            ShaderPath::Path(path) => LoadPath::Path(path.into()),
-        }
     }
 }
 

@@ -15,4 +15,5 @@ bitflags = { workspace = true }
 smol = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true }
+downcast-rs = { workspace = true }
 wgpu = { workspace = true, features = ["spirv", "glsl", "serde"] }

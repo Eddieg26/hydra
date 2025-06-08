@@ -171,7 +171,16 @@ impl From<PathBuf> for AssetPath<'static> {
 
 impl Into<PathBuf> for &AssetPath<'_> {
     fn into(self) -> PathBuf {
-        todo!()
+        let source = match self.source {
+            SourceName::Default => "",
+            SourceName::Name(ref name) => name,
+        };
+
+        let path = format!("{}://{}", source, self.path.display());
+        match &self.name {
+            Some(name) => PathBuf::from(format!("{}@{}", path, &name)),
+            None => PathBuf::from(path),
+        }
     }
 }
 

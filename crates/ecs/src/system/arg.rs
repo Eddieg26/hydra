@@ -418,13 +418,14 @@ impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O2, P, Q);
 #[allow(type_alias_bounds)]
 pub mod unlifetime {
     use super::{ArgItem, SystemArg};
-    use crate::{BaseFilter, BaseQuery, NonSend, NonSendMut, Query, Resource};
+    use crate::{BaseFilter, BaseQuery, Commands, NonSend, NonSendMut, Query, Resource};
 
     pub type Read<T> = &'static T;
     pub type Write<T> = &'static mut T;
     pub type NonSendRes<R: Resource> = NonSend<'static, R>;
     pub type NonSendResMut<R: Resource> = NonSendMut<'static, R>;
-    pub type SQuery<Q: BaseQuery, F: BaseFilter> = Query<'static, 'static, Q, F>;
+    pub type SQuery<Q: BaseQuery, F: BaseFilter = ()> = Query<'static, 'static, Q, F>;
+    pub type SCommands = Commands<'static, 'static>;
 
     pub struct StaticArg<'w, 's, S: SystemArg>(ArgItem<'w, 's, S>);
     impl<'w, 's, S: SystemArg> StaticArg<'w, 's, S> {

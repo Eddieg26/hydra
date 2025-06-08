@@ -2,13 +2,13 @@ use super::{RenderAssetExtractor, RenderResource};
 use crate::{
     device::RenderDevice,
     resources::{
+        Shader,
         binding::{AsBinding, BindGroup, BindGroupLayout},
         extract::RenderAsset,
-        shader::ShaderPath,
     },
 };
-use asset::{AssetId, asset::Asset};
-use ecs::{Component, Resource, system::unlifetime::Read};
+use asset::{Asset, AssetId};
+use ecs::{Resource, system::unlifetime::Read};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -47,8 +47,18 @@ pub enum DepthWrite {
     On,
 }
 
+pub trait PhaseItem:
+    Copy + Clone + Eq + PartialEq + Ord + PartialEq + Send + Sync + 'static
+{
+    const SORT: bool = false;
+}
+
+impl PhaseItem for () {
+    const SORT: bool = false;
+}
+
 pub trait MaterialPhase: Send + Sync + 'static {
-    type Item: Copy + Send + Sync + 'static;
+    type Item: PhaseItem;
 
     fn mode() -> BlendMode;
     fn depth_write() -> DepthWrite {
@@ -56,16 +66,10 @@ pub trait MaterialPhase: Send + Sync + 'static {
     }
 }
 
-pub trait SortedPhase: MaterialPhase {
-    type Key: PartialOrd + Ord + Copy + Send + Sync + 'static;
-
-    fn sort_key(&self) -> Self::Key;
-}
-
 pub trait Material: Asset + AsBinding + Clone + Sized {
     type Phase: MaterialPhase;
 
-    fn shader() -> impl Into<ShaderPath>;
+    fn shader() -> impl Into<AssetId<Shader>>;
 }
 
 pub struct MaterialLayout<M: Material> {
@@ -133,11 +137,7 @@ impl<M: Material> RenderAsset for MaterialBinding<M> {}
 impl<M: Material> RenderAssetExtractor for M {
     type RenderAsset = MaterialBinding<M>;
 
-    type Arg = (
-        Read<RenderDevice>,
-        Option<Read<MaterialLayout<M>>>,
-        M::Arg,
-    );
+    type Arg = (Read<RenderDevice>, Option<Read<MaterialLayout<M>>>, M::Arg);
 
     fn extract(
         asset: Self,
@@ -159,49 +159,3 @@ impl<M: Material> RenderAssetExtractor for M {
         })
     }
 }
-
-pub struct MaterialRef<M: Material>(AssetId<M>);
-impl<M: Material> MaterialRef<M> {
-    pub fn new(asset: impl Into<AssetId<M>>) -> Self {
-        Self(asset.into())
-    }
-
-    pub fn set(&mut self, asset: AssetId<M>) {
-        self.0 = asset;
-    }
-}
-
-impl<M: Material> From<AssetId<M>> for MaterialRef<M> {
-    fn from(asset: AssetId<M>) -> Self {
-        Self::new(asset)
-    }
-}
-
-impl<M: Material> From<MaterialRef<M>> for AssetId<M> {
-    fn from(asset: MaterialRef<M>) -> Self {
-        asset.0
-    }
-}
-
-impl<M: Material> std::ops::Deref for MaterialRef<M> {
-    type Target = AssetId<M>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<M: Material> AsRef<AssetId<M>> for MaterialRef<M> {
-    fn as_ref(&self) -> &AssetId<M> {
-        &self.0
-    }
-}
-
-impl<M: Material> Copy for MaterialRef<M> {}
-impl<M: Material> Clone for MaterialRef<M> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-impl<M: Material> Component for MaterialRef<M> {}

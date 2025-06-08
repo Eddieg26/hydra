@@ -703,6 +703,16 @@ unsafe impl<Q: BaseQuery + 'static, F: BaseFilter + 'static> SystemArg for Query
 
 unsafe impl<Q: ReadQuery + 'static, F: BaseFilter + 'static> ReadOnly for Query<'_, '_, Q, F> {}
 
+impl<'w, 's, Q: BaseQuery, F: BaseFilter> IntoIterator for &'w Query<'w, 's, Q, F> {
+    type Item = Q::Item<'w>;
+
+    type IntoIter = QueryIter<'w, 's, Q, F>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        QueryIter::new(self)
+    }
+}
+
 pub struct QueryIterState<'a, Q: BaseQuery, F: BaseFilter = ()> {
     pub(crate) data: Q::State<'a>,
     pub(crate) filter: F::State<'a>,

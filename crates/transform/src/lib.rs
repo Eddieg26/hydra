@@ -20,7 +20,7 @@ pub struct Transform2d {
     pub rotation: f32,
 }
 
-#[derive(Component)]
+#[derive(Debug, Clone, Copy, Component)]
 pub struct GlobalTransform(Affine3A);
 
 impl GlobalTransform {
@@ -45,7 +45,7 @@ impl GlobalTransform {
     pub fn affine(&self) -> Affine3A {
         self.0
     }
-    
+
     pub fn matrix(&self) -> Mat4 {
         Mat4::from(self.0)
     }
