@@ -9,6 +9,7 @@ use crate::{
 };
 use asset::{Asset, AssetId};
 use ecs::{Resource, system::unlifetime::Read};
+use transform::GlobalTransform;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -48,16 +49,22 @@ pub enum DepthWrite {
 }
 
 pub trait RenderItem:
-    Copy + Clone + Eq + PartialEq + Ord + PartialEq + Send + Sync + 'static
+    Copy + Clone + Eq + PartialEq + Ord + PartialEq + Send + Sync + Sized + 'static
 {
     const SORT: bool = false;
+
+    fn new(view: &GlobalTransform, item: &GlobalTransform) -> Self;
 }
 
 impl RenderItem for () {
     const SORT: bool = false;
+
+    fn new(_: &GlobalTransform, _: &GlobalTransform) -> Self {
+        ()
+    }
 }
 
-pub trait RenderMode: Send + Sync + 'static {
+pub trait RenderPhase: Send + Sync + 'static {
     type Item: RenderItem;
 
     fn mode() -> BlendMode;
@@ -67,7 +74,7 @@ pub trait RenderMode: Send + Sync + 'static {
 }
 
 pub trait Material: Asset + AsBinding + Clone + Sized {
-    type Mode: RenderMode;
+    type Phase: RenderPhase;
 
     fn shader() -> impl Into<AssetId<Shader>>;
 }

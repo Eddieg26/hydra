@@ -1,4 +1,5 @@
 use crate::{
+    Label,
     device::RenderDevice,
     renderer::camera::EntityCamera,
     resources::{ComputePipeline, PipelineCache, PipelineId, RenderPipeline},
@@ -10,6 +11,7 @@ use std::{
     collections::HashMap,
     sync::Arc,
 };
+use wgpu::{RenderPassColorAttachment, RenderPassDepthStencilAttachment};
 
 pub type Name = &'static str;
 pub type NodeId = u32;
@@ -698,14 +700,24 @@ impl GraphResource for DepthOutput {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct RenderPassDesc<'a> {
+    /// Debug label of the render pass. This will show up in graphics debuggers for easy identification.
+    pub label: Label,
+    /// The color attachments of the render pass.
+    pub color_attachments: Vec<Option<RenderPassColorAttachment<'a>>>,
+    /// The depth and stencil attachment of the render pass, if any.
+    pub depth_stencil_attachment: Option<RenderPassDepthStencilAttachment<'a>>,
+}
+
 pub trait Renderer: Send + Sync + 'static {
     type Data: Send + Sync + 'static;
 
     fn setup(builder: &mut PassBuilder) -> Self::Data;
 
-    fn build<'a>(ctx: &'a RenderContext, data: &'a Self::Data) -> wgpu::RenderPassDescriptor<'a>;
+    fn build<'a>(ctx: &'a RenderContext<'a>, data: &'a Self::Data) -> RenderPassDesc<'a>;
 
-    fn render(ctx: &mut RenderContext, pass: wgpu::RenderPass);
+    fn render<'a>(ctx: &'a mut RenderContext, pass: &'a mut wgpu::RenderPass<'a>);
 }
 
 pub trait ErasedRenderer: downcast_rs::Downcast + Send + Sync + 'static {
@@ -722,9 +734,17 @@ impl<R: Renderer> ErasedRenderer for R {
     fn render(&self, ctx: &mut RenderContext, data: &Box<dyn Any + Send + Sync>) {
         let mut encoder = ctx.encoder();
         let desc = Self::build(ctx, data.downcast_ref::<R::Data>().unwrap());
-        let pass = encoder.begin_render_pass(&desc);
+        let desc = wgpu::RenderPassDescriptor {
+            label: desc.label.as_deref(),
+            color_attachments: &desc.color_attachments,
+            depth_stencil_attachment: desc.depth_stencil_attachment,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        };
 
-        Self::render(ctx, pass);
+        let mut pass = encoder.begin_render_pass(&desc);
+
+        Self::render(ctx, &mut pass);
 
         ctx.submit(encoder.finish());
     }

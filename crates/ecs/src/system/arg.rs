@@ -110,6 +110,10 @@ unsafe impl<R: Resource + Send> SystemArg for &R {
         id
     }
 
+    unsafe fn validate(_: &Self::State, world: WorldCell, _: &SystemMeta) -> bool {
+        unsafe { world.get() }.resources.contains::<R>()
+    }
+
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         world: WorldCell<'world>,
@@ -136,13 +140,23 @@ unsafe impl<R: Resource + Send> SystemArg for &mut R {
         id
     }
 
+    unsafe fn validate(_: &Self::State, world: WorldCell, _: &SystemMeta) -> bool {
+        unsafe { world.get() }.resources.contains::<R>()
+    }
+
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         mut world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
         let world = unsafe { world.get_mut() };
-        world.resources.get_mut::<R>(*state, world.frame).unwrap()
+        world
+            .resources
+            .get_mut::<R>(*state, world.frame)
+            .expect(&format!(
+                "Resource of type {} not found",
+                std::any::type_name::<R>(),
+            ))
     }
 }
 
@@ -157,12 +171,22 @@ unsafe impl<R: Resource> SystemArg for NonSend<'_, R> {
         id
     }
 
+    unsafe fn validate(_: &Self::State, world: WorldCell, _: &SystemMeta) -> bool {
+        unsafe { world.get() }.resources.contains::<R>()
+    }
+
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
-        let resource = unsafe { world.get() }.resources().get::<R>(*state).unwrap();
+        let resource = unsafe { world.get() }
+            .resources()
+            .get::<R>(*state)
+            .expect(&format!(
+                "NonSend resource of type {} not found",
+                std::any::type_name::<R>(),
+            ));
 
         NonSend::new(resource)
     }
@@ -183,13 +207,23 @@ unsafe impl<R: Resource> SystemArg for NonSendMut<'_, R> {
         id
     }
 
+    unsafe fn validate(_: &Self::State, world: WorldCell, _: &SystemMeta) -> bool {
+        unsafe { world.get() }.resources.contains::<R>()
+    }
+
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         mut world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
         let world = unsafe { world.get_mut() };
-        let resource = world.resources.get_mut::<R>(*state, world.frame).unwrap();
+        let resource = world
+            .resources
+            .get_mut::<R>(*state, world.frame)
+            .expect(&format!(
+                "NonSendMut resource of type {} not found",
+                std::any::type_name::<R>(),
+            ));
 
         NonSendMut::new(resource)
     }
@@ -208,6 +242,10 @@ unsafe impl<R: Resource + Send + Clone> SystemArg for Cloned<R> {
         world.register_resource::<R>()
     }
 
+    unsafe fn validate(_: &Self::State, world: WorldCell, _: &SystemMeta) -> bool {
+        unsafe { world.get() }.resources.contains::<R>()
+    }
+
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         world: WorldCell<'world>,
@@ -217,7 +255,10 @@ unsafe impl<R: Resource + Send + Clone> SystemArg for Cloned<R> {
             .resources()
             .get::<R>(*state)
             .cloned()
-            .unwrap();
+            .expect(&format!(
+                "Cloned resource of type {} not found",
+                std::any::type_name::<R>(),
+            ));
 
         Cloned::new(resource)
     }

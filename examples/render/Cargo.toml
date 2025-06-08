@@ -6,5 +6,7 @@ edition = "2024"
 [dependencies]
 ecs = { path = "../../crates/ecs" }
 asset = { path = "../../crates/asset" }
+math = { path = "../../crates/math" }
+transform = { path = "../../crates/transform" }
 render = { path = "../../crates/render" }
 window = { path = "../../crates/window" }

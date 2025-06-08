@@ -1,12 +1,13 @@
 use crate::{
+    ExtractError, MainRenderPass, ProcessAssets, Renderer, ShaderData,
     app::{
         PostRender, PreRender, Present, Process, ProcessPipelines, Queue, QueueDraws, QueueViews,
         Render, RenderApp,
     },
     renderer::{
-        Camera, Draw, DrawItem, DrawMode, DrawPipeline, EntityCameras, ExtractedDraws,
-        ExtractedViews, MeshDataBuffer, MeshPipeline, RenderGraph, RenderGraphPass, SubGraph, View,
-        ViewBuffer, ViewDrawCalls,
+        Camera, Draw, DrawItem, DrawPhase, DrawPipeline, EntityCameras, ExtractedDraws,
+        ExtractedViews, MeshDataBuffer, RenderGraph, RenderGraphPass, SubGraph, View, ViewBuffer,
+        ViewDrawCalls,
     },
     resources::{
         AssetExtractors, ExtractInfo, Fallbacks, Material, MaterialLayout, Mesh, PipelineCache,
@@ -26,6 +27,7 @@ impl Plugin for RenderPlugin {
         app.add_plugins(WindowPlugin)
             .add_sub_app(RenderApp)
             .add_sub_phase(Run, Process)
+            .add_sub_phase(Process, ProcessAssets)
             .add_sub_phase(Process, ProcessPipelines)
             .add_sub_phase(Run, Queue)
             .add_sub_phase(Queue, QueueViews)
@@ -42,9 +44,11 @@ impl Plugin for RenderPlugin {
             .add_systems(Extract, EntityCameras::extract)
             .add_resource(RenderGraph::new())
             .add_resource(RenderSurfaceTexture::new())
+            .add_resource(EntityCameras::default())
             .add_resource(AssetExtractors::default())
             .add_resource(ResourceExtractors::default())
-            .add_resource(PipelineCache::default());
+            .add_resource(PipelineCache::default())
+            .register_event::<ExtractError>();
 
         app.register::<Camera>()
             .extract_render_resource::<Fallbacks>()
@@ -60,6 +64,10 @@ impl Plugin for RenderPlugin {
         }
 
         let app = app.sub_app_mut(RenderApp).unwrap();
+        app.add_systems(Extract, ResourceExtractors::extract);
+        app.add_systems(Process, ResourceExtractors::process);
+        app.add_systems(ProcessPipelines, PipelineCache::process);
+
         let configs = app
             .remove_resource::<AssetExtractors>()
             .map(|a| a.build())
@@ -67,17 +75,15 @@ impl Plugin for RenderPlugin {
 
         for config in configs {
             app.add_systems(Extract, config.extract);
-            app.add_systems(Process, config.process);
+            app.add_systems(ProcessAssets, config.process);
             app.add_systems(PostRender, config.clear);
         }
-
-        app.add_systems(Extract, ResourceExtractors::extract);
-        app.add_systems(Process, ResourceExtractors::process);
-        app.add_systems(ProcessPipelines, PipelineCache::process);
     }
 }
 
 pub trait RenderAppExt {
+    fn set_renderer<R: Renderer>(&mut self, renderer: R) -> &mut Self;
+    fn register_draw<D: Draw>(&mut self) -> &mut Self;
     fn add_pass<P: RenderGraphPass>(&mut self, pass: P) -> &mut Self;
     fn add_sub_graph<S: SubGraph>(&mut self) -> &mut Self;
     fn add_sub_graph_pass<S: SubGraph, P: RenderGraphPass>(&mut self, pass: P) -> &mut Self;
@@ -86,6 +92,14 @@ pub trait RenderAppExt {
 }
 
 impl RenderAppExt for AppBuilder {
+    fn set_renderer<R: Renderer>(&mut self, renderer: R) -> &mut Self {
+        self.add_plugins(RendererPlugin::new(renderer))
+    }
+
+    fn register_draw<D: Draw>(&mut self) -> &mut Self {
+        self.add_plugins(DrawPlugin::<D>::new())
+    }
+
     fn add_pass<P: RenderGraphPass>(&mut self, pass: P) -> &mut Self {
         self.scoped_sub_app(RenderApp, |render_app| {
             render_app
@@ -133,6 +147,25 @@ impl RenderAppExt for AppBuilder {
     }
 }
 
+pub struct RendererPlugin {
+    main_render_pass: Option<MainRenderPass>,
+}
+
+impl RendererPlugin {
+    pub fn new<R: Renderer>(renderer: R) -> Self {
+        Self {
+            main_render_pass: Some(MainRenderPass::new(renderer)),
+        }
+    }
+}
+
+impl Plugin for RendererPlugin {
+    fn setup(&mut self, app: &mut AppBuilder) {
+        app.add_plugins(RenderPlugin)
+            .add_pass(self.main_render_pass.take().unwrap());
+    }
+}
+
 pub struct MaterialPlugin<M: Material>(std::marker::PhantomData<M>);
 impl<M: Material> MaterialPlugin<M> {
     pub fn new() -> Self {
@@ -163,28 +196,29 @@ impl<V: View> Plugin for ViewPlugin<V> {
                 .add_resource(ExtractedViews::<V>::new())
                 .add_systems(Extract, ExtractedViews::<V>::extract)
                 .add_systems(QueueViews, ExtractedViews::<V>::queue)
-                .add_systems(Process, ViewBuffer::<V>::process)
+                .add_systems(PreRender, ViewBuffer::<V>::update_buffer)
                 .add_systems(PostRender, ViewBuffer::<V>::clear_buffer);
         })
+        .register::<V>()
         .extract_render_resource::<ViewBuffer<V>>();
     }
 }
 
-struct MeshPipelinePlugin<P: MeshPipeline>(std::marker::PhantomData<P>);
-impl<P: MeshPipeline> MeshPipelinePlugin<P> {
+struct MeshDataPlugin<S: ShaderData>(std::marker::PhantomData<S>);
+impl<S: ShaderData> MeshDataPlugin<S> {
     pub fn new() -> Self {
         Self(Default::default())
     }
 }
 
-impl<P: MeshPipeline> Plugin for MeshPipelinePlugin<P> {
+impl<T: ShaderData> Plugin for MeshDataPlugin<T> {
     fn setup(&mut self, app: &mut AppBuilder) {
         app.scoped_sub_app(RenderApp, |render_app| {
             render_app
-                .add_systems(Process, MeshDataBuffer::<P::Mesh>::process)
-                .add_systems(PostRender, MeshDataBuffer::<P::Mesh>::clear_buffer);
+                .add_systems(PreRender, MeshDataBuffer::<T>::update_buffer)
+                .add_systems(PostRender, MeshDataBuffer::<T>::clear_buffer);
         })
-        .extract_render_resource::<MeshDataBuffer<P::Mesh>>();
+        .extract_render_resource::<MeshDataBuffer<T>>();
     }
 }
 
@@ -201,26 +235,27 @@ impl<D: Draw> Plugin for DrawPlugin<D> {
             RenderPlugin,
             MaterialPlugin::<D::Material>::new(),
             ViewPlugin::<D::View>::new(),
-            MeshPipelinePlugin::<D::Pipeline>::new(),
+            MeshDataPlugin::<D::Mesh>::new(),
         ))
         .scoped_sub_app(RenderApp, |sub_app| {
             sub_app
                 .add_resource(ExtractedDraws::<D>::new())
-                .add_resource(ViewDrawCalls::<D::View, DrawMode<D>>::new())
+                .add_resource(ViewDrawCalls::<D::View, DrawPhase<D>>::new())
                 .add_systems(Extract, ExtractedDraws::<D>::extract)
                 .add_systems(
                     QueueDraws,
-                    ViewDrawCalls::<D::View, DrawMode<D>>::queue::<D>,
+                    ViewDrawCalls::<D::View, DrawPhase<D>>::queue::<D>,
                 )
                 .add_systems(
                     PostRender,
-                    ViewDrawCalls::<D::View, DrawMode<D>>::clear_draws,
+                    ViewDrawCalls::<D::View, DrawPhase<D>>::clear_draws,
                 );
 
             if DrawItem::<D>::SORT {
-                sub_app.add_systems(Process, ViewDrawCalls::<D::View, DrawMode<D>>::sort);
+                sub_app.add_systems(PreRender, ViewDrawCalls::<D::View, DrawPhase<D>>::sort);
             }
         })
+        .register::<D>()
         .extract_render_resource::<DrawPipeline<D>>();
     }
 }

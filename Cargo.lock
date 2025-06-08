@@ -1728,7 +1728,9 @@ version = "0.1.0"
 dependencies = [
  "asset",
  "ecs",
+ "math",
  "render",
+ "transform",
  "window",
 ]
 
