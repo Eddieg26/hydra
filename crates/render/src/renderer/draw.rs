@@ -3,8 +3,8 @@ use crate::{
     renderer::{Camera, RenderContext, RenderState},
     resources::{
         BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, BlendMode, Buffer,
-        DepthWrite, FragmentState, Material, MaterialBinding, MaterialLayout, MaterialPhase, Mesh,
-        MeshLayout, PipelineCache, PipelineId, RenderAssets, RenderMesh, RenderPipelineDesc,
+        DepthWrite, FragmentState, Material, MaterialBinding, MaterialLayout, Mesh, MeshLayout,
+        PipelineCache, PipelineId, RenderAssets, RenderMesh, RenderMode, RenderPipelineDesc,
         RenderResource, Shader, UniformBufferArray, VertexState,
     },
     surface::RenderSurface,
@@ -114,6 +114,16 @@ impl<T: TransformData> MeshDataBuffer<T> {
     }
 }
 
+impl<T: TransformData> RenderResource for MeshDataBuffer<T> {
+    type Arg = Read<RenderDevice>;
+
+    fn extract(
+        device: ecs::ArgItem<Self::Arg>,
+    ) -> Result<Self, crate::resources::ExtractError<()>> {
+        Ok(Self::new(device))
+    }
+}
+
 pub struct ExtractedView<V: View> {
     pub entity: Entity,
     pub view: V,
@@ -122,8 +132,13 @@ pub struct ExtractedView<V: View> {
 
 #[derive(Resource)]
 pub struct ExtractedViews<V: View>(Vec<ExtractedView<V>>);
+impl<V: View> ExtractedViews<V> {
+    pub const fn new() -> Self {
+        Self(Vec::new())
+    }
+}
 
-impl<V: View> ExtractedView<V> {
+impl<V: View> ExtractedViews<V> {
     pub(crate) fn extract(
         cameras: Main<SQuery<(Entity, &GlobalTransform, &V), With<Camera>>>,
         views: &mut ExtractedViews<V>,
@@ -229,7 +244,17 @@ impl<V: View> ViewBuffer<V> {
     }
 }
 
-pub trait MeshPipeline {
+impl<V: View> RenderResource for ViewBuffer<V> {
+    type Arg = Read<RenderDevice>;
+
+    fn extract(
+        device: ecs::ArgItem<Self::Arg>,
+    ) -> Result<Self, crate::resources::ExtractError<()>> {
+        Ok(Self::new(device))
+    }
+}
+
+pub trait MeshPipeline: 'static {
     type View: View;
     type Mesh: TransformData;
 
@@ -248,7 +273,8 @@ pub trait MeshPipeline {
 
 pub type DrawMesh<D> = <<D as Draw>::Pipeline as MeshPipeline>::Mesh;
 pub type DrawView<D> = <D as Draw>::View;
-pub type PhaseItem<M> = <<M as Material>::Phase as MaterialPhase>::Item;
+pub type DrawMode<D> = <<D as Draw>::Material as Material>::Mode;
+pub type DrawItem<D> = <<<D as Draw>::Material as Material>::Mode as RenderMode>::Item;
 
 pub trait Draw: Component + Clone {
     type View: View;
@@ -263,16 +289,22 @@ pub trait Draw: Component + Clone {
 
     fn data(&self, transform: &GlobalTransform) -> DrawMesh<Self>;
 
-    fn phase_item(&self, view: &QueuedView<Self::View>) -> PhaseItem<Self::Material>;
+    fn phase_item(&self, view: &QueuedView<Self::View>) -> DrawItem<Self>;
 }
 
 pub struct ExtractedDraw<D: Draw> {
-    entity: Entity,
+    pub entity: Entity,
     draw: D,
     transform: GlobalTransform,
 }
 
+#[derive(Resource)]
 pub struct ExtractedDraws<D: Draw>(Vec<ExtractedDraw<D>>);
+impl<D: Draw> ExtractedDraws<D> {
+    pub const fn new() -> Self {
+        Self(Vec::new())
+    }
+}
 
 impl<D: Draw> ExtractedDraws<D> {
     pub fn extract(
@@ -295,19 +327,26 @@ pub struct BatchKey {
     pub mesh: AssetId<Mesh>,
 }
 
-pub struct DrawCall<V: View, P: MaterialPhase> {
+pub struct DrawCall<V: View, P: RenderMode> {
     pub key: BatchKey,
     pub instances: Range<u32>,
     pub item: P::Item,
     pub function: DrawFunctionId<V>,
 }
 
-pub struct ViewDrawCalls<V: View, P: MaterialPhase>(
+#[derive(Resource)]
+pub struct ViewDrawCalls<V: View, P: RenderMode>(
     pub(crate) HashMap<Entity, Vec<DrawCall<V, P>>>,
     std::marker::PhantomData<V>,
 );
 
-impl<V: View, P: MaterialPhase> ViewDrawCalls<V, P> {
+impl<V: View, P: RenderMode> ViewDrawCalls<V, P> {
+    pub fn new() -> Self {
+        Self(HashMap::new(), Default::default())
+    }
+}
+
+impl<V: View, P: RenderMode> ViewDrawCalls<V, P> {
     pub(crate) fn queue<D: Draw<View = V>>(
         draws: &mut ExtractedDraws<D>,
         views: &mut ViewDrawCalls<V, P>,
@@ -315,7 +354,7 @@ impl<V: View, P: MaterialPhase> ViewDrawCalls<V, P> {
         view_buffer: &ViewBuffer<V>,
         function: DrawId<D>,
     ) where
-        D::Material: Material<Phase = P>,
+        D::Material: Material<Mode = P>,
     {
         let function = function.0;
 
@@ -459,7 +498,7 @@ impl<D: Draw> RenderResource for DrawPipeline<D> {
                 entry: "main".into(),
                 targets: vec![Some(ColorTargetState {
                     format: surface.format(),
-                    blend: Some(<D::Material as Material>::Phase::mode().into()),
+                    blend: Some(<D::Material as Material>::Mode::mode().into()),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -467,7 +506,7 @@ impl<D: Draw> RenderResource for DrawPipeline<D> {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: surface.depth_format(),
                 depth_write_enabled: matches!(
-                    <D::Material as Material>::Phase::depth_write(),
+                    <D::Material as Material>::Mode::depth_write(),
                     DepthWrite::On
                 ),
                 depth_compare: wgpu::CompareFunction::Less,
@@ -506,7 +545,7 @@ impl<V: View> Clone for DrawFunctionId<V> {
 
 impl<V: View> Copy for DrawFunctionId<V> {}
 
-struct DrawId<D: Draw>(DrawFunctionId<D::View>);
+pub struct DrawId<D: Draw>(DrawFunctionId<D::View>);
 
 unsafe impl<D: Draw> SystemArg for DrawId<D> {
     type Item<'world, 'state> = DrawId<D>;
@@ -514,7 +553,9 @@ unsafe impl<D: Draw> SystemArg for DrawId<D> {
     type State = DrawFunctionId<D::View>;
 
     fn init(world: &mut ecs::World, _: &mut ecs::WorldAccess) -> Self::State {
-        let functions = world.resource_mut::<DrawFunctions<D::View>>();
+        let functions =
+            world.get_or_insert_resource::<DrawFunctions<D::View>>(DrawFunctions::<D::View>::new);
+
         functions.register::<D>()
     }
 
@@ -537,10 +578,14 @@ pub type DrawFunction<V> = fn(
     Range<u32>,
 );
 
-#[derive(Default, Resource)]
+#[derive(Resource)]
 pub struct DrawFunctions<V: View>(IndexMap<TypeId, DrawFunction<V>>);
 
 impl<V: View> DrawFunctions<V> {
+    pub fn new() -> Self {
+        Self(IndexMap::new())
+    }
+
     pub fn register<D: Draw<View = V>>(&mut self) -> DrawFunctionId<V> {
         let ty = TypeId::of::<D>();
         if let Some(id) = self.0.get_index_of(&ty).map(DrawFunctionId::<V>::from) {

@@ -47,18 +47,18 @@ pub enum DepthWrite {
     On,
 }
 
-pub trait PhaseItem:
+pub trait RenderItem:
     Copy + Clone + Eq + PartialEq + Ord + PartialEq + Send + Sync + 'static
 {
     const SORT: bool = false;
 }
 
-impl PhaseItem for () {
+impl RenderItem for () {
     const SORT: bool = false;
 }
 
-pub trait MaterialPhase: Send + Sync + 'static {
-    type Item: PhaseItem;
+pub trait RenderMode: Send + Sync + 'static {
+    type Item: RenderItem;
 
     fn mode() -> BlendMode;
     fn depth_write() -> DepthWrite {
@@ -67,7 +67,7 @@ pub trait MaterialPhase: Send + Sync + 'static {
 }
 
 pub trait Material: Asset + AsBinding + Clone + Sized {
-    type Phase: MaterialPhase;
+    type Mode: RenderMode;
 
     fn shader() -> impl Into<AssetId<Shader>>;
 }

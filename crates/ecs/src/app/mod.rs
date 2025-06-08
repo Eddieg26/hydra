@@ -40,6 +40,40 @@ impl<T: Plugin> PluginKit for T {
     }
 }
 
+#[macro_export]
+macro_rules! impl_plugin_kit_for_tuples {
+    ($(($($name:ident),*)),*)  => {
+        $(
+            #[allow(non_snake_case)]
+            impl<$($name: PluginKit),+> PluginKit for ($($name),+) {
+                fn get<Pc: PluginCollection>(self, plugins: &mut Pc) {
+                    let ($($name),+) = self;
+                    $(
+                        $name.get(plugins);
+                    )+
+                }
+            }
+        )+
+    };
+}
+
+impl_plugin_kit_for_tuples!((A, B));
+impl_plugin_kit_for_tuples!((A, B, C));
+impl_plugin_kit_for_tuples!((A, B, C, D));
+impl_plugin_kit_for_tuples!((A, B, C, D, E));
+impl_plugin_kit_for_tuples!((A, B, C, D, E, F));
+impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G));
+impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H));
+impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I));
+impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J));
+impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K));
+impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L));
+impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M));
+impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N));
+impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O));
+impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P));
+impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q));
+
 pub trait AppTag: 'static {
     fn name(&self) -> &'static str {
         ext::short_type_name::<Self>()
@@ -346,16 +380,16 @@ impl AppBuilder {
     pub fn add_sub_app(&mut self, app: impl AppTag) -> &mut AppBuilder {
         let app = Box::new(app) as Box<dyn AppTag>;
         match &mut self.0 {
-            AppType::Main { secondary, .. } => {
+            AppType::Main { secondary, .. } => secondary.entry(app).or_insert_with(|| {
                 let mut config = AppBuildInfo::new();
                 config.add_sub_phases();
 
-                secondary.entry(app).or_insert(AppBuilder(AppType::Sub {
+                AppBuilder(AppType::Sub {
                     config,
                     task_pool_settings: TaskPoolSettings::default(),
                     building: false,
-                }))
-            }
+                })
+            }),
             AppType::Sub { .. } => panic!("Cannot add sub app to a sub app"),
         }
     }
@@ -374,6 +408,12 @@ impl AppBuilder {
             }
             AppType::Sub { .. } => None,
         }
+    }
+
+    pub fn scoped_sub_app(&mut self, app: impl AppTag, f: impl FnOnce(&mut AppBuilder)) -> &mut Self {
+        let app = self.add_sub_app(app);
+        f(app);
+        self
     }
 
     pub fn add_plugins<P: PluginKit>(&mut self, plugins: P) -> &mut Self {

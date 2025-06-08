@@ -21,8 +21,8 @@ pub enum ResourceType {
     Transient,
 }
 
-pub trait GraphResource: Any + Sized + 'static {
-    type Desc: Any + 'static;
+pub trait GraphResource: Any + Sized + Send + Sync + 'static {
+    type Desc: Any + Send + Sync + 'static;
 
     const NAME: Name;
 
@@ -51,15 +51,16 @@ impl ResourceNode {
     }
 }
 
-pub type CreateResource = fn(&RenderDevice, &RenderSurface, Name, &dyn Any) -> Box<dyn Any>;
+pub type CreateResource =
+    fn(&RenderDevice, &RenderSurface, Name, &dyn Any) -> Box<dyn Any + Send + Sync>;
 
 pub struct ResourceEntry {
     pub id: GraphResourceId,
     pub name: Name,
     pub version: u32,
     pub ty: ResourceType,
-    desc: Arc<dyn Any>,
-    object: Option<Box<dyn Any>>,
+    desc: Arc<dyn Any + Send + Sync>,
+    object: Option<Box<dyn Any + Send + Sync>>,
     creator: Option<NodeId>,
     last_pass: Option<NodeId>,
     create: CreateResource,
@@ -96,7 +97,7 @@ impl ResourceEntry {
             version: 0,
             ty: ResourceType::Imported,
             desc: Arc::new(()),
-            object: object.map(|o| Box::new(o) as Box<dyn Any>),
+            object: object.map(|o| Box::new(o) as Box<dyn Any + Send + Sync>),
             creator: None,
             last_pass: None,
             create: |_, _, _, _| Box::new(()),
@@ -120,7 +121,7 @@ impl ResourceEntry {
     }
 }
 
-pub type PassExecutor = Box<dyn Fn(&mut RenderContext)>;
+pub type PassExecutor = Box<dyn Fn(&mut RenderContext) + Send + Sync + 'static>;
 
 pub struct PassNode {
     pub id: NodeId,
@@ -247,7 +248,10 @@ impl<'a> PassBuilder<'a> {
 pub trait RenderGraphPass {
     const NAME: Name;
 
-    fn setup(self, builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + 'static;
+    fn setup(
+        self,
+        builder: &mut PassBuilder,
+    ) -> impl Fn(&mut RenderContext) + Send + Sync + 'static;
 }
 
 pub trait SubGraph {
@@ -297,6 +301,7 @@ pub struct CompiledGraph {
     resources: Vec<ResourceInfo>,
 }
 
+#[derive(Resource)]
 pub struct RenderGraph {
     passes: Vec<PassNode>,
     resources: Vec<ResourceNode>,
@@ -323,11 +328,13 @@ impl RenderGraph {
     }
 
     pub fn add_sub_graph<S: SubGraph>(&mut self) {
-        let id = self.add_pass(SubGraphPass::new::<S>());
-        self.passes[id as usize].has_side_effect = true;
-        self.passes[id as usize].name = S::NAME;
+        if !self.sub_graphs.contains_key(S::NAME) {
+            let id = self.add_pass(SubGraphPass::new::<S>());
+            self.passes[id as usize].has_side_effect = true;
+            self.passes[id as usize].name = S::NAME;
 
-        self.sub_graphs.insert(S::NAME, RenderGraph::new());
+            self.sub_graphs.insert(S::NAME, RenderGraph::new());
+        }
     }
 
     pub fn import<R: GraphResource>(&mut self, resource: Option<R>) {
@@ -338,7 +345,7 @@ impl RenderGraph {
                 if entry.ty == ResourceType::Transient {
                     panic!("transient resource already exists: {}", R::NAME);
                 } else {
-                    entry.object = resource.map(|r| Box::new(r) as Box<dyn Any>);
+                    entry.object = resource.map(|r| Box::new(r) as Box<dyn Any + Send + Sync>);
                 }
             }
             ecs::core::map::Entry::Vacant(entry) => {
@@ -361,8 +368,9 @@ impl RenderGraph {
         self.sub_graphs.get(S::NAME)
     }
 
-    pub fn get_sub_graph_mut<S: SubGraph>(&mut self) -> Option<&mut RenderGraph> {
-        self.sub_graphs.get_mut(S::NAME)
+    pub fn get_sub_graph_mut<S: SubGraph>(&mut self) -> &mut RenderGraph {
+        self.add_sub_graph::<S>();
+        self.sub_graphs.get_mut(S::NAME).unwrap()
     }
 
     pub fn get_resource<G: GraphResource>(&self, id: GraphResourceId) -> Option<&G> {
@@ -511,8 +519,6 @@ impl RenderGraph {
         graph.destroy::<RenderOutput>();
     }
 }
-
-impl Resource for RenderGraph {}
 
 pub struct RenderContext<'a> {
     camera: Option<EntityCamera>,
