@@ -32,6 +32,17 @@ pub struct Camera {
     pub target: Option<AssetId<RenderTexture>>,
 }
 
+impl Default for Camera {
+    fn default() -> Self {
+        Self {
+            viewport: Viewport::new(0.0, 0.0, 1.0, 1.0, 0.0..1.0),
+            depth: Default::default(),
+            clear_color: Default::default(),
+            target: Default::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct EntityCamera {
     pub entity: Entity,

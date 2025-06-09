@@ -1,7 +1,7 @@
 use asset::{Asset, AssetId, DefaultSettings, embed_asset, io::EmbeddedFs, plugin::AssetAppExt};
 use ecs::{App, Component, Init, Spawner};
 use render::{
-    AsBinding, Color, DepthOutput, Draw, DrawFunctions, GraphResourceId, Material, Mesh,
+    AsBinding, Camera, Color, DepthOutput, Draw, DrawFunctions, GraphResourceId, Material, Mesh,
     MeshAttribute, MeshAttributeType, MeshAttributeValues, MeshData, MeshTopology, Projection,
     RenderAssets, RenderMesh, RenderOutput, RenderPassDesc, RenderPhase, RenderState, Renderer,
     Shader, ShaderType, View, ViewBuffer, ViewDrawCalls,
@@ -41,6 +41,13 @@ fn main() {
         .add_asset(MAT_ID, UnlitColor::from(Color::red()), None)
         .add_asset(QUAD_ID, quad, None)
         .add_systems(Init, |mut spawner: Spawner| {
+            spawner
+                .spawn()
+                .with_component(GlobalTransform::IDENTITY)
+                .with_component(Camera::default())
+                .with_component(View3d::default())
+                .finish();
+
             spawner
                 .spawn()
                 .with_component(GlobalTransform::IDENTITY)
@@ -101,14 +108,27 @@ impl MeshData for Mesh3d {
 
 #[derive(ShaderType)]
 pub struct View3dData {
-    world: [f32; 16],
-    view: [f32; 16],
-    projection: [f32; 16],
+    world: math::Mat4,
+    view: math::Mat4,
+    projection: math::Mat4,
 }
 
 #[derive(Clone, Component)]
 pub struct View3d {
     projection: Projection,
+}
+
+impl Default for View3d {
+    fn default() -> Self {
+        Self {
+            projection: Projection::Perspective {
+                fov: 1.0,
+                aspect_ratio: 1.0,
+                near: 0.1,
+                far: 100.0,
+            },
+        }
+    }
 }
 
 impl View for View3d {
@@ -136,9 +156,9 @@ impl View for View3d {
         let view = world.inverse();
 
         View3dData {
-            world: world.to_cols_array(),
-            view: view.to_cols_array(),
-            projection: projection.to_cols_array(),
+            world,
+            view,
+            projection,
         }
     }
 }

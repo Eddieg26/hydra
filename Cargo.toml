@@ -17,7 +17,8 @@ members = [
     "crates/transform",
     "crates/window",
     "examples/ecs/*",
-    "examples/window", "examples/render",
+    "examples/window",
+    "examples/render",
 ]
 
 
