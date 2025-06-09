@@ -6,7 +6,7 @@ use crate::{
         processor::AssetProcessor,
     },
     database::{
-        AssetDatabase,
+        AssetDatabase, DatabaseEvent,
         commands::LoadDependencies,
         load::{LoadError, LoadPath},
     },
@@ -38,9 +38,21 @@ impl Plugin for AssetPlugin {
             config.add_source(SourceName::Default, LocalFs::new("assets"));
         }
 
-        let mut commands = std::mem::take(&mut config.commands);
-        AssetDatabase::init(config.build()).setup();
-        commands.execute(app.world_mut());
+        let commands = std::mem::take(&mut config.commands);
+        let load = std::mem::take(&mut config.load);
+        let db = AssetDatabase::init(config.build());
+
+        smol::block_on(async move {
+            db.send_event(DatabaseEvent::Setup).await;
+
+            for path in load {
+                db.send_event(DatabaseEvent::LoadAsset(path)).await;
+            }
+
+            for command in commands {
+                db.send_event(command).await;
+            }
+        });
     }
 }
 
@@ -59,7 +71,10 @@ pub trait AssetAppExt {
         asset: A,
         dependencies: Option<LoadDependencies>,
     ) -> &mut Self;
-    fn load_asset<A: Asset + for<'a> Deserialize<'a>>(&mut self, path: impl Into<LoadPath<'static>>) -> &mut Self;
+    fn load_asset<A: Asset + for<'a> Deserialize<'a>>(
+        &mut self,
+        path: impl Into<LoadPath<'static>>,
+    ) -> &mut Self;
     fn set_cache(&mut self, cache: AssetCache) -> &mut Self;
 }
 
@@ -98,7 +113,10 @@ impl AssetAppExt for ecs::AppBuilder {
         self
     }
 
-    fn load_asset<A: Asset + for<'a> Deserialize<'a>>(&mut self, path: impl Into<LoadPath<'static>>) -> &mut Self {
+    fn load_asset<A: Asset + for<'a> Deserialize<'a>>(
+        &mut self,
+        path: impl Into<LoadPath<'static>>,
+    ) -> &mut Self {
         self.world_mut().load_asset::<A>(path);
         self
     }
@@ -162,7 +180,10 @@ impl AssetAppExt for ecs::World {
         self
     }
 
-    fn load_asset<A: Asset + for<'a> Deserialize<'a>>(&mut self, path: impl Into<LoadPath<'static>>) -> &mut Self {
+    fn load_asset<A: Asset + for<'a> Deserialize<'a>>(
+        &mut self,
+        path: impl Into<LoadPath<'static>>,
+    ) -> &mut Self {
         self.register_asset::<A>();
 
         let config = self.resource_mut::<AssetConfigBuilder>();

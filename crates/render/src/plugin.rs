@@ -16,7 +16,7 @@ use crate::{
     },
     surface::{RenderSurface, RenderSurfaceTexture},
 };
-use asset::plugin::AssetAppExt;
+use asset::plugin::{AssetAppExt, AssetPlugin};
 use ecs::{AppBuilder, Extract, Init, Plugin, Run};
 use transform::GlobalTransform;
 use window::plugin::WindowPlugin;
@@ -25,7 +25,7 @@ pub struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn setup(&mut self, app: &mut ecs::AppBuilder) {
-        app.add_plugins(WindowPlugin)
+        app.add_plugins((WindowPlugin, AssetPlugin))
             .add_sub_app(RenderApp)
             .add_sub_phase(Run, Process)
             .add_sub_phase(Process, ProcessAssets)
@@ -53,10 +53,11 @@ impl Plugin for RenderPlugin {
 
         app.register::<Camera>()
             .extract_render_resource::<Fallbacks>()
-            .extract_render_asset::<ShaderSource>()
             .extract_render_asset::<Mesh>()
             .extract_render_asset::<Texture>()
-            .extract_render_asset::<RenderTexture>();
+            .extract_render_asset::<RenderTexture>()
+            .extract_render_asset::<ShaderSource>()
+            .add_importer::<ShaderSource>();
     }
 
     fn finish(&mut self, app: &mut AppBuilder) {

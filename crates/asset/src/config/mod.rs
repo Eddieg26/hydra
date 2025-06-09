@@ -1,10 +1,7 @@
 use crate::{
     AssetCommand, AssetId,
     asset::{Asset, AssetType},
-    database::{
-        commands::{LoadAsset, LoadDependencies},
-        load::LoadPath,
-    },
+    database::{commands::LoadDependencies, load::LoadPath},
     io::{
         AssetSource, FileSystem,
         cache::AssetCache,
@@ -12,12 +9,12 @@ use crate::{
         source::{AssetSources, SourceName},
     },
 };
-use ecs::{CommandBuffer, Resource};
+use ecs::Resource;
 use importer::{AssetImporter, AssetImporters};
 use processor::{AssetProcessor, AssetProcessors};
 use registry::AssetRegistry;
 use serde::Deserialize;
-use std::any::TypeId;
+use std::{any::TypeId, collections::HashSet};
 
 pub mod importer;
 pub mod processor;
@@ -32,7 +29,8 @@ pub struct AssetConfigBuilder {
     processors: AssetProcessors,
     sources: AssetSources,
     cache: AssetCache,
-    pub(crate) commands: CommandBuffer,
+    pub(crate) load: HashSet<LoadPath<'static>>,
+    pub(crate) commands: Vec<AssetCommand>,
 }
 
 impl AssetConfigBuilder {
@@ -43,7 +41,8 @@ impl AssetConfigBuilder {
             processors: AssetProcessors::new(),
             sources: AssetSources::new(),
             cache: AssetCache::new(LocalFs::new(".cache")),
-            commands: CommandBuffer::new(),
+            load: HashSet::new(),
+            commands: Vec::new(),
         }
     }
 
@@ -86,7 +85,7 @@ impl AssetConfigBuilder {
         dependencies: Option<LoadDependencies>,
     ) {
         let ty = self.register::<A>();
-        self.commands.add(AssetCommand::Add {
+        self.commands.push(AssetCommand::Add {
             id: id.into(),
             ty,
             asset: asset.into(),
@@ -98,7 +97,7 @@ impl AssetConfigBuilder {
         &mut self,
         path: impl Into<LoadPath<'static>>,
     ) {
-        self.commands.add(LoadAsset::<A>::from(path.into()));
+        self.load.insert(path.into());
     }
 
     pub fn build(self) -> AssetConfig {

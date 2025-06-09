@@ -1,5 +1,8 @@
-use asset::{Asset, AssetId, DefaultSettings, embed_asset, io::EmbeddedFs, plugin::AssetAppExt};
-use ecs::{App, Component, Init, Spawner};
+use asset::{
+    Asset, AssetId, DefaultSettings, embed_asset, importer::ImportError, io::EmbeddedFs,
+    plugin::AssetAppExt,
+};
+use ecs::{App, Component, EventReader, Init, Spawner, Start};
 use render::{
     AsBinding, Camera, Color, DepthOutput, Draw, DrawFunctions, GraphResourceId, Material, Mesh,
     MeshAttribute, MeshAttributeType, MeshAttributeValues, MeshData, MeshTopology, Projection,
@@ -56,6 +59,11 @@ fn main() {
                     mesh: QUAD_ID,
                 })
                 .finish();
+        })
+        .add_systems(Start, |events: EventReader<ImportError>| {
+            for event in events {
+                println!("Import error: {}", event);
+            }
         })
         .run();
 }

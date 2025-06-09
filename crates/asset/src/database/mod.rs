@@ -1,6 +1,7 @@
 use crate::{
     asset::ErasedId,
     config::{AssetConfig, AssetConfigBuilder, importer::ImportError},
+    database::load::LoadPath,
     io::{AssetPath, cache::AssetLibrary},
 };
 use commands::AssetCommand;
@@ -76,7 +77,7 @@ impl AssetDatabase {
         let _ = self.sender.send(event.into()).await;
     }
 
-    pub fn setup(&self) {
+    fn setup(&self) {
         IoTaskPool::get()
             .spawn(async {
                 let db = AssetDatabase::get();
@@ -110,6 +111,10 @@ impl AssetDatabase {
     ) {
         while let Ok(event) = db.receiver.try_recv() {
             match event {
+                DatabaseEvent::Setup => db.setup(),
+                DatabaseEvent::LoadAsset(path) => {
+                    let _ = db.load_erased(path);
+                }
                 DatabaseEvent::AssetCommand(command) => commands.add(command),
                 DatabaseEvent::ImportError(error) => import_errors.send(error),
                 DatabaseEvent::LoadError(error) => load_errors.send(error),
@@ -119,6 +124,8 @@ impl AssetDatabase {
 }
 
 pub enum DatabaseEvent {
+    Setup,
+    LoadAsset(LoadPath<'static>),
     AssetCommand(AssetCommand),
     ImportError(ImportError),
     LoadError(LoadError),
