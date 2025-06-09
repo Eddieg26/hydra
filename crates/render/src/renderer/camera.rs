@@ -29,7 +29,6 @@ pub struct Camera {
     pub viewport: Viewport,
     pub depth: u32,
     pub clear_color: Option<Color>,
-    pub projection: Projection,
     pub target: Option<AssetId<RenderTexture>>,
 }
 

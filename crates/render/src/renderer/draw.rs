@@ -26,21 +26,19 @@ use wgpu::{BufferUsages, ColorTargetState, ShaderStages, VertexFormat, VertexSte
 pub trait ShaderData: Send + Sync + ShaderType + WriteInto + 'static {}
 impl<S: Send + Sync + ShaderType + WriteInto + 'static> ShaderData for S {}
 
-pub trait View: Component + Clone + 'static {
-    type Data: ShaderData;
-
-    fn data(&self, transform: &GlobalTransform) -> Self::Data;
+pub trait MeshData: ShaderData {
+    fn formats() -> &'static [VertexFormat];
 }
 
 #[derive(Resource)]
-pub struct MeshDataBuffer<T: ShaderData> {
+pub struct MeshDataBuffer<T: MeshData> {
     buffer: Buffer,
     data: Vec<u8>,
     offset: usize,
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<T: ShaderData> MeshDataBuffer<T> {
+impl<T: MeshData> MeshDataBuffer<T> {
     const SIZE: usize = std::mem::size_of::<T>();
 
     pub fn new(device: &RenderDevice) -> Self {
@@ -113,7 +111,7 @@ impl<T: ShaderData> MeshDataBuffer<T> {
     }
 }
 
-impl<T: ShaderData> RenderResource for MeshDataBuffer<T> {
+impl<T: MeshData> RenderResource for MeshDataBuffer<T> {
     type Arg = Read<RenderDevice>;
 
     fn extract(
@@ -121,6 +119,12 @@ impl<T: ShaderData> RenderResource for MeshDataBuffer<T> {
     ) -> Result<Self, crate::resources::ExtractError<()>> {
         Ok(Self::new(device))
     }
+}
+
+pub trait View: Component + Clone + 'static {
+    type Data: ShaderData;
+
+    fn data(&self, transform: &GlobalTransform) -> Self::Data;
 }
 
 pub struct ExtractedView<V: View> {
@@ -262,7 +266,7 @@ pub type DrawItem<D> = <<<D as Draw>::Material as Material>::Phase as RenderPhas
 
 pub trait Draw: Component + Clone {
     type View: View;
-    type Mesh: ShaderData;
+    type Mesh: MeshData;
     type Material: Material;
 
     const BATCH: bool = true;
@@ -278,10 +282,6 @@ pub trait Draw: Component + Clone {
     }
 
     fn formats() -> &'static [VertexFormat];
-
-    fn instance_formats() -> &'static [VertexFormat] {
-        &[]
-    }
 
     fn shader() -> impl Into<AssetId<Shader>>;
 }
@@ -404,6 +404,8 @@ impl<V: View, P: RenderPhase> ViewDrawCalls<V, P> {
                 views.0.entry(*entity).or_default().extend(draw_calls);
             }
         }
+
+        draws.0.clear();
     }
 
     pub(crate) fn sort(view_draws: &mut ViewDrawCalls<V, P>) {
@@ -483,22 +485,19 @@ impl<D: Draw> RenderResource for DrawPipeline<D> {
             "Mesh pipeline must have at least one vertex format"
         );
 
-        let mut buffers = vec![];
-        buffers.push(MeshLayout::into_vertex_buffer_layout(
-            0,
-            D::formats(),
-            VertexStepMode::Vertex,
-        ));
+        assert!(
+            !D::Mesh::formats().is_empty(),
+            "Mesh pipeline must have at least one vertex format"
+        );
 
-        if !D::instance_formats().is_empty() {
-            let layout = MeshLayout::into_vertex_buffer_layout(
+        let buffers = vec![
+            MeshLayout::into_vertex_buffer_layout(0, D::formats(), VertexStepMode::Vertex),
+            MeshLayout::into_vertex_buffer_layout(
                 D::formats().len() as u32,
-                D::instance_formats(),
+                D::Mesh::formats(),
                 VertexStepMode::Instance,
-            );
-
-            buffers.push(layout);
-        }
+            ),
+        ];
 
         let id = cache.queue_render_pipeline(RenderPipelineDesc {
             label: None,

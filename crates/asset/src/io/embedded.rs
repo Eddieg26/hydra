@@ -1,5 +1,8 @@
 use super::{AssetIoError, AsyncReader, AsyncWriter, FileSystem, PathExt, serialize};
-use crate::asset::{Asset, AssetMetadata, ErasedId, Settings};
+use crate::{
+    AssetId,
+    asset::{Asset, AssetMetadata, Settings},
+};
 use futures::{AsyncRead, AsyncWrite, future::BoxFuture};
 use serde::Serialize;
 use smol::lock::RwLock;
@@ -170,25 +173,23 @@ pub struct EmbeddedAssets {
 type Handle = Arc<RwLock<EmbeddedAssets>>;
 
 pub struct EmbeddedFs {
-    root: Box<Path>,
     fs: Handle,
 }
 
 impl EmbeddedFs {
-    pub fn new(root: impl AsRef<Path>) -> Self {
+    pub fn new() -> Self {
         Self {
-            root: root.as_ref().to_path_buf().into_boxed_path(),
             fs: Handle::default(),
         }
     }
 
     pub fn embed<A: Asset, S: Settings + Serialize>(
         &self,
-        id: impl Into<ErasedId>,
+        id: AssetId<A>,
         path: impl AsRef<Path>,
         asset: &'static [u8],
         settings: S,
-    ) -> AssetMetadata<S> {
+    ) -> AssetId<A> {
         let metadata = AssetMetadata::<S>::new(id, settings);
         let metabytes = match serialize(&metadata) {
             Ok(metabytes) => metabytes,
@@ -202,7 +203,8 @@ impl EmbeddedFs {
             path.append_ext("meta"),
             EmbeddedData::Dynamic(metabytes.into()),
         );
-        metadata
+
+        id
     }
 }
 
@@ -220,7 +222,7 @@ impl FileSystem for EmbeddedFs {
     type Writer = EmbeddedWriter;
 
     fn root(&self) -> &Path {
-        &self.root
+        "".as_ref()
     }
 
     async fn reader(&self, path: &Path) -> Result<Self::Reader, AssetIoError> {

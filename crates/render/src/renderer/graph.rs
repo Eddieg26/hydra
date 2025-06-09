@@ -1,5 +1,5 @@
 use crate::{
-    Label,
+    Label, RenderState,
     device::RenderDevice,
     renderer::camera::EntityCamera,
     resources::{ComputePipeline, PipelineCache, PipelineId, RenderPipeline},
@@ -53,8 +53,10 @@ impl ResourceNode {
     }
 }
 
+pub type ResourceObj = Box<dyn Any + Send + Sync + 'static>;
+
 pub type CreateResource =
-    fn(&RenderDevice, &RenderSurface, Name, &dyn Any) -> Box<dyn Any + Send + Sync>;
+    fn(&RenderDevice, &RenderSurface, Name, &(dyn Any + Send + Sync)) -> ResourceObj;
 
 pub struct ResourceEntry {
     pub id: GraphResourceId,
@@ -62,7 +64,7 @@ pub struct ResourceEntry {
     pub version: u32,
     pub ty: ResourceType,
     desc: Arc<dyn Any + Send + Sync>,
-    object: Option<Box<dyn Any + Send + Sync>>,
+    object: Option<ResourceObj>,
     creator: Option<NodeId>,
     last_pass: Option<NodeId>,
     create: CreateResource,
@@ -99,15 +101,15 @@ impl ResourceEntry {
             version: 0,
             ty: ResourceType::Imported,
             desc: Arc::new(()),
-            object: object.map(|o| Box::new(o) as Box<dyn Any + Send + Sync>),
+            object: object.map(|o| Box::new(o) as ResourceObj),
             creator: None,
             last_pass: None,
-            create: |_, _, _, _| Box::new(()),
+            create: |_, _, _, _| unreachable!("imported resources cannot be created"),
         }
     }
 
     pub fn create(&mut self, device: &RenderDevice, surface: &RenderSurface) {
-        let object = (self.create)(device, surface, self.name, &self.desc);
+        let object = (self.create)(device, surface, self.name, self.desc.as_ref());
         self.object = Some(object)
     }
 
@@ -165,18 +167,23 @@ impl<'a> PassBuilder<'a> {
     }
 
     pub fn create<R: GraphResource>(&mut self, desc: R::Desc) -> GraphResourceId {
-        let resource = self.graph.entries.len() as u32;
-        let entry = ResourceEntry::new::<R>(resource, R::NAME, ResourceType::Transient, desc);
-        let node = ResourceNode::new(self.graph.resources.len() as u32, resource);
+        let id = self.graph.resources.len() as u32;
+        let entry = ResourceEntry::new::<R>(
+            self.graph.entries.len() as u32,
+            R::NAME,
+            ResourceType::Transient,
+            desc,
+        );
+        let node = ResourceNode::new(id, self.graph.entries.len() as u32);
 
         self.graph.resources.push(node);
         self.graph.entries.insert(TypeId::of::<R>(), entry);
-        self.creates.push(resource);
+        self.creates.push(id);
 
-        resource
+        id
     }
 
-    pub fn read<G: GraphResource>(&mut self) -> GraphResourceId {
+    pub fn read<G: GraphResource>(&mut self) -> NodeId {
         let id = self
             .graph
             .get_resource_entry::<G>()
@@ -188,14 +195,14 @@ impl<'a> PassBuilder<'a> {
         id
     }
 
-    pub fn write<G: GraphResource>(&mut self) -> GraphResourceId {
+    pub fn write<G: GraphResource>(&mut self) -> NodeId {
         let entry = match self.graph.get_resource_entry::<G>() {
             Some(entry) => entry,
             None => {
                 self.graph.import::<G>(None);
                 self.graph
                     .get_resource_entry::<G>()
-                    .expect("resource not found")
+                    .expect(&format!("resource not found after import: {}", G::NAME))
             }
         };
 
@@ -347,7 +354,7 @@ impl RenderGraph {
                 if entry.ty == ResourceType::Transient {
                     panic!("transient resource already exists: {}", R::NAME);
                 } else {
-                    entry.object = resource.map(|r| Box::new(r) as Box<dyn Any + Send + Sync>);
+                    entry.object = resource.map(|r| Box::new(r) as ResourceObj);
                 }
             }
             ecs::core::map::Entry::Vacant(entry) => {
@@ -375,7 +382,7 @@ impl RenderGraph {
         self.sub_graphs.get_mut(S::NAME).unwrap()
     }
 
-    pub fn get_resource<G: GraphResource>(&self, id: GraphResourceId) -> Option<&G> {
+    pub fn get_resource<G: GraphResource>(&self, id: NodeId) -> Option<&G> {
         let node = self.resources.get(id as usize)?;
 
         self.entries[node.resource as usize]
@@ -475,7 +482,10 @@ impl RenderGraph {
         for pass in &compiled.passes {
             for id in self.passes[*pass].creates.iter().copied() {
                 let resource = self.resources[id as usize].resource;
-                self.entries[resource as usize].create(device, surface);
+                let entry = &mut self.entries[resource as usize];
+                if entry.ty == ResourceType::Transient {
+                    entry.create(device, surface);
+                }
             }
 
             {
@@ -578,9 +588,11 @@ impl<'a> RenderContext<'a> {
     }
 
     pub fn get<R: GraphResource>(&self, id: GraphResourceId) -> &R {
-        self.graph
-            .get_resource::<R>(id)
-            .expect("resource not found")
+        self.graph.get_resource::<R>(id).expect(&format!(
+            "resource not found: {} with id {}",
+            R::NAME,
+            id
+        ))
     }
 
     pub fn encoder(&self) -> wgpu::CommandEncoder {
@@ -717,7 +729,7 @@ pub trait Renderer: Send + Sync + 'static {
 
     fn build<'a>(ctx: &'a RenderContext<'a>, data: &'a Self::Data) -> RenderPassDesc<'a>;
 
-    fn render<'a>(ctx: &'a mut RenderContext, pass: &'a mut wgpu::RenderPass<'a>);
+    fn render<'a>(ctx: &'a mut RenderContext, state: RenderState<'a>);
 }
 
 pub trait ErasedRenderer: downcast_rs::Downcast + Send + Sync + 'static {
@@ -742,9 +754,11 @@ impl<R: Renderer> ErasedRenderer for R {
             occlusion_query_set: None,
         };
 
-        let mut pass = encoder.begin_render_pass(&desc);
+        {
+            let mut pass = encoder.begin_render_pass(&desc);
 
-        Self::render(ctx, &mut pass);
+            Self::render(ctx, RenderState::new(&mut pass));
+        }
 
         ctx.submit(encoder.finish());
     }

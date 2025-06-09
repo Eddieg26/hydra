@@ -88,6 +88,10 @@ impl<A: Asset> AssetId<A> {
         Self(uuid::Uuid::from_u128(value), std::marker::PhantomData::<A>)
     }
 
+    pub const fn from_uuid(value: uuid::Uuid) -> Self {
+        Self(value, std::marker::PhantomData::<A>)
+    }
+
     pub fn uuid(&self) -> &uuid::Uuid {
         &self.0
     }

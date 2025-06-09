@@ -1,14 +1,19 @@
 use crate::{
-    Asset, AssetEvent, Assets,
+    Asset, AssetEvent, AssetId, Assets,
     config::{
         AssetConfigBuilder,
         importer::{AssetImporter, ImportError},
         processor::AssetProcessor,
     },
-    database::{AssetDatabase, load::LoadError},
+    database::{
+        AssetDatabase,
+        commands::LoadDependencies,
+        load::{LoadError, LoadPath},
+    },
     io::{AssetCache, FileSystem, LocalFs, SourceName},
 };
 use ecs::app::{End, Plugin};
+use serde::Deserialize;
 
 pub struct AssetPlugin;
 
@@ -33,8 +38,9 @@ impl Plugin for AssetPlugin {
             config.add_source(SourceName::Default, LocalFs::new("assets"));
         }
 
-        let database = AssetDatabase::init(config.build());
-        database.setup();
+        let mut commands = std::mem::take(&mut config.commands);
+        AssetDatabase::init(config.build()).setup();
+        commands.execute(app.world_mut());
     }
 }
 
@@ -47,6 +53,13 @@ pub trait AssetAppExt {
         name: impl Into<SourceName<'static>>,
         source: S,
     ) -> &mut Self;
+    fn add_asset<A: Asset>(
+        &mut self,
+        id: AssetId<A>,
+        asset: A,
+        dependencies: Option<LoadDependencies>,
+    ) -> &mut Self;
+    fn load_asset<A: Asset + for<'a> Deserialize<'a>>(&mut self, path: impl Into<LoadPath<'static>>) -> &mut Self;
     fn set_cache(&mut self, cache: AssetCache) -> &mut Self;
 }
 
@@ -72,6 +85,21 @@ impl AssetAppExt for ecs::AppBuilder {
         source: S,
     ) -> &mut Self {
         self.world_mut().add_source(name, source);
+        self
+    }
+
+    fn add_asset<A: Asset>(
+        &mut self,
+        id: AssetId<A>,
+        asset: A,
+        dependencies: Option<LoadDependencies>,
+    ) -> &mut Self {
+        self.world_mut().add_asset(id, asset, dependencies);
+        self
+    }
+
+    fn load_asset<A: Asset + for<'a> Deserialize<'a>>(&mut self, path: impl Into<LoadPath<'static>>) -> &mut Self {
+        self.world_mut().load_asset::<A>(path);
         self
     }
 
@@ -117,6 +145,29 @@ impl AssetAppExt for ecs::World {
     ) -> &mut Self {
         let config = self.get_or_insert_resource(AssetConfigBuilder::new);
         config.add_source(name, source);
+        self
+    }
+
+    fn add_asset<A: Asset>(
+        &mut self,
+        id: AssetId<A>,
+        asset: A,
+        dependencies: Option<LoadDependencies>,
+    ) -> &mut Self {
+        self.register_asset::<A>();
+
+        let config = self.resource_mut::<AssetConfigBuilder>();
+        config.add_asset(id, asset, dependencies);
+
+        self
+    }
+
+    fn load_asset<A: Asset + for<'a> Deserialize<'a>>(&mut self, path: impl Into<LoadPath<'static>>) -> &mut Self {
+        self.register_asset::<A>();
+
+        let config = self.resource_mut::<AssetConfigBuilder>();
+        config.load_asset::<A>(path);
+
         self
     }
 

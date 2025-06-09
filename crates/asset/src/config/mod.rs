@@ -1,5 +1,10 @@
 use crate::{
+    AssetCommand, AssetId,
     asset::{Asset, AssetType},
+    database::{
+        commands::{LoadAsset, LoadDependencies},
+        load::LoadPath,
+    },
     io::{
         AssetSource, FileSystem,
         cache::AssetCache,
@@ -7,10 +12,11 @@ use crate::{
         source::{AssetSources, SourceName},
     },
 };
-use ecs::Resource;
+use ecs::{CommandBuffer, Resource};
 use importer::{AssetImporter, AssetImporters};
 use processor::{AssetProcessor, AssetProcessors};
 use registry::AssetRegistry;
+use serde::Deserialize;
 use std::any::TypeId;
 
 pub mod importer;
@@ -26,6 +32,7 @@ pub struct AssetConfigBuilder {
     processors: AssetProcessors,
     sources: AssetSources,
     cache: AssetCache,
+    pub(crate) commands: CommandBuffer,
 }
 
 impl AssetConfigBuilder {
@@ -36,6 +43,7 @@ impl AssetConfigBuilder {
             processors: AssetProcessors::new(),
             sources: AssetSources::new(),
             cache: AssetCache::new(LocalFs::new(".cache")),
+            commands: CommandBuffer::new(),
         }
     }
 
@@ -71,6 +79,28 @@ impl AssetConfigBuilder {
         self.sources.get(name)
     }
 
+    pub fn add_asset<A: Asset>(
+        &mut self,
+        id: AssetId<A>,
+        asset: A,
+        dependencies: Option<LoadDependencies>,
+    ) {
+        let ty = self.register::<A>();
+        self.commands.add(AssetCommand::Add {
+            id: id.into(),
+            ty,
+            asset: asset.into(),
+            dependencies,
+        });
+    }
+
+    pub fn load_asset<A: Asset + for<'a> Deserialize<'a>>(
+        &mut self,
+        path: impl Into<LoadPath<'static>>,
+    ) {
+        self.commands.add(LoadAsset::<A>::from(path.into()));
+    }
+
     pub fn build(self) -> AssetConfig {
         AssetConfig {
             registry: self.registry,
@@ -81,7 +111,6 @@ impl AssetConfigBuilder {
         }
     }
 }
-
 
 impl Default for AssetConfigBuilder {
     fn default() -> Self {

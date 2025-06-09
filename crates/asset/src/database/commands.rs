@@ -1,6 +1,10 @@
 use super::AssetDatabase;
-use crate::asset::{Asset, AssetAction, AssetId, AssetType, ErasedAsset, ErasedId};
+use crate::{
+    asset::{Asset, AssetAction, AssetId, AssetType, ErasedAsset, ErasedId},
+    database::load::LoadPath,
+};
 use ecs::{Command, Commands, World};
+use serde::Deserialize;
 use std::{any::TypeId, collections::HashSet};
 
 pub struct LoadDependencies {
@@ -14,6 +18,22 @@ impl LoadDependencies {
             parent,
             dependencies: dependencies.into_iter().collect(),
         }
+    }
+}
+
+pub struct LoadAsset<A: Asset + for<'a> Deserialize<'a>>(
+    LoadPath<'static>,
+    std::marker::PhantomData<A>,
+);
+impl<A: Asset + for<'a> Deserialize<'a>, P: Into<LoadPath<'static>>> From<P> for LoadAsset<A> {
+    fn from(value: P) -> Self {
+        Self(value.into(), Default::default())
+    }
+}
+
+impl<A: Asset + for<'a> Deserialize<'a>> Command for LoadAsset<A> {
+    fn execute(self, _: &mut World) {
+        let _ = AssetDatabase::get().load::<A>(self.0);
     }
 }
 

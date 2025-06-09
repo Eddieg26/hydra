@@ -1,5 +1,5 @@
 use crate::{
-    ExtractError, MainRenderPass, ProcessAssets, Renderer, ShaderData,
+    ExtractError, MainRenderPass, MeshData, ProcessAssets, Renderer, Shader,
     app::{
         PostRender, PreRender, Present, Process, ProcessPipelines, Queue, QueueDraws, QueueViews,
         Render, RenderApp,
@@ -18,6 +18,7 @@ use crate::{
 };
 use asset::plugin::AssetAppExt;
 use ecs::{AppBuilder, Extract, Init, Plugin, Run};
+use transform::GlobalTransform;
 use window::plugin::WindowPlugin;
 
 pub struct RenderPlugin;
@@ -204,14 +205,14 @@ impl<V: View> Plugin for ViewPlugin<V> {
     }
 }
 
-struct MeshDataPlugin<S: ShaderData>(std::marker::PhantomData<S>);
-impl<S: ShaderData> MeshDataPlugin<S> {
+struct MeshDataPlugin<S: MeshData>(std::marker::PhantomData<S>);
+impl<S: MeshData> MeshDataPlugin<S> {
     pub fn new() -> Self {
         Self(Default::default())
     }
 }
 
-impl<T: ShaderData> Plugin for MeshDataPlugin<T> {
+impl<T: MeshData> Plugin for MeshDataPlugin<T> {
     fn setup(&mut self, app: &mut AppBuilder) {
         app.scoped_sub_app(RenderApp, |render_app| {
             render_app
@@ -256,6 +257,9 @@ impl<D: Draw> Plugin for DrawPlugin<D> {
             }
         })
         .register::<D>()
+        .register::<GlobalTransform>()
+        .load_asset::<Shader>(D::shader().into())
+        .load_asset::<Shader>(D::Material::shader().into())
         .extract_render_resource::<DrawPipeline<D>>();
     }
 }

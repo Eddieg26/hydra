@@ -75,6 +75,7 @@ pub trait EntityCommand: Send + 'static {
 
 pub type ExecuteCommand = fn(&[u8], &mut World) -> usize;
 
+#[derive(Default)]
 pub struct CommandBuffer {
     buffer: Vec<u8>,
 }
