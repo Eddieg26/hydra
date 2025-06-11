@@ -1,5 +1,6 @@
 use super::{RenderAssetExtractor, RenderResource};
 use crate::{
+    ExtractResource,
     device::RenderDevice,
     resources::{
         Shader,
@@ -8,7 +9,10 @@ use crate::{
     },
 };
 use asset::{Asset, AssetId};
-use ecs::{Resource, system::unlifetime::Read};
+use ecs::{
+    Resource,
+    system::unlifetime::{Read, SCommands},
+};
 use transform::GlobalTransform;
 
 #[derive(
@@ -144,16 +148,24 @@ impl<M: Material> RenderAsset for MaterialBinding<M> {}
 impl<M: Material> RenderAssetExtractor for M {
     type RenderAsset = MaterialBinding<M>;
 
-    type Arg = (Read<RenderDevice>, Option<Read<MaterialLayout<M>>>, M::Arg);
+    type Arg = (
+        Read<RenderDevice>,
+        Option<Read<MaterialLayout<M>>>,
+        SCommands,
+        M::Arg,
+    );
 
     fn extract(
         asset: Self,
         arg: &mut ecs::ArgItem<Self::Arg>,
     ) -> Result<Self::RenderAsset, super::ExtractError<Self>> {
-        let (device, layout, arg) = arg;
+        let (device, layout, commands, arg) = arg;
         let layout = match layout.as_ref() {
             Some(layout) => layout,
-            None => return Err(super::ExtractError::Retry(asset)),
+            None => {
+                commands.add(ExtractResource::<MaterialLayout<M>>::new());
+                return Err(super::ExtractError::Retry(asset));
+            }
         };
 
         let binding = asset

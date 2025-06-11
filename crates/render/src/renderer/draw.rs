@@ -338,6 +338,10 @@ impl<V: View, P: RenderPhase> ViewDrawCalls<V, P> {
     pub fn new() -> Self {
         Self(HashMap::new(), Default::default())
     }
+
+    pub fn iter(&self) -> std::collections::hash_map::Iter<'_, Entity, Vec<DrawCall<V, P>>> {
+        self.0.iter()
+    }
 }
 
 impl<V: View, P: RenderPhase> ViewDrawCalls<V, P> {

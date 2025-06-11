@@ -122,8 +122,7 @@ impl RenderAppExt for AppBuilder {
         self.scoped_sub_app(RenderApp, |render_app| {
             render_app
                 .get_or_insert_resource(RenderGraph::new)
-                .get_sub_graph_mut::<S>()
-                .add_pass(pass);
+                .add_sub_graph_pass::<S, P>(pass);
         })
     }
 

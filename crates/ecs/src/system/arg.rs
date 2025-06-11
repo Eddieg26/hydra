@@ -513,5 +513,25 @@ pub mod unlifetime {
         ) -> Self::Item<'world, 'state> {
             unsafe { StaticArg(S::get(state, world, system)) }
         }
+
+        unsafe fn validate(
+            state: &Self::State,
+            world: crate::world::WorldCell,
+            system: &crate::SystemMeta,
+        ) -> bool {
+            unsafe { S::validate(state, world, system) }
+        }
+
+        fn exclusive() -> bool {
+            S::exclusive()
+        }
+
+        fn send() -> bool {
+            S::send()
+        }
+
+        fn update(state: &mut Self::State, world: &mut crate::World) {
+            S::update(state, world);
+        }
     }
 }

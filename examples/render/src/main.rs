@@ -1,9 +1,15 @@
 use asset::{
-    database::load::LoadError, embed_asset, importer::ImportError, io::EmbeddedFs, plugin::AssetAppExt, Asset, AssetEvent, AssetId, DefaultSettings
+    Asset, AssetEvent, AssetId, DefaultSettings, database::load::LoadError, embed_asset,
+    importer::ImportError, io::EmbeddedFs, plugin::AssetAppExt,
 };
-use ecs::{App, Component, EventReader, Init, Spawner, Start};
+use ecs::{App, Component, Entity, EventReader, Init, Query, Spawner, Start, query::With};
 use render::{
-    plugin::{RenderAppExt, RenderPlugin}, AsBinding, Camera, Color, DepthOutput, Draw, DrawFunctions, GraphResourceId, Material, Mesh, MeshAttribute, MeshAttributeType, MeshAttributeValues, MeshData, MeshTopology, Projection, RenderAssets, RenderMesh, RenderOutput, RenderPassDesc, RenderPhase, RenderState, Renderer, Shader, ShaderSource, ShaderType, View, ViewBuffer, ViewDrawCalls
+    AsBinding, Camera, CameraSubGraph, Color, DepthOutput, Draw, DrawFunctions, GraphResourceId,
+    MainRenderPass, Material, Mesh, MeshAttribute, MeshAttributeType, MeshAttributeValues,
+    MeshData, MeshTopology, Projection, RenderAssets, RenderMesh, RenderOutput, RenderPassDesc,
+    RenderPhase, RenderState, Renderer, Shader, ShaderSource, ShaderType, View, ViewBuffer,
+    ViewDrawCalls,
+    plugin::{RenderAppExt, RenderPlugin},
 };
 use transform::GlobalTransform;
 
@@ -35,13 +41,17 @@ fn main() {
         .add_plugins(RenderPlugin)
         .add_source("embedded", fs)
         .register_draw::<DrawMesh<UnlitColor>>()
-        .set_renderer(BasicRenderer)
+        .add_sub_graph_pass::<CameraSubGraph, MainRenderPass>(MainRenderPass::new(BasicRenderer))
         .add_asset(MAT_ID, UnlitColor::from(Color::red()), None)
         .add_asset(QUAD_ID, quad, None)
         .add_systems(Init, |mut spawner: Spawner| {
             spawner
                 .spawn()
-                .with_component(GlobalTransform::IDENTITY)
+                .with_component(GlobalTransform::new(
+                    math::Vec3::new(0.0, 0.0, -10.0),
+                    math::Quat::IDENTITY,
+                    math::Vec3::ONE,
+                ))
                 .with_component(Camera::default())
                 .with_component(View3d::default())
                 .finish();
@@ -57,7 +67,9 @@ fn main() {
         })
         .add_systems(
             Start,
-            |import_errors: EventReader<ImportError>, load_errors: EventReader<LoadError>, events: EventReader<AssetEvent<ShaderSource>>| {
+            |import_errors: EventReader<ImportError>,
+             load_errors: EventReader<LoadError>,
+             events: EventReader<AssetEvent<ShaderSource>>| {
                 for error in import_errors {
                     println!("Import error: {}", error);
                 }
@@ -69,7 +81,6 @@ fn main() {
                 for event in events {
                     println!("Event: {:?}", event);
                 }
-
             },
         )
         .run();

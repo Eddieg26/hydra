@@ -287,6 +287,7 @@ impl RenderGraphPass for SubGraphPass {
     }
 }
 
+#[derive(Debug)]
 pub struct ResourceInfo {
     id: GraphResourceId,
     ref_count: u32,
@@ -305,6 +306,7 @@ impl From<&ResourceEntry> for ResourceInfo {
     }
 }
 
+#[derive(Debug)]
 pub struct CompiledGraph {
     passes: Vec<usize>,
     resources: Vec<ResourceInfo>,
@@ -315,7 +317,7 @@ pub struct RenderGraph {
     passes: Vec<PassNode>,
     resources: Vec<ResourceNode>,
     entries: IndexMap<TypeId, ResourceEntry>,
-    sub_graphs: HashMap<Name, RenderGraph>,
+    sub_graphs: HashMap<Name, Vec<PassNode>>,
 }
 
 impl RenderGraph {
@@ -342,8 +344,18 @@ impl RenderGraph {
             self.passes[id as usize].has_side_effect = true;
             self.passes[id as usize].name = S::NAME;
 
-            self.sub_graphs.insert(S::NAME, RenderGraph::new());
+            self.sub_graphs.insert(S::NAME, Vec::new());
         }
+    }
+
+    pub fn add_sub_graph_pass<S: SubGraph, P: RenderGraphPass>(&mut self, pass: P) -> NodeId {
+        self.add_sub_graph::<S>();
+
+        let id = self.sub_graphs.get(S::NAME).unwrap().len() as u32;
+        let node = PassBuilder::new(id, P::NAME, self).build::<P>(pass);
+        self.sub_graphs.get_mut(S::NAME).unwrap().push(node);
+
+        id
     }
 
     pub fn import<R: GraphResource>(&mut self, resource: Option<R>) {
@@ -373,15 +385,6 @@ impl RenderGraph {
         }
     }
 
-    pub fn get_sub_graph<S: SubGraph>(&self) -> Option<&RenderGraph> {
-        self.sub_graphs.get(S::NAME)
-    }
-
-    pub fn get_sub_graph_mut<S: SubGraph>(&mut self) -> &mut RenderGraph {
-        self.add_sub_graph::<S>();
-        self.sub_graphs.get_mut(S::NAME).unwrap()
-    }
-
     pub fn get_resource<G: GraphResource>(&self, id: NodeId) -> Option<&G> {
         let node = self.resources.get(id as usize)?;
 
@@ -395,118 +398,9 @@ impl RenderGraph {
         self.entries.get(&TypeId::of::<G>())
     }
 
-    fn compile(&self) -> CompiledGraph {
-        let mut passes = self
-            .passes
-            .iter()
-            .map(|p| p.writes.len())
-            .collect::<Vec<_>>();
-
-        let mut resources = self
-            .entries
-            .values()
-            .map(ResourceInfo::from)
-            .collect::<Vec<_>>();
-
-        for pass in &self.passes {
-            for id in &pass.reads {
-                let resource = self.resources[*id as usize].resource;
-                resources[resource as usize].ref_count += 1;
-            }
-
-            for id in &pass.writes {
-                let resource = self.resources[*id as usize].resource;
-                resources[resource as usize].creator = Some(pass.id);
-            }
-        }
-
-        let mut unreferenced = resources
-            .iter()
-            .enumerate()
-            .filter_map(|(id, info)| (info.ref_count == 0).then_some(id as u32))
-            .collect::<Vec<_>>();
-
-        while let Some(id) = unreferenced.pop() {
-            let Some(pass) = resources[id as usize].creator else {
-                continue;
-            };
-
-            if self.passes[pass as usize].has_side_effect {
-                continue;
-            }
-
-            assert!(passes[pass as usize] >= 1);
-            passes[pass as usize] -= 1;
-            if passes[pass as usize] == 0 {
-                for id in &self.passes[pass as usize].reads {
-                    resources[*id as usize].ref_count -= 1;
-                    if resources[*id as usize].ref_count == 0 {
-                        unreferenced.push(*id);
-                    }
-                }
-            }
-        }
-
-        let queue = passes.iter().enumerate().filter_map(|(pass, ref_count)| {
-            if *ref_count == 0 && !self.passes[pass].has_side_effect {
-                return None;
-            }
-
-            for id in &self.passes[pass].creates {
-                let resource = self.resources[*id as usize].resource;
-                resources[resource as usize].creator = Some(self.passes[pass].id);
-            }
-
-            for id in &self.passes[pass].reads {
-                let resource = self.resources[*id as usize].resource;
-                resources[resource as usize].last_pass = Some(self.passes[pass].id);
-            }
-
-            for id in &self.passes[pass].writes {
-                let resource = self.resources[*id as usize].resource;
-                resources[resource as usize].last_pass = Some(self.passes[pass].id);
-            }
-
-            Some(pass)
-        });
-
-        CompiledGraph {
-            passes: queue.collect(),
-            resources,
-        }
-    }
-
     pub fn run(&mut self, world: &World, device: &RenderDevice, surface: &RenderSurface) {
-        let mut compiled = self.compile();
-
-        for pass in &compiled.passes {
-            for id in self.passes[*pass].creates.iter().copied() {
-                let resource = self.resources[id as usize].resource;
-                let entry = &mut self.entries[resource as usize];
-                if entry.ty == ResourceType::Transient {
-                    entry.create(device, surface);
-                }
-            }
-
-            {
-                let mut sub_graphs = std::mem::take(&mut self.sub_graphs);
-                let mut ctx = RenderContext::new(self, &mut sub_graphs, world, device, surface);
-
-                self.passes[*pass].execute(&mut ctx);
-
-                device.queue.submit(ctx.finish());
-
-                self.sub_graphs = sub_graphs;
-            }
-
-            compiled.resources.iter_mut().for_each(|info| {
-                let destroy = info.last_pass == Some(self.passes[*pass].id)
-                    && self.entries[info.id as usize].ty == ResourceType::Transient;
-                if destroy {
-                    self.entries[info.id as usize].destroy();
-                }
-            });
-        }
+        let mut ctx = RenderContext::new(self, world, device, surface);
+        ctx.run();
     }
 
     pub(crate) fn run_graph(
@@ -534,8 +428,7 @@ impl RenderGraph {
 
 pub struct RenderContext<'a> {
     camera: Option<EntityCamera>,
-    graph: &'a RenderGraph,
-    sub_graphs: &'a mut HashMap<Name, RenderGraph>,
+    graph: &'a mut RenderGraph,
     world: &'a World,
     device: &'a RenderDevice,
     surface: &'a RenderSurface,
@@ -545,8 +438,7 @@ pub struct RenderContext<'a> {
 
 impl<'a> RenderContext<'a> {
     pub fn new(
-        graph: &'a RenderGraph,
-        sub_graphs: &'a mut HashMap<Name, RenderGraph>,
+        graph: &'a mut RenderGraph,
         world: &'a World,
         device: &'a RenderDevice,
         surface: &'a RenderSurface,
@@ -554,7 +446,6 @@ impl<'a> RenderContext<'a> {
         Self {
             camera: None,
             graph,
-            sub_graphs,
             world,
             device,
             surface,
@@ -612,8 +503,120 @@ impl<'a> RenderContext<'a> {
     }
 
     pub(crate) fn run_sub_graph(&mut self, name: Name) {
-        if let Some(graph) = self.sub_graphs.get_mut(name) {
-            graph.run(self.world, self.device, self.surface);
+        if let Some(passes) = self.graph.sub_graphs.remove(name) {
+            self.run_passes(&passes);
+            self.graph.sub_graphs.insert(name, passes);
+        }
+    }
+
+    fn run(&mut self) {
+        let passes = std::mem::take(&mut self.graph.passes);
+        self.run_passes(&passes);
+        self.graph.passes = passes;
+    }
+
+    fn run_passes(&mut self, passes: &[PassNode]) {
+        let mut compiled = self.compile(passes);
+
+        for pass in &compiled.passes {
+            for id in passes[*pass].creates.iter().copied() {
+                let resource = self.graph.resources[id as usize].resource;
+                let entry = &mut self.graph.entries[resource as usize];
+                if entry.ty == ResourceType::Transient {
+                    entry.create(&self.device, &self.surface);
+                }
+            }
+
+            {
+                passes[*pass].execute(self);
+
+                self.device.queue.submit(self.buffers.drain(..));
+            }
+
+            compiled.resources.iter_mut().for_each(|info| {
+                let destroy = info.last_pass == Some(passes[*pass].id)
+                    && self.graph.entries[info.id as usize].ty == ResourceType::Transient;
+                if destroy {
+                    self.graph.entries[info.id as usize].destroy();
+                }
+            });
+        }
+    }
+
+    fn compile(&self, nodes: &[PassNode]) -> CompiledGraph {
+        let mut passes = nodes.iter().map(|p| p.writes.len()).collect::<Vec<_>>();
+        let mut resources = self
+            .graph
+            .entries
+            .values()
+            .map(ResourceInfo::from)
+            .collect::<Vec<_>>();
+
+        for pass in nodes {
+            for id in &pass.reads {
+                let resource = self.graph.resources[*id as usize].resource;
+                resources[resource as usize].ref_count += 1;
+            }
+
+            for id in &pass.writes {
+                let resource = self.graph.resources[*id as usize].resource;
+                resources[resource as usize].creator = Some(pass.id);
+            }
+        }
+
+        let mut unreferenced = resources
+            .iter()
+            .enumerate()
+            .filter_map(|(id, info)| (info.ref_count == 0).then_some(id as u32))
+            .collect::<Vec<_>>();
+
+        while let Some(id) = unreferenced.pop() {
+            let Some(pass) = resources[id as usize].creator else {
+                continue;
+            };
+
+            if nodes[pass as usize].has_side_effect {
+                continue;
+            }
+
+            assert!(passes[pass as usize] >= 1);
+            passes[pass as usize] -= 1;
+            if passes[pass as usize] == 0 {
+                for id in &nodes[pass as usize].reads {
+                    resources[*id as usize].ref_count -= 1;
+                    if resources[*id as usize].ref_count == 0 {
+                        unreferenced.push(*id);
+                    }
+                }
+            }
+        }
+
+        let queue = passes.iter().enumerate().filter_map(|(pass, ref_count)| {
+            if *ref_count == 0 && !nodes[pass].has_side_effect {
+                return None;
+            }
+
+            for id in &nodes[pass].creates {
+                let resource = self.graph.resources[*id as usize].resource;
+                resources[resource as usize].creator = Some(nodes[pass].id);
+            }
+
+            for id in &nodes[pass].reads {
+                let resource = self.graph.resources[*id as usize].resource;
+                resources[resource as usize].last_pass = Some(nodes[pass].id);
+            }
+
+            for id in &nodes[pass].writes {
+                let resource = self.graph.resources[*id as usize].resource;
+                resources[resource as usize].last_pass = Some(nodes[pass].id);
+            }
+
+            Some(pass)
+        });
+
+        CompiledGraph {
+            passes: queue.collect(),
+            resources,
         }
     }
 }

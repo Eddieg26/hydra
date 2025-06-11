@@ -277,4 +277,8 @@ impl RenderAssetExtractor for ShaderSource {
     ) -> Result<Self::RenderAsset, super::ExtractError<Self>> {
         Ok(Shader::new(device, asset))
     }
+
+    fn usage(_: &Self) -> super::AssetUsage {
+        super::AssetUsage::Discard
+    }
 }
