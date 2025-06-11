@@ -1,14 +1,9 @@
 use asset::{
-    Asset, AssetId, DefaultSettings, embed_asset, importer::ImportError, io::EmbeddedFs,
-    plugin::AssetAppExt,
+    database::load::LoadError, embed_asset, importer::ImportError, io::EmbeddedFs, plugin::AssetAppExt, Asset, AssetEvent, AssetId, DefaultSettings
 };
 use ecs::{App, Component, EventReader, Init, Spawner, Start};
 use render::{
-    AsBinding, Camera, Color, DepthOutput, Draw, DrawFunctions, GraphResourceId, Material, Mesh,
-    MeshAttribute, MeshAttributeType, MeshAttributeValues, MeshData, MeshTopology, Projection,
-    RenderAssets, RenderMesh, RenderOutput, RenderPassDesc, RenderPhase, RenderState, Renderer,
-    Shader, ShaderType, View, ViewBuffer, ViewDrawCalls,
-    plugin::{RenderAppExt, RenderPlugin},
+    plugin::{RenderAppExt, RenderPlugin}, AsBinding, Camera, Color, DepthOutput, Draw, DrawFunctions, GraphResourceId, Material, Mesh, MeshAttribute, MeshAttributeType, MeshAttributeValues, MeshData, MeshTopology, Projection, RenderAssets, RenderMesh, RenderOutput, RenderPassDesc, RenderPhase, RenderState, Renderer, Shader, ShaderSource, ShaderType, View, ViewBuffer, ViewDrawCalls
 };
 use transform::GlobalTransform;
 
@@ -60,11 +55,23 @@ fn main() {
                 })
                 .finish();
         })
-        .add_systems(Start, |events: EventReader<ImportError>| {
-            for event in events {
-                println!("Import error: {}", event);
-            }
-        })
+        .add_systems(
+            Start,
+            |import_errors: EventReader<ImportError>, load_errors: EventReader<LoadError>, events: EventReader<AssetEvent<ShaderSource>>| {
+                for error in import_errors {
+                    println!("Import error: {}", error);
+                }
+
+                for error in load_errors {
+                    println!("Load error: {}", error);
+                }
+
+                for event in events {
+                    println!("Event: {:?}", event);
+                }
+
+            },
+        )
         .run();
 }
 

@@ -429,6 +429,14 @@ impl AssetCache {
         }
     }
 
+    pub async fn create_artifacts_path(&self) -> Result<(), AssetIoError> {
+        if !self.fs.exists(&self.artifacts).await? {
+            self.fs.create_dir_all(&self.artifacts).await
+        } else {
+            Ok(())
+        }
+    }
+
     pub async fn create_temp(&self) -> Result<(), AssetIoError> {
         if !self.fs.exists(&self.temp).await? {
             self.fs.create_dir_all(&self.temp).await
@@ -439,7 +447,7 @@ impl AssetCache {
 
     pub async fn delete_temp(&self) -> Result<(), AssetIoError> {
         if self.fs.exists(&self.temp).await? {
-            self.fs.create_dir_all(&self.temp).await
+            self.fs.remove_dir(&self.temp).await
         } else {
             Ok(())
         }

@@ -419,7 +419,7 @@ impl<A: Asset> Assets<A> {
 
 pub struct Test;
 
-#[derive(Event)]
+#[derive(Debug, Event)]
 /// Event representing changes to an [`Asset`] in the [`AssetDatabase`].
 pub enum AssetEvent<A: Asset> {
     /// An asset was added, modified, removed, or loaded.

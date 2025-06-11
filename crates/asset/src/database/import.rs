@@ -23,10 +23,10 @@ use std::{
     ops::Deref,
 };
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct ImportInfo {
-    imported: Vec<AssetPath<'static>>,
-    removed: Vec<AssetPath<'static>>,
+    pub imported: Vec<AssetPath<'static>>,
+    pub removed: Vec<AssetPath<'static>>,
 }
 
 impl ImportInfo {
@@ -109,6 +109,12 @@ impl AssetDatabase {
             return;
         }
 
+        if let Err(error) = self.config.cache().create_artifacts_path().await {
+            self.send_event(DatabaseEvent::ImportError(ImportError::Unknown(error)))
+                .await;
+            return;
+        }
+
         if let Err(error) = self.config.cache().create_temp().await {
             self.send_event(DatabaseEvent::ImportError(ImportError::Unknown(error)))
                 .await;
@@ -145,13 +151,15 @@ impl AssetDatabase {
         }
 
         let _ = self.config.cache().delete_temp().await;
+
         let _ = self
             .config
             .cache()
-            .save_library(self.library.read().await.deref());
+            .save_library(self.library.read().await.deref())
+            .await;
     }
 
-    async fn import_source<'a>(
+    pub async fn import_source<'a>(
         &'a self,
         name: &'a SourceName<'a>,
         source: &'a AssetSource,
@@ -294,12 +302,12 @@ impl AssetDatabase {
         Ok(None)
     }
 
-    async fn import_assets<'a>(
+    pub async fn import_assets<'a>(
         &'a self,
         paths: Vec<AssetPath<'static>>,
         library: &'a mut AssetLibrary,
     ) -> ImmutableIndexDag<ErasedId> {
-        let mut graph = IndexDag::new();
+        let mut process_list = IndexDag::new();
         let mut node_map = HashMap::new();
 
         for path in paths {
@@ -353,14 +361,14 @@ impl AssetDatabase {
 
                 let node = *node_map
                     .entry(artifact.id())
-                    .or_insert_with(|| graph.add_node(artifact.id()));
+                    .or_insert_with(|| process_list.add_node(artifact.id()));
 
                 for dependency in &artifact.meta().dependencies {
                     let dependency = *node_map
                         .entry(*dependency)
-                        .or_insert_with(|| graph.add_node(*dependency));
+                        .or_insert_with(|| process_list.add_node(*dependency));
 
-                    graph.add_dependency(dependency, node);
+                    process_list.add_dependency(dependency, node);
                 }
 
                 let id = artifact.id();
@@ -369,13 +377,13 @@ impl AssetDatabase {
             }
         }
 
-        let _ = graph.build();
+        let _ = process_list.build();
 
-        graph.into_immutable()
+        process_list.into_immutable()
     }
 
-    async fn process_assets<'a>(&'a self, graph: ImmutableIndexDag<ErasedId>) {
-        for id in graph.iter().copied() {
+    pub async fn process_assets<'a>(&'a self, process_list: ImmutableIndexDag<ErasedId>) {
+        for id in process_list.iter().copied() {
             let mut artifact = match self.config.cache().get_temp_artifact(id).await {
                 Ok(artifact) => artifact,
                 Err(error) => {

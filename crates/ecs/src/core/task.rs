@@ -10,6 +10,8 @@ use std::{
     thread::JoinHandle,
 };
 
+pub use smol::block_on;
+
 pub fn available_parallelism() -> NonZeroUsize {
     std::thread::available_parallelism().unwrap_or(NonZeroUsize::new(1).unwrap())
 }
@@ -129,7 +131,7 @@ impl TaskPool {
                                     }
                                 };
 
-                                smol::block_on(runner.or(receiver.recv()))
+                                block_on(runner.or(receiver.recv()))
                             });
 
                             if let Ok(result) = result {
@@ -218,7 +220,7 @@ impl TaskPool {
             values
         };
 
-        smol::block_on(async {
+        block_on(async {
             let result = async {
                 loop {
                     let runner = async {
