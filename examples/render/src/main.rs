@@ -57,7 +57,7 @@ fn main() {
             spawner
                 .spawn()
                 .with_component(GlobalTransform::new(
-                    math::Vec3::new(-0.5, 0.0, 0.0),
+                    math::Vec3::new(0.0, 0.0, 0.0),
                     math::Quat::IDENTITY,
                     math::Vec3::new(1.0, 1.0, 1.0),
                 ))
@@ -68,9 +68,9 @@ fn main() {
                 .finish();
 
             let transform = GlobalTransform::new(
-                math::Vec3::new(1.0, 0.0, -1.0),
+                math::Vec3::new(1.0, 0.0, 0.0),
                 math::Quat::IDENTITY,
-                math::Vec3::new(0.5, 0.5, 0.5),
+                math::Vec3::new(1.0, 1.0, 1.0),
             );
 
             spawner
