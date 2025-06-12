@@ -78,7 +78,6 @@ impl Plugin for RenderPlugin {
         for config in configs {
             app.add_systems(Extract, config.extract);
             app.add_systems(ProcessAssets, config.process);
-            app.add_systems(PostRender, config.clear);
         }
     }
 }
@@ -138,12 +137,14 @@ impl RenderAppExt for AppBuilder {
             app.add_resource(ExtractInfo::<R>::new());
         }
 
+        self.register_event::<ExtractError<R>>();
         self.register_asset::<R>()
     }
 
     fn extract_render_resource<R: RenderResource>(&mut self) -> &mut Self {
         self.get_or_insert_resource(|| ResourceExtractors::default())
             .add::<R>();
+        self.register_event::<ExtractError<R>>();
         self
     }
 }

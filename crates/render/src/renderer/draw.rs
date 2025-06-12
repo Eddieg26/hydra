@@ -1,5 +1,5 @@
 use crate::{
-    RenderItem,
+    ExtractResource, RenderItem,
     device::RenderDevice,
     renderer::{Camera, RenderContext, RenderState},
     resources::{
@@ -14,7 +14,6 @@ use asset::{AssetId, ErasedId};
 use ecs::{
     Component, Entity, IndexMap, Resource, SystemArg,
     app::Main,
-    commands::AddResource,
     query::With,
     system::unlifetime::{Read, SCommands, SQuery, Write},
 };
@@ -339,6 +338,10 @@ impl<V: View, P: RenderPhase> ViewDrawCalls<V, P> {
         Self(HashMap::new(), Default::default())
     }
 
+    pub fn get(&self, entity: &Entity) -> Option<&Vec<DrawCall<V, P>>> {
+        self.0.get(entity)
+    }
+
     pub fn iter(&self) -> std::collections::hash_map::Iter<'_, Entity, Vec<DrawCall<V, P>>> {
         self.0.iter()
     }
@@ -457,7 +460,6 @@ impl<D: Draw> std::ops::Deref for DrawPipeline<D> {
 impl<D: Draw> RenderResource for DrawPipeline<D> {
     type Arg = (
         Write<PipelineCache>,
-        Read<RenderDevice>,
         Read<RenderSurface>,
         Option<Read<ViewBuffer<D::View>>>,
         Option<Write<MaterialLayout<D::Material>>>,
@@ -465,7 +467,7 @@ impl<D: Draw> RenderResource for DrawPipeline<D> {
     );
 
     fn extract(arg: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::resources::ExtractError<()>> {
-        let (cache, device, surface, views, layout, mut commands) = arg;
+        let (cache, surface, views, layout, mut commands) = arg;
 
         let Some(views) = views else {
             return Err(crate::resources::ExtractError::Retry(()));
@@ -474,10 +476,8 @@ impl<D: Draw> RenderResource for DrawPipeline<D> {
         let layout = match layout {
             Some(layout) => layout.clone(),
             None => {
-                let layout = MaterialLayout::<D::Material>::new(&device);
-                commands.add(AddResource::from(layout.clone()));
-
-                layout
+                commands.add(ExtractResource::<MaterialLayout<D::Material>>::new());
+                return Err(crate::resources::ExtractError::Retry(()));
             }
         };
 

@@ -2,7 +2,7 @@ use asset::{
     Asset, AssetEvent, AssetId, DefaultSettings, database::load::LoadError, embed_asset,
     importer::ImportError, io::EmbeddedFs, plugin::AssetAppExt,
 };
-use ecs::{App, Component, Entity, EventReader, Init, Query, Spawner, Start, query::With};
+use ecs::{App, Component, EventReader, Init, Spawner, Start};
 use render::{
     AsBinding, Camera, CameraSubGraph, Color, DepthOutput, Draw, DrawFunctions, GraphResourceId,
     MainRenderPass, Material, Mesh, MeshAttribute, MeshAttributeType, MeshAttributeValues,
@@ -15,7 +15,8 @@ use transform::GlobalTransform;
 
 const VERT_ID: AssetId<Shader> = AssetId::from_u128(0xabcdef0123456789);
 const FRAG_ID: AssetId<Shader> = AssetId::from_u128(0x123456789abcdef0);
-const MAT_ID: AssetId<UnlitColor> = AssetId::from_u128(0xdeadbeef12345678);
+const RED_MAT: AssetId<UnlitColor> = AssetId::from_u128(0xdeadbeef12345678);
+const BLUE_MAT: AssetId<UnlitColor> = AssetId::from_u128(0x87654321fedcba98);
 const QUAD_ID: AssetId<Mesh> = AssetId::from_u128(0xfeedface87654321);
 
 const QUAD: &[math::Vec2] = &[
@@ -42,25 +43,41 @@ fn main() {
         .add_source("embedded", fs)
         .register_draw::<DrawMesh<UnlitColor>>()
         .add_sub_graph_pass::<CameraSubGraph, MainRenderPass>(MainRenderPass::new(BasicRenderer))
-        .add_asset(MAT_ID, UnlitColor::from(Color::red()), None)
+        .add_asset(RED_MAT, UnlitColor::from(Color::red()), None)
+        .add_asset(BLUE_MAT, UnlitColor::from(Color::blue()), None)
         .add_asset(QUAD_ID, quad, None)
         .add_systems(Init, |mut spawner: Spawner| {
             spawner
                 .spawn()
-                .with_component(GlobalTransform::new(
-                    math::Vec3::new(0.0, 0.0, -10.0),
-                    math::Quat::IDENTITY,
-                    math::Vec3::ONE,
-                ))
+                .with_component(GlobalTransform::with_translation(math::Vec3::Z * 1.0))
                 .with_component(Camera::default())
                 .with_component(View3d::default())
                 .finish();
 
             spawner
                 .spawn()
-                .with_component(GlobalTransform::IDENTITY)
+                .with_component(GlobalTransform::new(
+                    math::Vec3::new(-0.5, 0.0, 0.0),
+                    math::Quat::IDENTITY,
+                    math::Vec3::new(1.0, 1.0, 1.0),
+                ))
                 .with_component(DrawMesh::<UnlitColor> {
-                    material: MAT_ID,
+                    material: RED_MAT,
+                    mesh: QUAD_ID,
+                })
+                .finish();
+
+            let transform = GlobalTransform::new(
+                math::Vec3::new(1.0, 0.0, -1.0),
+                math::Quat::IDENTITY,
+                math::Vec3::new(0.5, 0.5, 0.5),
+            );
+
+            spawner
+                .spawn()
+                .with_component(transform)
+                .with_component(DrawMesh::<UnlitColor> {
+                    material: BLUE_MAT,
                     mesh: QUAD_ID,
                 })
                 .finish();
@@ -144,13 +161,28 @@ pub struct View3d {
     projection: Projection,
 }
 
+impl View3d {
+    fn orthographic() -> Self {
+        Self {
+            projection: Projection::Orthographic {
+                left: -1.0,
+                right: 1.0,
+                bottom: -1.0,
+                top: 1.0,
+                near: 0.01,
+                far: 100.0,
+            },
+        }
+    }
+}
+
 impl Default for View3d {
     fn default() -> Self {
         Self {
             projection: Projection::Perspective {
-                fov: 1.0,
+                fov: 60.0f32.to_radians(),
                 aspect_ratio: 1.0,
-                near: 0.1,
+                near: 0.01,
                 far: 100.0,
             },
         }

@@ -26,12 +26,16 @@ pub struct GlobalTransform(Affine3A);
 impl GlobalTransform {
     pub const IDENTITY: Self = GlobalTransform(Affine3A::IDENTITY);
 
-    pub fn new(translation: Vec3, rotation: math::Quat, scale: Vec3) -> Self {
+    pub fn new(translation: Vec3, rotation: Quat, scale: Vec3) -> Self {
         GlobalTransform(Affine3A::from_scale_rotation_translation(
             scale,
             rotation,
             translation,
         ))
+    }
+
+    pub fn with_translation(translation: Vec3) -> Self {
+        Self::new(translation, Quat::IDENTITY, Vec3::ONE)
     }
 
     pub fn from_affine(affine: Affine3A) -> Self {

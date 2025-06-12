@@ -27,6 +27,6 @@ fn main(input: VertexInput) -> VertexOutput {
         input.object_2,
         input.object_3
     );
-    output.position = camera.projection * camera.view * camera.world * object * vec4<f32>(input.position, 0.0, 1.0);
+    output.position = camera.projection * camera.view * object * vec4<f32>(input.position, -1.0, 1.0);
     return output;
 }

@@ -157,7 +157,6 @@ pub struct AssetExtractorConfig {
     pub ty: RenderAssetType,
     pub extract: SystemConfig,
     pub process: SystemConfig,
-    pub clear: SystemConfig,
 }
 
 #[derive(Default, Resource)]
@@ -179,7 +178,6 @@ impl AssetExtractors {
             ty: render_asset_type,
             extract: Self::extractor::<R>.config(),
             process: Self::process::<R>.config(),
-            clear: (|info: &mut ExtractInfo<R>| info.removed.clear()).config(),
         };
 
         for dep in R::dependencies() {
@@ -229,15 +227,15 @@ impl AssetExtractors {
         arg: StaticArg<R::Arg>,
     ) {
         let mut arg = arg.into_inner();
-        let mut extract = vec![];
+        let extract = std::mem::take(&mut extract_info.extracted);
 
-        for (id, asset) in extract_info.extracted.drain(..) {
+        for (id, asset) in extract {
             match R::extract(asset, &mut arg) {
                 Ok(render_asset) => {
                     assets.add(id.into(), render_asset);
                 }
                 Err(ExtractError::Retry(asset)) => {
-                    extract.push((id, asset));
+                    extract_info.extracted.push((id, asset));
                 }
                 Err(ExtractError::Error(error)) => {
                     errors.send(ExtractError::Error(error));
@@ -246,8 +244,7 @@ impl AssetExtractors {
         }
 
         assets.retain(|id, _| !extract_info.removed.contains(&id));
-
-        extract_info.extracted = extract;
+        extract_info.removed.clear();
     }
 
     pub fn build(self) -> Vec<AssetExtractorConfig> {
@@ -325,7 +322,8 @@ impl ResourceExtractors {
             Ok(resource) => {
                 world.add_resource(resource);
             }
-            Err(error) => world.send(error),
+            Err(ExtractError::Retry(_)) => world.resource_mut::<Self>().add::<R>(),
+            Err(ExtractError::Error(error)) => world.send(ExtractError::<R>::Error(error)),
         }
     }
 }
