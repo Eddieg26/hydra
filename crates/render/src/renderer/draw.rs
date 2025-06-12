@@ -123,7 +123,12 @@ impl<T: MeshData> RenderResource for MeshDataBuffer<T> {
 pub trait View: Component + Clone + 'static {
     type Data: ShaderData;
 
-    fn data(&self, transform: &GlobalTransform) -> Self::Data;
+    fn data(
+        &self,
+        screen_width: u32,
+        screen_height: u32,
+        transform: &GlobalTransform,
+    ) -> Self::Data;
 }
 
 pub struct ExtractedView<V: View> {
@@ -144,10 +149,11 @@ impl<V: View> ExtractedViews<V> {
 impl<V: View> ExtractedViews<V> {
     pub(crate) fn extract(
         cameras: Main<SQuery<(Entity, &GlobalTransform, &V), With<Camera>>>,
+        surface: &RenderSurface,
         views: &mut ExtractedViews<V>,
     ) {
         for (entity, transform, view) in cameras.iter() {
-            let data = view.data(transform);
+            let data = view.data(surface.width(), surface.height(), transform);
             views.0.push(ExtractedView {
                 entity,
                 view: view.clone(),

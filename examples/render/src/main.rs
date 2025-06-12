@@ -51,7 +51,7 @@ fn main() {
                 .spawn()
                 .with_component(GlobalTransform::with_translation(math::Vec3::Z * 1.0))
                 .with_component(Camera::default())
-                .with_component(View3d::default())
+                .with_component(View3d::orthographic())
                 .finish();
 
             spawner
@@ -165,12 +165,9 @@ impl View3d {
     fn orthographic() -> Self {
         Self {
             projection: Projection::Orthographic {
-                left: -1.0,
-                right: 1.0,
-                bottom: -1.0,
-                top: 1.0,
                 near: 0.01,
                 far: 100.0,
+                size: 1.0,
             },
         }
     }
@@ -181,7 +178,6 @@ impl Default for View3d {
         Self {
             projection: Projection::Perspective {
                 fov: 60.0f32.to_radians(),
-                aspect_ratio: 1.0,
                 near: 0.01,
                 far: 100.0,
             },
@@ -192,22 +188,17 @@ impl Default for View3d {
 impl View for View3d {
     type Data = View3dData;
 
-    fn data(&self, transform: &GlobalTransform) -> Self::Data {
+    fn data(&self, width: u32, height: u32, transform: &GlobalTransform) -> Self::Data {
         let projection = match self.projection {
-            Projection::Orthographic {
-                left,
-                right,
-                bottom,
-                top,
-                near,
-                far,
-            } => math::Mat4::orthographic_rh(left, right, bottom, top, near, far),
-            Projection::Perspective {
-                fov,
-                aspect_ratio,
-                near,
-                ..
-            } => math::Mat4::perspective_infinite_reverse_rh(fov, aspect_ratio, near),
+            Projection::Orthographic { near, far, size } => {
+                let aspect_ratio = width as f32 / height as f32;
+                let width = size * aspect_ratio;
+                math::Mat4::orthographic_rh(-width, width, -size, size, near, far)
+            }
+            Projection::Perspective { fov, near, .. } => {
+                let aspect_ratio = width as f32 / height as f32;
+                math::Mat4::perspective_infinite_reverse_rh(fov, aspect_ratio, near)
+            }
         };
 
         let world = transform.matrix();

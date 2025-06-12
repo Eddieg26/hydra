@@ -9,16 +9,12 @@ use ecs::{Component, Entity, Resource, app::Main, system::unlifetime::SQuery};
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Projection {
     Orthographic {
-        left: f32,
-        right: f32,
-        bottom: f32,
-        top: f32,
         near: f32,
         far: f32,
+        size: f32,
     },
     Perspective {
         fov: f32, // in radians
-        aspect_ratio: f32,
         near: f32,
         far: f32,
     },
