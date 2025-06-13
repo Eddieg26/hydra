@@ -300,7 +300,7 @@ impl GpuTexture {
         let block_size = format.block_copy_size(None).unwrap_or(0);
         for (layer, range) in texture.layers.iter().enumerate() {
             device.queue.write_texture(
-                wgpu::ImageCopyTexture {
+                wgpu::TexelCopyTextureInfo {
                     texture: &created,
                     mip_level: 0,
                     origin: wgpu::Origin3d {
@@ -311,7 +311,7 @@ impl GpuTexture {
                     aspect: TextureAspect::All,
                 },
                 &texture.pixels[range.clone()],
-                wgpu::ImageDataLayout {
+                wgpu::TexelCopyBufferLayout {
                     bytes_per_row: Some(block_size * size.width),
                     rows_per_image: Some(block_size * size.width / size.height),
                     offset: 0,
