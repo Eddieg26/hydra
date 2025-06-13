@@ -80,21 +80,17 @@ impl RenderSurface {
 
         let depth_format = Self::DEPTH_FORMAT;
 
-        let present_mode = capabilities
-            .present_modes
-            .iter()
-            .find(|mode| **mode == PresentMode::Mailbox)
-            .cloned()
-            .unwrap_or_default();
-
-        let alpha_mode = capabilities.alpha_modes[0];
+        let present_mode = match capabilities.present_modes.contains(&PresentMode::Mailbox) {
+            true => PresentMode::Mailbox,
+            false => PresentMode::Fifo,
+        };
 
         let config = wgpu::SurfaceConfiguration {
             usage: capabilities.usages - wgpu::TextureUsages::STORAGE_BINDING,
             format,
             width: size.width,
             height: size.height,
-            present_mode: wgpu::PresentMode::AutoVsync,
+            present_mode,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![format.add_srgb_suffix()],
             desired_maximum_frame_latency: 2,
