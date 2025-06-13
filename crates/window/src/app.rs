@@ -78,21 +78,18 @@ impl WindowApp {
 
 impl ApplicationHandler for WindowApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let world = self.apps.world_mut();
-        let has_window = world.try_non_send_resource::<Window>().is_some();
+        let has_window = self.apps.world().try_resource::<Window>().is_some();
+
         if !has_window {
+            let world = self.apps.world_mut();
             let config = world.remove_resource::<WindowConfig>().unwrap_or_default();
             let window = Window::new(config, event_loop);
             let id = window.id();
-            world.add_non_send_resource(window);
+            world.add_resource(window);
             world.send(WindowCreated::new(id));
             self.start();
-        }
-    }
-
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if let Some(ext) = self.update() {
-            println!("Application exit: {}", ext);
+        } else if let Some(exit) = self.update() {
+            println!("Application exit: {}", exit);
             event_loop.exit();
         }
     }
@@ -102,6 +99,15 @@ impl ApplicationHandler for WindowApp {
             WindowEvent::CloseRequested => {
                 self.run_event(WindowClosed::new(window));
                 event_loop.exit();
+            }
+            WindowEvent::RedrawRequested => {
+                if let Some(exit) = self.update() {
+                    println!("Application exit: {}", exit);
+                    event_loop.exit();
+                } else {
+                    let app = self.apps.world().resource::<Window>();
+                    app.inner().request_redraw();
+                }
             }
             WindowEvent::Destroyed => self.run_event(WindowDestroyed::new(window)),
             WindowEvent::Resized(size) => self.run_event(WindowResized::new(size)),

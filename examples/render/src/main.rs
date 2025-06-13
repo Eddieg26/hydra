@@ -53,7 +53,6 @@ fn main() {
                 .with_component(Camera::default())
                 .with_component(View3d::orthographic())
                 .finish();
-
             spawner
                 .spawn()
                 .with_component(GlobalTransform::new(
@@ -66,13 +65,11 @@ fn main() {
                     mesh: QUAD_ID,
                 })
                 .finish();
-
             let transform = GlobalTransform::new(
                 math::Vec3::new(1.0, 0.0, 0.0),
                 math::Quat::IDENTITY,
                 math::Vec3::new(1.0, 1.0, 1.0),
             );
-
             spawner
                 .spawn()
                 .with_component(transform)
@@ -90,11 +87,9 @@ fn main() {
                 for error in import_errors {
                     println!("Import error: {}", error);
                 }
-
                 for error in load_errors {
                     println!("Load error: {}", error);
                 }
-
                 for event in events {
                     println!("Event: {:?}", event);
                 }
@@ -280,7 +275,7 @@ impl Renderer for BasicRenderer {
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: depth,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(f32::MAX),
+                    load: wgpu::LoadOp::Clear(1.0f32),
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,

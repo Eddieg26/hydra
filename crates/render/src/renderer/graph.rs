@@ -757,11 +757,7 @@ impl<R: Renderer> ErasedRenderer for R {
             occlusion_query_set: None,
         };
 
-        {
-            let mut pass = encoder.begin_render_pass(&desc);
-
-            Self::render(ctx, RenderState::new(&mut pass));
-        }
+        Self::render(ctx, RenderState::new(encoder.begin_render_pass(&desc)));
 
         ctx.submit(encoder.finish());
     }

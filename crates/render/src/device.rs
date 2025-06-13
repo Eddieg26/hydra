@@ -11,7 +11,7 @@ pub struct RenderDevice {
 impl RenderDevice {
     pub async fn new(adapter: &Adapter) -> Result<Self, RequestDeviceError> {
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor::default(), None)
+            .request_device(&wgpu::DeviceDescriptor::default())
             .await?;
 
         Ok(Self {

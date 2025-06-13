@@ -9,7 +9,7 @@ use std::{collections::HashMap, ops::Range};
 use wgpu::{IndexFormat, QuerySet, RenderBundle, ShaderStages};
 
 pub struct RenderState<'a> {
-    pass: &'a mut wgpu::RenderPass<'a>,
+    pass: wgpu::RenderPass<'a>,
     vertex_buffers: HashMap<u32, BufferSliceId>,
     index_buffer: Option<BufferSliceId>,
     bind_groups: HashMap<u32, (BindGroupId, Vec<u32>)>,
@@ -17,7 +17,7 @@ pub struct RenderState<'a> {
 }
 
 impl<'a> RenderState<'a> {
-    pub fn new(pass: &'a mut wgpu::RenderPass<'a>) -> Self {
+    pub fn new(pass: wgpu::RenderPass<'a>) -> Self {
         Self {
             pass,
             vertex_buffers: HashMap::new(),

@@ -208,7 +208,6 @@ impl Resources {
     pub fn remove<R: Resource>(&mut self, frame: Frame) -> Option<R> {
         let data = self.remove_by_id(self.get_id::<R>()?, frame)?;
         let resource = unsafe { std::ptr::read(data.as_ptr() as *const R) };
-        std::mem::forget(data); // Prevent double free
 
         return Some(resource);
     }

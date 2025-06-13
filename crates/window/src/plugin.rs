@@ -39,7 +39,7 @@ impl Plugin for WindowPlugin {
             .register_event::<TouchpadPressure>()
             .register_event::<ScaleFactorChanged>()
             .register_event::<WindowOccluded>()
-            .register_non_send_resource::<Window>()
+            .register_resource::<Window>()
             .set_runner(WindowApp::runner);
     }
 }

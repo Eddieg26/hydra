@@ -410,7 +410,11 @@ impl AppBuilder {
         }
     }
 
-    pub fn scoped_sub_app(&mut self, app: impl AppTag, f: impl FnOnce(&mut AppBuilder)) -> &mut Self {
+    pub fn scoped_sub_app(
+        &mut self,
+        app: impl AppTag,
+        f: impl FnOnce(&mut AppBuilder),
+    ) -> &mut Self {
         let app = self.add_sub_app(app);
         f(app);
         self

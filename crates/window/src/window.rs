@@ -91,7 +91,6 @@ impl Default for WindowConfig {
 #[derive(Clone, Resource)]
 pub struct Window {
     inner: Arc<winit::window::Window>,
-    _unsend: std::marker::PhantomData<*const ()>,
 }
 
 impl Window {
@@ -109,7 +108,6 @@ impl Window {
 
         Self {
             inner: Arc::new(window),
-            _unsend: std::marker::PhantomData,
         }
     }
 

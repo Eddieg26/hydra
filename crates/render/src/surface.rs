@@ -1,5 +1,5 @@
 use crate::device::RenderDevice;
-use ecs::{Commands, NonSend, Resource, app::Main, commands::AddResource};
+use ecs::{Commands, Resource, app::Main, commands::AddResource};
 use std::sync::Arc;
 use wgpu::{PresentMode, SurfaceConfiguration, SurfaceTargetUnsafe, rwh::HandleError};
 use window::{Window, app::WindowCommandsExt};
@@ -7,7 +7,7 @@ use window::{Window, app::WindowCommandsExt};
 #[derive(Debug)]
 pub enum RenderSurfaceError {
     Create(wgpu::CreateSurfaceError),
-    Adapter,
+    Adapter(wgpu::RequestAdapterError),
     Handle(HandleError),
 }
 
@@ -21,7 +21,7 @@ impl std::fmt::Display for RenderSurfaceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Create(e) => write!(f, "Failed to create surface: {}", e),
-            Self::Adapter => write!(f, "Failed to request adapter"),
+            Self::Adapter(e) => write!(f, "Failed to request adapter: {}", e),
             Self::Handle(e) => write!(f, "{}", e),
         }
     }
@@ -37,6 +37,7 @@ impl std::error::Error for RenderSurfaceError {}
 
 #[derive(Resource)]
 pub struct RenderSurface {
+    window: Window,
     surface: Arc<wgpu::Surface<'static>>,
     config: SurfaceConfiguration,
     depth_format: wgpu::TextureFormat,
@@ -46,7 +47,7 @@ impl RenderSurface {
     pub const DEFAULT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-    pub async fn new(window: &Window) -> Result<(Self, wgpu::Adapter), RenderSurfaceError> {
+    pub async fn new(window: Window) -> Result<(Self, wgpu::Adapter), RenderSurfaceError> {
         let instance = wgpu::Instance::default();
 
         let surface = unsafe {
@@ -67,7 +68,7 @@ impl RenderSurface {
                 ..Default::default()
             })
             .await
-            .ok_or(RenderSurfaceError::Adapter)?;
+            .map_err(RenderSurfaceError::Adapter)?;
 
         let capabilities = surface.get_capabilities(&adapter);
 
@@ -86,18 +87,21 @@ impl RenderSurface {
             .cloned()
             .unwrap_or_default();
 
+        let alpha_mode = capabilities.alpha_modes[0];
+
         let config = wgpu::SurfaceConfiguration {
             usage: capabilities.usages - wgpu::TextureUsages::STORAGE_BINDING,
             format,
             width: size.width,
             height: size.height,
-            present_mode,
-            alpha_mode: capabilities.alpha_modes[0],
-            view_formats: vec![],
-            desired_maximum_frame_latency: 3,
+            present_mode: wgpu::PresentMode::AutoVsync,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            view_formats: vec![format.add_srgb_suffix()],
+            desired_maximum_frame_latency: 2,
         };
 
         let surface = Self {
+            window,
             surface: Arc::new(surface),
             config,
             depth_format,
@@ -108,6 +112,10 @@ impl RenderSurface {
 
     pub fn surface(&self) -> &wgpu::Surface<'static> {
         &self.surface
+    }
+
+    pub fn window(&self) -> &Window {
+        &self.window
     }
 
     pub fn width(&self) -> u32 {
@@ -145,11 +153,11 @@ impl RenderSurface {
     }
 
     pub(crate) fn create_surface(
-        window: Main<NonSend<Window>>,
+        window: Main<&Window>,
         mut commands: Commands,
         mut main_commands: Main<Commands>,
     ) {
-        let (surface, adapter) = match smol::block_on(RenderSurface::new(&window)) {
+        let (surface, adapter) = match smol::block_on(RenderSurface::new(window.clone())) {
             Ok(result) => result,
             Err(error) => return main_commands.exit_error(error),
         };
@@ -166,7 +174,7 @@ impl RenderSurface {
     }
 
     pub(crate) fn resize_surface(
-        window: Main<NonSend<Window>>,
+        window: Main<&Window>,
         surface: &mut RenderSurface,
         device: &RenderDevice,
     ) {
@@ -177,16 +185,29 @@ impl RenderSurface {
     }
 
     pub(crate) fn queue_surface(
+        device: &RenderDevice,
         surface: &RenderSurface,
         surface_texture: &mut RenderSurfaceTexture,
     ) {
-        if let Ok(texture) = surface.texture() {
-            surface_texture.set(texture);
+        match surface.texture() {
+            Ok(texture) => {
+                if texture.suboptimal {
+                    surface.configure(device);
+                }
+                surface_texture.set(texture);
+            }
+            Err(wgpu::SurfaceError::Lost) | Err(wgpu::SurfaceError::Outdated) => {
+                surface.configure(device);
+            }
+            _ => return,
         };
     }
 
-    pub(crate) fn present_surface(surface_texture: &mut RenderSurfaceTexture) {
-        surface_texture.present();
+    pub(crate) fn present_surface(
+        surface: &RenderSurface,
+        surface_texture: &mut RenderSurfaceTexture,
+    ) {
+        surface_texture.present(&surface.window);
     }
 }
 
@@ -206,8 +227,9 @@ impl RenderSurfaceTexture {
         self.0.as_ref()
     }
 
-    pub fn present(&mut self) {
+    fn present(&mut self, window: &Window) {
         if let Some(surface) = self.0.take() {
+            window.inner().pre_present_notify();
             surface.present();
         }
     }
