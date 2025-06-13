@@ -165,10 +165,11 @@ impl<'de, A: Asset> Deserialize<'de> for AssetId<A> {
 
 impl<A: Asset> std::fmt::Debug for AssetId<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("AssetId")
-            .field(&self.0)
-            .field(&self.1)
-            .finish()
+        f.write_fmt(format_args!(
+            "AssetId::<{}>({})",
+            ecs::ext::short_type_name::<A>(),
+            self.0
+        ))
     }
 }
 
