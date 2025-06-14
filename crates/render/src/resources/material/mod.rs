@@ -57,7 +57,7 @@ pub trait RenderItem:
 {
     const SORT: bool = false;
 
-    fn new(view: &GlobalTransform, item: &GlobalTransform) -> Self;
+    fn new(_: &GlobalTransform, _: &GlobalTransform) -> Self;
 }
 
 impl RenderItem for () {

@@ -291,6 +291,10 @@ pub trait Draw: Component + Clone {
     fn shader() -> impl Into<AssetId<Shader>>;
 }
 
+pub trait IntoRenderItem<R: RenderPhase> {
+    fn render_item(&self, view: &GlobalTransform, transform: &GlobalTransform) -> R::Item;
+}
+
 pub struct ExtractedDraw<D: Draw> {
     pub entity: Entity,
     draw: D,
@@ -361,6 +365,7 @@ impl<V: View, P: RenderPhase> ViewDrawCalls<V, P> {
         view_buffer: &ViewBuffer<V>,
         function: DrawId<D>,
     ) where
+        D: IntoRenderItem<P>,
         D::Material: Material<Phase = P>,
     {
         let function = function.0;
@@ -383,7 +388,10 @@ impl<V: View, P: RenderPhase> ViewDrawCalls<V, P> {
 
                 let draw_calls = batches.drain().map(|(key, (draw_index, data))| {
                     let instances = mesh_buffer.append(data);
-                    let item = P::Item::new(&view.transform, &draws.0[draw_index].transform);
+                    let extracted = &draws.0[draw_index];
+                    let item = extracted
+                        .draw
+                        .render_item(&view.transform, &extracted.transform);
 
                     DrawCall::<V, P> {
                         key,
@@ -403,7 +411,9 @@ impl<V: View, P: RenderPhase> ViewDrawCalls<V, P> {
                         mesh: extracted.draw.mesh(),
                     };
 
-                    let item = P::Item::new(&view.transform, &extracted.transform);
+                    let item = extracted
+                        .draw
+                        .render_item(&view.transform, &extracted.transform);
                     let instances = offset..(offset + 1);
 
                     DrawCall::<V, P> {

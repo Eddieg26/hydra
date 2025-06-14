@@ -4,9 +4,9 @@ use asset::{
 };
 use ecs::{App, Component, EventReader, Init, Spawner, Start};
 use render::{
-    AsBinding, Camera, Color, Draw, Material, Mesh, MeshAttribute, MeshAttributeType,
-    MeshAttributeValues, MeshData, MeshTopology, Projection, RenderPhase, Renderer, Shader,
-    ShaderSource, ShaderType, View,
+    AsBinding, Camera, Color, Draw, IntoRenderItem, Material, Mesh, MeshAttribute,
+    MeshAttributeType, MeshAttributeValues, MeshData, MeshTopology, Projection, RenderPhase,
+    Renderer, Shader, ShaderSource, ShaderType, View,
     plugin::{RenderAppExt, RenderPlugin},
 };
 use transform::GlobalTransform;
@@ -238,6 +238,16 @@ impl<M: Material> Draw for DrawMesh<M> {
 
     fn shader() -> impl Into<AssetId<render::Shader>> {
         VERT_ID
+    }
+}
+
+impl<M: Material> IntoRenderItem<Opaque3d> for DrawMesh<M> {
+    fn render_item(
+        &self,
+        _: &GlobalTransform,
+        _: &GlobalTransform,
+    ) -> <Opaque3d as RenderPhase>::Item {
+        ()
     }
 }
 

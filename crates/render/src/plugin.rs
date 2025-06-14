@@ -1,5 +1,6 @@
 use crate::{
-    CameraSubGraph, DrawPass, ExtractError, MeshData, ProcessAssets, Renderer, Shader,
+    CameraSubGraph, DrawPass, ExtractError, IntoRenderItem, MeshData, ProcessAssets, Renderer,
+    Shader,
     app::{
         PostRender, PreRender, Present, Process, ProcessPipelines, Queue, QueueDraws, QueueViews,
         Render, RenderApp,
@@ -83,7 +84,9 @@ impl Plugin for RenderPlugin {
 }
 
 pub trait RenderAppExt {
-    fn register_draw<D: Draw>(&mut self) -> &mut Self;
+    fn register_draw<D: Draw + IntoRenderItem<<D::Material as Material>::Phase>>(
+        &mut self,
+    ) -> &mut Self;
     fn add_pass<P: RenderGraphPass>(&mut self, pass: P) -> &mut Self;
     fn add_sub_graph<S: SubGraph>(&mut self) -> &mut Self;
     fn add_sub_graph_pass<S: SubGraph, P: RenderGraphPass>(&mut self, pass: P) -> &mut Self;
@@ -93,7 +96,9 @@ pub trait RenderAppExt {
 }
 
 impl RenderAppExt for AppBuilder {
-    fn register_draw<D: Draw>(&mut self) -> &mut Self {
+    fn register_draw<D: Draw + IntoRenderItem<<D::Material as Material>::Phase>>(
+        &mut self,
+    ) -> &mut Self {
         self.add_plugins(DrawPlugin::<D>::new())
     }
 
@@ -232,12 +237,12 @@ impl<T: MeshData> Plugin for MeshDataPlugin<T> {
 
 pub struct DrawPlugin<D: Draw>(std::marker::PhantomData<D>);
 impl<D: Draw> DrawPlugin<D> {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self(Default::default())
     }
 }
 
-impl<D: Draw> Plugin for DrawPlugin<D> {
+impl<D: Draw + IntoRenderItem<<D::Material as Material>::Phase>> Plugin for DrawPlugin<D> {
     fn setup(&mut self, app: &mut AppBuilder) {
         app.add_plugins((
             RenderPlugin,
