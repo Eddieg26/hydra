@@ -72,7 +72,7 @@ fn main() {
                 .spawn()
                 .with_component(transform)
                 .with_component(DrawMesh::<UnlitColor> {
-                    material: BLUE_MAT,
+                    material: RED_MAT,
                     mesh: QUAD_ID,
                 })
                 .finish();

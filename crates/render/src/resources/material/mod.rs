@@ -71,6 +71,8 @@ impl RenderItem for () {
 pub trait RenderPhase: Send + Sync + 'static {
     type Item: RenderItem;
 
+    const QUEUE: i32 = 0;
+
     fn mode() -> BlendMode;
     fn depth_write() -> DepthWrite {
         DepthWrite::On

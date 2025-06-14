@@ -684,35 +684,38 @@ impl<V: View> DrawFunctions<V> {
     }
 }
 
-pub struct RenderPhases(Vec<fn(Entity, &RenderContext, &mut RenderState)>);
+pub struct RenderPhases(Vec<(fn(Entity, &RenderContext, &mut RenderState), i32)>);
 
 impl RenderPhases {
     pub fn add_phase<V: View, P: RenderPhase>(&mut self) {
-        self.0.push(|entity, ctx, state| {
-            let functions = ctx.world().resource::<DrawFunctions<V>>();
-            let views = ctx.world().resource::<ViewBuffer<V>>();
-            let draw_calls = ctx.world().resource::<ViewDrawCalls<V, P>>();
-            let meshes = ctx.world().resource::<RenderAssets<RenderMesh>>();
+        self.0.push((
+            |entity, ctx, state| {
+                let functions = ctx.world().resource::<DrawFunctions<V>>();
+                let views = ctx.world().resource::<ViewBuffer<V>>();
+                let draw_calls = ctx.world().resource::<ViewDrawCalls<V, P>>();
+                let meshes = ctx.world().resource::<RenderAssets<RenderMesh>>();
 
-            let Some(calls) = draw_calls.get(&entity) else {
-                return;
-            };
+                let Some(calls) = draw_calls.get(&entity) else {
+                    return;
+                };
 
-            let Some(view) = views.get(entity) else {
-                return;
-            };
+                let Some(view) = views.get(entity) else {
+                    return;
+                };
 
-            for call in calls {
-                let function = functions.0[*call.function];
+                for call in calls {
+                    let function = functions.0[*call.function];
 
-                function(state, ctx, meshes, views, view, &call.key, &call.instances);
-            }
-        });
+                    function(state, ctx, meshes, views, view, &call.key, &call.instances);
+                }
+            },
+            P::QUEUE,
+        ));
     }
 
     fn render(&self, entity: Entity, ctx: &RenderContext, mut state: RenderState) {
         for phase in &self.0 {
-            phase(entity, &ctx, &mut state);
+            phase.0(entity, &ctx, &mut state);
         }
     }
 }
@@ -750,6 +753,8 @@ impl<R: Renderer> RenderGraphPass for DrawPass<R> {
         let data = R::setup(builder, &mut phases);
         let color = builder.write::<RenderOutput>();
         let depth = builder.create::<DepthOutput>(());
+
+        phases.0.sort_by_key(|p| p.1);
 
         move |ctx| {
             let Some(camera) = ctx.camera() else {
