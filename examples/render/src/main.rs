@@ -4,11 +4,9 @@ use asset::{
 };
 use ecs::{App, Component, EventReader, Init, Spawner, Start};
 use render::{
-    AsBinding, Camera, CameraSubGraph, Color, DepthOutput, Draw, DrawFunctions, GraphResourceId,
-    MainRenderPass, Material, Mesh, MeshAttribute, MeshAttributeType, MeshAttributeValues,
-    MeshData, MeshTopology, Projection, RenderAssets, RenderMesh, RenderOutput, RenderPassDesc,
-    RenderPhase, RenderState, Renderer, Shader, ShaderSource, ShaderType, View, ViewBuffer,
-    ViewDrawCalls,
+    AsBinding, Camera, Color, Draw, Material, Mesh, MeshAttribute, MeshAttributeType,
+    MeshAttributeValues, MeshData, MeshTopology, Projection, RenderPhase, Renderer, Shader,
+    ShaderSource, ShaderType, View,
     plugin::{RenderAppExt, RenderPlugin},
 };
 use transform::GlobalTransform;
@@ -42,7 +40,7 @@ fn main() {
         .add_plugins(RenderPlugin)
         .add_source("embedded", fs)
         .register_draw::<DrawMesh<UnlitColor>>()
-        .add_sub_graph_pass::<CameraSubGraph, MainRenderPass>(MainRenderPass::new(BasicRenderer))
+        .add_renderer::<BasicRenderer>()
         .add_asset(RED_MAT, UnlitColor::from(Color::red()), None)
         .add_asset(BLUE_MAT, UnlitColor::from(Color::blue()), None)
         .add_asset(QUAD_ID, quad, None)
@@ -246,66 +244,11 @@ impl<M: Material> Draw for DrawMesh<M> {
 pub struct BasicRenderer;
 
 impl Renderer for BasicRenderer {
-    type Data = (GraphResourceId, GraphResourceId);
+    type Data = ();
 
-    fn setup(builder: &mut render::PassBuilder) -> Self::Data {
-        let color = builder.write::<RenderOutput>();
-        let depth = builder.create::<DepthOutput>(());
-        (color, depth)
-    }
+    const NAME: render::renderer::Name = "Basic Renderer";
 
-    fn build<'a>(ctx: &'a render::RenderContext<'a>, data: &'a Self::Data) -> RenderPassDesc<'a> {
-        use render::wgpu;
-
-        let (color, depth) = *data;
-
-        let color = ctx.get::<RenderOutput>(color);
-        let depth = ctx.get::<DepthOutput>(depth);
-
-        RenderPassDesc {
-            label: None,
-            color_attachments: vec![Some(wgpu::RenderPassColorAttachment {
-                view: color,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(Color::green().into()),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: depth,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0f32),
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-        }
-    }
-
-    fn render<'a>(ctx: &mut render::RenderContext, mut state: RenderState<'a>) {
-        let Some(camera) = ctx.camera() else {
-            return;
-        };
-
-        let views = ctx.world().resource::<ViewBuffer<View3d>>();
-
-        let Some(view) = views.get(camera.entity) else {
-            return;
-        };
-
-        let meshes = ctx.world().resource::<RenderAssets<RenderMesh>>();
-        let functions = ctx.world().resource::<DrawFunctions<View3d>>();
-        let opaque = ctx.world().resource::<ViewDrawCalls<View3d, Opaque3d>>();
-
-        opaque.draw(
-            ctx,
-            &mut state,
-            &camera.entity,
-            view,
-            views,
-            meshes,
-            functions,
-        );
+    fn setup(_: &mut render::PassBuilder, phases: &mut render::RenderPhases) -> Self::Data {
+        phases.add_phase::<View3d, Opaque3d>();
     }
 }

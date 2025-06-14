@@ -1,5 +1,5 @@
 use crate::{
-    ExtractResource, RenderItem,
+    Color, DepthOutput, ExtractResource, PassBuilder, RenderGraphPass, RenderItem, RenderOutput,
     device::RenderDevice,
     renderer::{Camera, RenderContext, RenderState},
     resources::{
@@ -671,5 +671,115 @@ impl<V: View> DrawFunctions<V> {
         self.0.insert(ty, f);
 
         id
+    }
+}
+
+pub struct RenderPhases(Vec<fn(Entity, &RenderContext, &mut RenderState)>);
+
+impl RenderPhases {
+    pub fn add_phase<V: View, P: RenderPhase>(&mut self) {
+        self.0.push(|entity, ctx, state| {
+            let functions = ctx.world().resource::<DrawFunctions<V>>();
+            let views = ctx.world().resource::<ViewBuffer<V>>();
+            let draw_calls = ctx.world().resource::<ViewDrawCalls<V, P>>();
+            let meshes = ctx.world().resource::<RenderAssets<RenderMesh>>();
+
+            let Some(calls) = draw_calls.get(&entity) else {
+                return;
+            };
+
+            let Some(view) = views.get(entity) else {
+                return;
+            };
+
+            for call in calls {
+                let function = functions.0[*call.function];
+
+                function(state, ctx, meshes, views, view, &call.key, &call.instances);
+            }
+        });
+    }
+}
+
+pub trait Renderer: Send + Sync + 'static {
+    const NAME: super::Name;
+
+    type Data: Send + Sync + 'static;
+
+    fn setup(builder: &mut PassBuilder, phases: &mut RenderPhases) -> Self::Data;
+
+    fn attachments<'a>(
+        _ctx: &'a RenderContext<'a>,
+        _data: &Self::Data,
+    ) -> Vec<Option<wgpu::RenderPassColorAttachment<'a>>> {
+        vec![]
+    }
+}
+
+pub struct DrawPass<R: Renderer>(std::marker::PhantomData<R>);
+impl<R: Renderer> DrawPass<R> {
+    pub fn new() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<R: Renderer> RenderGraphPass for DrawPass<R> {
+    const NAME: super::Name = R::NAME;
+
+    fn setup(
+        self,
+        builder: &mut PassBuilder,
+    ) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+        let mut phases = RenderPhases(Vec::new());
+        let data = R::setup(builder, &mut phases);
+        let color = builder.write::<RenderOutput>();
+        let depth = builder.create::<DepthOutput>(());
+
+        move |ctx| {
+            let Some(camera) = ctx.camera() else {
+                return;
+            };
+
+            let color = ctx.get::<RenderOutput>(color);
+            let depth = ctx.get::<DepthOutput>(depth);
+
+            let mut encoder = ctx.encoder();
+            let mut color_attachments = vec![Some(wgpu::RenderPassColorAttachment {
+                view: color,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(camera.clear_color.unwrap_or(Color::black()).into()),
+                    store: wgpu::StoreOp::Store,
+                },
+            })];
+
+            color_attachments.extend(R::attachments(ctx, &data));
+            let depth_stencil_attachment = wgpu::RenderPassDepthStencilAttachment {
+                view: depth,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0f32),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            };
+
+            let desc = wgpu::RenderPassDescriptor {
+                label: Some(R::NAME),
+                color_attachments: &color_attachments,
+                depth_stencil_attachment: Some(depth_stencil_attachment),
+                timestamp_writes: Default::default(),
+                occlusion_query_set: Default::default(),
+            };
+
+            {
+                let mut state = RenderState::new(encoder.begin_render_pass(&desc));
+
+                for phase in &phases.0 {
+                    phase(camera.entity, &ctx, &mut state);
+                }
+            }
+
+            ctx.submit(encoder.finish());
+        }
     }
 }

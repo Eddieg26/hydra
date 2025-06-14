@@ -1,5 +1,5 @@
 use crate::{
-    ExtractError, MainRenderPass, MeshData, ProcessAssets, Renderer, Shader,
+    CameraSubGraph, DrawPass, ExtractError, MeshData, ProcessAssets, Renderer, Shader,
     app::{
         PostRender, PreRender, Present, Process, ProcessPipelines, Queue, QueueDraws, QueueViews,
         Render, RenderApp,
@@ -83,20 +83,16 @@ impl Plugin for RenderPlugin {
 }
 
 pub trait RenderAppExt {
-    fn set_renderer<R: Renderer>(&mut self, renderer: R) -> &mut Self;
     fn register_draw<D: Draw>(&mut self) -> &mut Self;
     fn add_pass<P: RenderGraphPass>(&mut self, pass: P) -> &mut Self;
     fn add_sub_graph<S: SubGraph>(&mut self) -> &mut Self;
     fn add_sub_graph_pass<S: SubGraph, P: RenderGraphPass>(&mut self, pass: P) -> &mut Self;
+    fn add_renderer<R: Renderer>(&mut self) -> &mut Self;
     fn extract_render_asset<R: RenderAssetExtractor>(&mut self) -> &mut Self;
     fn extract_render_resource<R: RenderResource>(&mut self) -> &mut Self;
 }
 
 impl RenderAppExt for AppBuilder {
-    fn set_renderer<R: Renderer>(&mut self, renderer: R) -> &mut Self {
-        self.add_plugins(RendererPlugin::new(renderer))
-    }
-
     fn register_draw<D: Draw>(&mut self) -> &mut Self {
         self.add_plugins(DrawPlugin::<D>::new())
     }
@@ -125,6 +121,16 @@ impl RenderAppExt for AppBuilder {
         })
     }
 
+    fn add_renderer<R: Renderer>(&mut self) -> &mut Self {
+        self.scoped_sub_app(RenderApp, |render_app| {
+            render_app
+                .get_or_insert_resource(RenderGraph::new)
+                .add_sub_graph_pass::<CameraSubGraph, DrawPass<R>>(DrawPass::new());
+        });
+
+        self
+    }
+
     fn extract_render_asset<R: RenderAssetExtractor>(&mut self) -> &mut Self {
         let app = self.sub_app_mut(RenderApp).unwrap();
         app.resource_mut::<AssetExtractors>().add::<R>();
@@ -149,22 +155,22 @@ impl RenderAppExt for AppBuilder {
     }
 }
 
-pub struct RendererPlugin {
-    main_render_pass: Option<MainRenderPass>,
+pub struct RendererPlugin<R: Renderer> {
+    render_pass: Option<DrawPass<R>>,
 }
 
-impl RendererPlugin {
-    pub fn new<R: Renderer>(renderer: R) -> Self {
+impl<R: Renderer> RendererPlugin<R> {
+    pub fn new() -> Self {
         Self {
-            main_render_pass: Some(MainRenderPass::new(renderer)),
+            render_pass: Some(DrawPass::<R>::new()),
         }
     }
 }
 
-impl Plugin for RendererPlugin {
+impl<R: Renderer> Plugin for RendererPlugin<R> {
     fn setup(&mut self, app: &mut AppBuilder) {
         app.add_plugins(RenderPlugin)
-            .add_pass(self.main_render_pass.take().unwrap());
+            .add_pass(self.render_pass.take().unwrap());
     }
 }
 
