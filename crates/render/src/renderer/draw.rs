@@ -699,6 +699,12 @@ impl RenderPhases {
             }
         });
     }
+
+    fn render(&self, entity: Entity, ctx: &RenderContext, mut state: RenderState) {
+        for phase in &self.0 {
+            phase(entity, &ctx, &mut state);
+        }
+    }
 }
 
 pub trait Renderer: Send + Sync + 'static {
@@ -771,13 +777,8 @@ impl<R: Renderer> RenderGraphPass for DrawPass<R> {
                 occlusion_query_set: Default::default(),
             };
 
-            {
-                let mut state = RenderState::new(encoder.begin_render_pass(&desc));
-
-                for phase in &phases.0 {
-                    phase(camera.entity, &ctx, &mut state);
-                }
-            }
+            let state = RenderState::new(encoder.begin_render_pass(&desc));
+            phases.render(camera.entity, ctx, state);
 
             ctx.submit(encoder.finish());
         }
