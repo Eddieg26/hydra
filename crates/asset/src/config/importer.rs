@@ -1,9 +1,11 @@
 use super::{BoxedError, registry::AssetRegistry};
 use crate::{
+    AssetDependency,
     asset::{Asset, AssetId, AssetMetadata, AssetType, ErasedId, Settings},
     io::{
-        deserialize, Artifact, ArtifactMeta, AssetIoError, AssetPath, AssetSource, AsyncReader, ImportMeta, PathExt, SourceName
-    }, AssetDependency,
+        Artifact, ArtifactMeta, AssetIoError, AssetPath, AssetSource, AsyncReader, ImportMeta,
+        PathExt, SourceName, deserialize,
+    },
 };
 use ecs::Event;
 use futures::future::BoxFuture;
@@ -69,7 +71,6 @@ impl<'a> ImportContext<'a> {
 
     pub fn add_child<A: Asset + Serialize>(
         &mut self,
-        id: AssetId<A>,
         name: impl ToString,
         child: A,
     ) -> Result<AssetId<A>, AssetIoError> {
@@ -82,7 +83,9 @@ impl<'a> ImportContext<'a> {
                 std::any::type_name::<A>()
             ));
 
-        let path = self.path.with_name(name.to_string()).into_owned();
+        let name = name.to_string();
+        let id = AssetId::from(uuid::Uuid::new_v5(self.id.uuid(), name.as_bytes()));
+        let path = self.path.with_name(name).into_owned();
         let meta = ArtifactMeta::new_child(id, asset_meta.ty, path, self.id)
             .with_unload_action(asset_meta.dependency_unload_action);
         let artifact = Artifact::new(&child, meta)?;

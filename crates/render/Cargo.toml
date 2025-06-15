@@ -18,3 +18,5 @@ uuid = { workspace = true }
 downcast-rs = { workspace = true }
 wgpu = { workspace = true, features = ["spirv", "glsl", "serde"] }
 encase = { version = "0.10.0", features = ["glam"] }
+tobj = "4.0.3"
+waker-fn = "1.2.0"

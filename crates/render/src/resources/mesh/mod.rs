@@ -4,10 +4,12 @@ use super::{
     extract::{ExtractError, ReadWrite, RenderAsset, RenderAssetExtractor},
 };
 use crate::{device::RenderDevice, types::Color};
-use asset::Asset;
+use asset::{Asset, Settings, importer::AssetImporter};
 use ecs::system::{ArgItem, unlifetime::Read};
 use math::bounds::Bounds;
+use smol::io::AsyncAsSync;
 use std::{hash::Hash, ops::Range};
+use waker_fn::waker_fn;
 use wgpu::{BufferUsages, VertexStepMode};
 
 #[derive(
@@ -223,7 +225,6 @@ pub struct Mesh {
     indices: Option<Indices>,
     bounds: Bounds,
     read_write: ReadWrite,
-    sub_meshes: Vec<SubMesh>,
 
     #[serde(skip)]
     dirty: MeshDirty,
@@ -237,7 +238,6 @@ impl Mesh {
             indices: None,
             bounds: Bounds::ZERO,
             read_write: ReadWrite::Disabled,
-            sub_meshes: Vec::new(),
             dirty: MeshDirty::empty(),
         }
     }
@@ -274,13 +274,6 @@ impl Mesh {
         }
     }
 
-    pub fn sub_meshes(&self) -> &[SubMesh] {
-        &self.sub_meshes
-    }
-
-    pub fn sub_mesh(&self, index: usize) -> Option<&SubMesh> {
-        self.sub_meshes.get(index)
-    }
 
     pub fn dirty(&self) -> MeshDirty {
         self.dirty
@@ -342,13 +335,6 @@ impl Mesh {
         self.attributes.iter().position(|a| a.ty == ty)
     }
 
-    pub fn add_sub_mesh(&mut self, sub_mesh: SubMesh) {
-        self.sub_meshes.push(sub_mesh);
-    }
-
-    pub fn remove_sub_mesh(&mut self, index: usize) -> SubMesh {
-        self.sub_meshes.remove(index)
-    }
 
     pub fn clear(&mut self) {
         for attribute in &mut self.attributes {
@@ -647,6 +633,112 @@ impl RenderAssetExtractor for Mesh {
         arg: &mut ArgItem<Self::Arg>,
     ) -> Result<Self::RenderAsset, ExtractError<Self>> {
         let mesh = asset.create_render_mesh(arg);
+        Ok(mesh)
+    }
+}
+
+#[derive(Default, Settings, serde::Serialize, serde::Deserialize)]
+pub struct MeshImportSettings {
+    read_write: ReadWrite,
+}
+
+pub struct ObjImporter;
+
+impl AssetImporter for ObjImporter {
+    type Asset = Mesh;
+
+    type Settings = MeshImportSettings;
+
+    type Error = tobj::LoadError;
+
+    async fn import(
+        ctx: &mut asset::importer::ImportContext<'_>,
+        reader: &mut dyn asset::io::AsyncReader,
+        metadata: &asset::AssetMetadata<Self::Settings>,
+    ) -> Result<Self::Asset, Self::Error> {
+        let waker = waker_fn(|| {});
+        let mut context = std::task::Context::from_waker(&waker);
+        let reader = AsyncAsSync::new(&mut context, reader);
+        let mut reader = std::io::BufReader::new(reader);
+
+        let (models, _) = tobj::load_obj_buf(&mut reader, &tobj::LoadOptions::default(), |_| {
+            Ok((vec![], Default::default()))
+        })?;
+
+        let mut positions = Vec::new();
+        let mut tex_coords = Vec::new();
+        let mut normals = Vec::new();
+        let mut indices = Vec::new();
+
+        for model in models {
+            let start_vertex = positions.len();
+            let start_index = indices.len();
+
+            for vertices in model.mesh.positions.chunks(3) {
+                positions.push(math::Vec3::from_slice(vertices));
+            }
+
+            for tex_coord in model.mesh.texcoord_indices.chunks(2) {
+                let coord = math::Vec2::new(
+                    model.mesh.texcoords[tex_coord[0] as usize],
+                    model.mesh.texcoords[tex_coord[1] as usize],
+                );
+                tex_coords.push(coord);
+            }
+
+            for normal in model.mesh.normal_indices.chunks(3) {
+                let normal = math::Vec3::new(
+                    model.mesh.normals[normal[0] as usize],
+                    model.mesh.normals[normal[1] as usize],
+                    model.mesh.normals[normal[2] as usize],
+                );
+                normals.push(normal);
+            }
+
+            indices.extend(model.mesh.indices);
+
+            let vertex_count = positions.len() - start_vertex;
+            let index_count = indices.len() - start_index;
+
+            let _ = ctx.add_child(
+                model.name,
+                SubMesh {
+                    start_vertex: start_vertex as u64,
+                    vertex_count: vertex_count as u64,
+                    start_index: start_index as u64,
+                    index_count: index_count as u64,
+                },
+            );
+        }
+
+        let mut mesh = Mesh::new(MeshTopology::TriangleList);
+        if !positions.is_empty() {
+            mesh.add_attribute(MeshAttribute {
+                ty: MeshAttributeType::Position,
+                values: MeshAttributeValues::Vec3(positions),
+            });
+        }
+
+        if !tex_coords.is_empty() {
+            mesh.add_attribute(MeshAttribute {
+                ty: MeshAttributeType::TexCoord0,
+                values: MeshAttributeValues::Vec2(tex_coords),
+            });
+        }
+
+        if !normals.is_empty() {
+            mesh.add_attribute(MeshAttribute {
+                ty: MeshAttributeType::Normal,
+                values: MeshAttributeValues::Vec3(normals),
+            });
+        }
+
+        if !indices.is_empty() {
+            mesh.set_indices(Indices::new::<u32>(&indices));
+        }
+
+        mesh.read_write = metadata.read_write;
+
         Ok(mesh)
     }
 }

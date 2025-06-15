@@ -8,4 +8,4 @@ pub use asset::*;
 pub use config::*;
 pub use database::{AssetDatabase, commands::AssetCommand, state::LoadState};
 
-pub use derive_asset::Asset;
+pub use derive_asset::{Asset, Settings, AssetDependency};
