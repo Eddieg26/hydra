@@ -1,7 +1,8 @@
 use super::{Label, RenderAssetExtractor, extract::RenderAsset};
 use crate::device::RenderDevice;
-use asset::Asset;
+use asset::{Asset, Settings, importer::AssetImporter};
 use ecs::system::unlifetime::Read;
+use smol::io::AsyncAsSync;
 use std::{ops::Range, sync::Arc};
 use wgpu::{TextureAspect, TextureFormat};
 
@@ -313,7 +314,7 @@ impl GpuTexture {
                 &texture.pixels[range.clone()],
                 wgpu::TexelCopyBufferLayout {
                     bytes_per_row: Some(block_size * size.width),
-                    rows_per_image: Some(block_size * size.width / size.height),
+                    rows_per_image: Some(size.height),
                     offset: 0,
                 },
                 wgpu::Extent3d {
@@ -393,5 +394,107 @@ impl RenderAssetExtractor for Texture {
     ) -> Result<Self::RenderAsset, super::ExtractError<Self>> {
         let sampler = Sampler::from_texture(device, &texture);
         Ok(GpuTexture::create(device, &texture, sampler))
+    }
+}
+
+pub struct Texture2dImporter;
+
+#[derive(
+    Default, Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum ImportFormat {
+    #[default]
+    RGBA8,
+    RGBA16,
+    RGBA32,
+}
+
+impl From<ImportFormat> for wgpu::TextureFormat {
+    fn from(format: ImportFormat) -> Self {
+        match format {
+            ImportFormat::RGBA8 => wgpu::TextureFormat::Rgba8Unorm,
+            ImportFormat::RGBA16 => wgpu::TextureFormat::Rgba16Unorm,
+            ImportFormat::RGBA32 => wgpu::TextureFormat::Rgba32Float,
+        }
+    }
+}
+
+#[derive(Settings, Default, serde::Serialize, serde::Deserialize)]
+pub struct Texture2dSettings {
+    format: ImportFormat,
+}
+
+impl AssetImporter for Texture2dImporter {
+    type Asset = Texture;
+
+    type Settings = Texture2dSettings;
+
+    type Error = image::ImageError;
+
+    async fn import(
+        ctx: &mut asset::importer::ImportContext<'_>,
+        reader: &mut dyn asset::io::AsyncReader,
+        metadata: &asset::AssetMetadata<Self::Settings>,
+    ) -> Result<Self::Asset, Self::Error> {
+        use image::error::*;
+        let format = match ctx.path().ext() {
+            Some("png") => image::ImageFormat::Png,
+            Some("jpg") | Some("jpeg") => image::ImageFormat::Jpeg,
+            Some(ext) => {
+                return Err(ImageError::Unsupported(
+                    UnsupportedError::from_format_and_kind(
+                        ImageFormatHint::Unknown,
+                        UnsupportedErrorKind::Format(ImageFormatHint::Name(ext.to_string())),
+                    ),
+                ));
+            }
+            None => {
+                return Err(ImageError::Unsupported(
+                    UnsupportedError::from_format_and_kind(
+                        ImageFormatHint::Unknown,
+                        UnsupportedErrorKind::Format(ImageFormatHint::Unknown),
+                    ),
+                ));
+            }
+        };
+
+        let waker = waker_fn::waker_fn(|| {});
+        let mut context = std::task::Context::from_waker(&waker);
+        let reader = std::io::BufReader::new(AsyncAsSync::new(&mut context, reader));
+
+        let dynamic = image::load(reader, format)?;
+        let width = dynamic.width();
+        let height = dynamic.height();
+        let pixels = match metadata.format {
+            ImportFormat::RGBA8 => dynamic.into_rgba8().into_raw(),
+            ImportFormat::RGBA16 => {
+                let rgba16 = dynamic.into_rgba16().into_raw();
+                bytemuck::cast_vec(rgba16)
+            }
+            ImportFormat::RGBA32 => {
+                let rgba32 = dynamic.into_rgba32f().into_raw();
+                bytemuck::cast_vec(rgba32)
+            }
+        };
+
+        let pixel_count = pixels.len();
+
+        let texture = Texture::new(
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            metadata.format.into(),
+            pixels,
+            vec![0..pixel_count],
+        );
+
+        Ok(texture)
+    }
+
+    fn extensions() -> &'static [&'static str] {
+        &["png", "jpg", "jpeg"]
     }
 }

@@ -1,5 +1,5 @@
 use super::{AssetIoError, AsyncReader, AsyncWriter, FileSystem, PathExt};
-use futures::{AsyncRead, AsyncWrite, StreamExt, executor::block_on, future::BoxFuture};
+use futures::{AsyncRead, AsyncSeek, AsyncWrite, StreamExt, executor::block_on, future::BoxFuture};
 use smol::lock::RwLock;
 use std::{
     collections::HashMap,
@@ -111,6 +111,26 @@ impl AsyncReader for FileReader {
                 Ok(0)
             }
         })
+    }
+}
+
+impl AsyncSeek for FileReader {
+    fn poll_seek(
+        mut self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+        pos: std::io::SeekFrom,
+    ) -> std::task::Poll<std::io::Result<u64>> {
+        match pos {
+            std::io::SeekFrom::Start(offset) => self.position = offset,
+            std::io::SeekFrom::End(offset) => {
+                self.position = (self.position as i64 + offset) as u64
+            }
+            std::io::SeekFrom::Current(offset) => {
+                self.position = (self.data.len() as i64 + offset) as u64
+            }
+        }
+
+        std::task::Poll::Ready(Ok(self.position))
     }
 }
 

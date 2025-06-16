@@ -1,21 +1,16 @@
 use crate::{
-    CameraSubGraph, DrawPass, ExtractError, IntoRenderItem, MeshData, ObjImporter, ProcessAssets,
-    Renderer, Shader, SubMesh,
     app::{
         PostRender, PreRender, Present, Process, ProcessPipelines, Queue, QueueDraws, QueueViews,
         Render, RenderApp,
-    },
-    renderer::{
+    }, renderer::{
         Camera, Draw, DrawItem, DrawPhase, DrawPipeline, EntityCameras, ExtractedDraws,
         ExtractedViews, MeshDataBuffer, RenderGraph, RenderGraphPass, SubGraph, View, ViewBuffer,
         ViewDrawCalls,
-    },
-    resources::{
+    }, resources::{
         AssetExtractors, ExtractInfo, Fallbacks, Material, MaterialLayout, Mesh, PipelineCache,
         RenderAssetExtractor, RenderAssets, RenderItem, RenderResource, RenderTexture,
         ResourceExtractors, ShaderSource, Texture,
-    },
-    surface::{RenderSurface, RenderSurfaceTexture},
+    }, surface::{RenderSurface, RenderSurfaceTexture}, CameraSubGraph, DrawPass, ExtractError, IntoRenderItem, MeshData, ObjImporter, ProcessAssets, Renderer, Shader, SubMesh, Texture2dImporter
 };
 use asset::plugin::{AssetAppExt, AssetPlugin};
 use ecs::{AppBuilder, Extract, Init, Plugin, Run};
@@ -61,6 +56,7 @@ impl Plugin for RenderPlugin {
             .extract_render_asset::<ShaderSource>()
             .add_importer::<ShaderSource>()
             .add_importer::<ObjImporter>()
+            .add_importer::<Texture2dImporter>()
             .add_loader::<SubMesh>()
             .set_default_processor::<Mesh>();
     }

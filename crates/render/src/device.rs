@@ -10,9 +10,14 @@ pub struct RenderDevice {
 
 impl RenderDevice {
     pub async fn new(adapter: &Adapter) -> Result<Self, RequestDeviceError> {
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor::default())
-            .await?;
+        let desc = wgpu::DeviceDescriptor {
+            required_features: wgpu::Features::ADDRESS_MODE_CLAMP_TO_BORDER
+                | wgpu::Features::ADDRESS_MODE_CLAMP_TO_ZERO
+                | wgpu::Features::default(),
+            ..Default::default()
+        };
+
+        let (device, queue) = adapter.request_device(&desc).await?;
 
         Ok(Self {
             device: Arc::new(device),

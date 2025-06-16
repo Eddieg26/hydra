@@ -1,4 +1,4 @@
-use futures::{AsyncRead, AsyncWrite, Stream, future::BoxFuture};
+use futures::{AsyncRead, AsyncSeek, AsyncWrite, Stream, future::BoxFuture};
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
@@ -87,7 +87,7 @@ impl From<ron::error::SpannedError> for AssetIoError {
     }
 }
 
-pub trait AsyncReader: AsyncRead + Send + Sync + Unpin {
+pub trait AsyncReader: AsyncRead + AsyncSeek + Send + Sync + Unpin {
     fn read_to_end<'a>(
         &'a mut self,
         buf: &'a mut Vec<u8>,
@@ -102,7 +102,6 @@ impl AsyncReader for Box<dyn AsyncReader> {
         self.as_mut().read_to_end(buf)
     }
 }
-
 pub trait AsyncWriter: AsyncWrite + Send + Sync + Unpin {}
 
 pub trait PathStream: Stream<Item = PathBuf> + Send + Unpin {}

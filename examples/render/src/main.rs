@@ -6,7 +6,7 @@ use ecs::{App, Component, EventReader, Init, Spawner, Start};
 use render::{
     AsBinding, Camera, Color, Draw, IntoRenderItem, Material, Mesh, MeshAttribute,
     MeshAttributeType, MeshAttributeValues, MeshData, MeshTopology, ObjImportSettings, Projection,
-    RenderPhase, Renderer, Shader, ShaderSource, ShaderType, View,
+    RenderPhase, Renderer, Shader, ShaderSource, ShaderType, Texture, Texture2dSettings, View,
     plugin::{RenderAppExt, RenderPlugin},
 };
 use transform::GlobalTransform;
@@ -18,6 +18,7 @@ const BLUE_MAT: AssetId<UnlitColor> = AssetId::from_u128(0x87654321fedcba98);
 const QUAD_ID: AssetId<Mesh> = AssetId::from_u128(0xe51f72d138f747c6b22e2ac8a64b7b92u128);
 const CUBE_ID: AssetId<Mesh> = AssetId::from_u128(0x9d3919f428f8429a80e195849b3b6c21u128);
 const SWORD_ID: AssetId<Mesh> = AssetId::from_u128(0x6d3d79f5c6764b43993ae8de7ed0219bu128);
+const GENGAR_ID: AssetId<Texture> = AssetId::from_u128(0x43c5893d2b2f4a3bb2bb33eb1b362ff6u128);
 
 const QUAD: &[math::Vec2] = &[
     math::Vec2::new(-0.5, -0.5), // Bottom-left
@@ -34,6 +35,7 @@ fn main() {
     embed_asset!(fs, FRAG_ID, "frag.wgsl", DefaultSettings::default());
     embed_asset!(fs, CUBE_ID, "cube.obj", ObjImportSettings::default());
     embed_asset!(fs, SWORD_ID, "sword.obj", ObjImportSettings::default());
+    embed_asset!(fs, GENGAR_ID, "gengar.png", Texture2dSettings::default());
 
     let quad = Mesh::new(MeshTopology::TriangleList).with_attribute(MeshAttribute::new(
         MeshAttributeType::Position,
@@ -49,6 +51,7 @@ fn main() {
         .add_asset(BLUE_MAT, UnlitColor::from(Color::blue()), None)
         .add_asset(QUAD_ID, quad, None)
         .load_asset::<Mesh>(SWORD_ID)
+        .load_asset::<Texture>(GENGAR_ID)
         .add_systems(Init, |mut spawner: Spawner| {
             spawner
                 .spawn()

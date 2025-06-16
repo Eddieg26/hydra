@@ -3,7 +3,7 @@ use crate::{
     AssetId,
     asset::{Asset, AssetMetadata, Settings},
 };
-use futures::{AsyncRead, AsyncWrite, future::BoxFuture};
+use futures::{AsyncRead, AsyncSeek, AsyncWrite, future::BoxFuture};
 use serde::Serialize;
 use smol::lock::RwLock;
 use std::{
@@ -102,6 +102,26 @@ impl AsyncReader for EmbeddedReader {
                 Ok(0)
             }
         })
+    }
+}
+
+impl AsyncSeek for EmbeddedReader {
+    fn poll_seek(
+        mut self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+        pos: std::io::SeekFrom,
+    ) -> std::task::Poll<std::io::Result<u64>> {
+        match pos {
+            std::io::SeekFrom::Start(offset) => self.position = offset,
+            std::io::SeekFrom::End(offset) => {
+                self.position = (self.data.len() as i64 + offset) as u64
+            }
+            std::io::SeekFrom::Current(offset) => {
+                self.position = (self.position as i64 + offset) as u64
+            }
+        }
+
+        std::task::Poll::Ready(Ok(self.position))
     }
 }
 
