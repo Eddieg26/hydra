@@ -220,8 +220,8 @@ impl ErasedImporter {
                     .map(|metadata| Box::new(metadata) as Box<dyn DynMetadata>)
             },
             default_metadata: || Box::new(AssetMetadata::<I::Settings>::default()),
-            type_id: || TypeId::of::<I::Asset>(),
-            asset_type_id: || TypeId::of::<I>(),
+            type_id: || TypeId::of::<I>(),
+            asset_type_id: || TypeId::of::<I::Asset>(),
             extensions: <I as AssetImporter>::extensions,
         }
     }

@@ -1,9 +1,12 @@
 struct VertexInput {
-    @location(0) position: vec2<f32>,
-    @location(1) object_0: vec4<f32>,
-    @location(2) object_1: vec4<f32>,
-    @location(3) object_2: vec4<f32>,
-    @location(4) object_3: vec4<f32>,
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) texcoord: vec2<f32>,
+    @location(3) tangent: vec4<f32>,
+    @location(4) object_0: vec4<f32>,
+    @location(5) object_1: vec4<f32>,
+    @location(6) object_2: vec4<f32>,
+    @location(7) object_3: vec4<f32>,
 }
 
 struct VertexOutput {
@@ -27,6 +30,6 @@ fn main(input: VertexInput) -> VertexOutput {
         input.object_2,
         input.object_3
     );
-    output.position = camera.projection * camera.view * object * vec4<f32>(input.position, -1.0, 1.0);
+    output.position = camera.projection * camera.view * object * vec4<f32>(input.position, 1.0);
     return output;
 }

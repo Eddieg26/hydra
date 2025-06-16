@@ -290,7 +290,14 @@ pub trait Draw: Component + Clone {
         wgpu::PrimitiveState::default()
     }
 
-    fn formats() -> &'static [VertexFormat];
+    fn formats() -> &'static [VertexFormat] {
+        &[
+            VertexFormat::Float32x3,
+            VertexFormat::Float32x3,
+            VertexFormat::Float32x2,
+            VertexFormat::Float32x4,
+        ]
+    }
 
     fn shader() -> impl Into<AssetId<Shader>>;
 }

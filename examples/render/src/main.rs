@@ -5,17 +5,19 @@ use asset::{
 use ecs::{App, Component, EventReader, Init, Spawner, Start};
 use render::{
     AsBinding, Camera, Color, Draw, IntoRenderItem, Material, Mesh, MeshAttribute,
-    MeshAttributeType, MeshAttributeValues, MeshData, MeshTopology, Projection, RenderPhase,
-    Renderer, Shader, ShaderSource, ShaderType, View,
+    MeshAttributeType, MeshAttributeValues, MeshData, MeshTopology, ObjImportSettings, Projection,
+    RenderPhase, Renderer, Shader, ShaderSource, ShaderType, View,
     plugin::{RenderAppExt, RenderPlugin},
 };
 use transform::GlobalTransform;
 
 const VERT_ID: AssetId<Shader> = AssetId::from_u128(0xabcdef0123456789);
 const FRAG_ID: AssetId<Shader> = AssetId::from_u128(0x123456789abcdef0);
-const RED_MAT: AssetId<UnlitColor> = AssetId::from_u128(0xdeadbeef12345678);
+const RED_MAT: AssetId<UnlitColor> = AssetId::from_u128(0xa0cc79971c2d4206874539cb5ac54fe2u128);
 const BLUE_MAT: AssetId<UnlitColor> = AssetId::from_u128(0x87654321fedcba98);
-const QUAD_ID: AssetId<Mesh> = AssetId::from_u128(0xfeedface87654321);
+const QUAD_ID: AssetId<Mesh> = AssetId::from_u128(0xe51f72d138f747c6b22e2ac8a64b7b92u128);
+const CUBE_ID: AssetId<Mesh> = AssetId::from_u128(0x9d3919f428f8429a80e195849b3b6c21u128);
+const SWORD_ID: AssetId<Mesh> = AssetId::from_u128(0x6d3d79f5c6764b43993ae8de7ed0219bu128);
 
 const QUAD: &[math::Vec2] = &[
     math::Vec2::new(-0.5, -0.5), // Bottom-left
@@ -30,6 +32,8 @@ fn main() {
     let fs = EmbeddedFs::new();
     embed_asset!(fs, VERT_ID, "vert.wgsl", DefaultSettings::default());
     embed_asset!(fs, FRAG_ID, "frag.wgsl", DefaultSettings::default());
+    embed_asset!(fs, CUBE_ID, "cube.obj", ObjImportSettings::default());
+    embed_asset!(fs, SWORD_ID, "sword.obj", ObjImportSettings::default());
 
     let quad = Mesh::new(MeshTopology::TriangleList).with_attribute(MeshAttribute::new(
         MeshAttributeType::Position,
@@ -44,38 +48,35 @@ fn main() {
         .add_asset(RED_MAT, UnlitColor::from(Color::red()), None)
         .add_asset(BLUE_MAT, UnlitColor::from(Color::blue()), None)
         .add_asset(QUAD_ID, quad, None)
+        .load_asset::<Mesh>(SWORD_ID)
         .add_systems(Init, |mut spawner: Spawner| {
             spawner
                 .spawn()
-                .with_component(GlobalTransform::with_translation(math::Vec3::Z * 1.0))
+                .with_component(GlobalTransform::with_translation(math::Vec3::Z * 5.0))
                 .with_component(Camera::default())
-                .with_component(View3d::orthographic())
+                .with_component(View3d::default())
                 .finish();
             spawner
                 .spawn()
-                .with_component(GlobalTransform::new(
-                    math::Vec3::new(0.0, 0.0, 0.0),
-                    math::Quat::IDENTITY,
-                    math::Vec3::new(1.0, 1.0, 1.0),
-                ))
+                .with_component(GlobalTransform::IDENTITY)
                 .with_component(DrawMesh::<UnlitColor> {
                     material: RED_MAT,
-                    mesh: QUAD_ID,
+                    mesh: SWORD_ID,
                 })
                 .finish();
-            let transform = GlobalTransform::new(
-                math::Vec3::new(1.0, 0.0, 0.0),
-                math::Quat::IDENTITY,
-                math::Vec3::new(1.0, 1.0, 1.0),
-            );
-            spawner
-                .spawn()
-                .with_component(transform)
-                .with_component(DrawMesh::<UnlitColor> {
-                    material: RED_MAT,
-                    mesh: QUAD_ID,
-                })
-                .finish();
+            // let transform = GlobalTransform::new(
+            //     math::Vec3::new(1.0, 0.0, 0.0),
+            //     math::Quat::IDENTITY,
+            //     math::Vec3::new(1.0, 1.0, 1.0),
+            // );
+            // spawner
+            //     .spawn()
+            //     .with_component(transform)
+            //     .with_component(DrawMesh::<UnlitColor> {
+            //         material: RED_MAT,
+            //         mesh: QUAD_ID,
+            //     })
+            //     .finish();
         })
         .add_systems(
             Start,
@@ -230,10 +231,6 @@ impl<M: Material> Draw for DrawMesh<M> {
         Mesh3d {
             world: transform.matrix().to_cols_array(),
         }
-    }
-
-    fn formats() -> &'static [render::wgpu::VertexFormat] {
-        &[render::wgpu::VertexFormat::Float32x2]
     }
 
     fn shader() -> impl Into<AssetId<render::Shader>> {

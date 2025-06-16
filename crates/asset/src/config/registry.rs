@@ -115,6 +115,14 @@ impl AssetRegistry {
         }
     }
 
+    pub fn map(&self) -> &HashMap<TypeId, AssetType> {
+        &self.map
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &AssetMeta> {
+        self.metas.iter()
+    }
+
     pub fn contains(&self, ty: TypeId) -> bool {
         self.map.contains_key(&ty)
     }

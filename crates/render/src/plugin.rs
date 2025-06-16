@@ -61,7 +61,8 @@ impl Plugin for RenderPlugin {
             .extract_render_asset::<ShaderSource>()
             .add_importer::<ShaderSource>()
             .add_importer::<ObjImporter>()
-            .add_loader::<SubMesh>();
+            .add_loader::<SubMesh>()
+            .set_default_processor::<Mesh>();
     }
 
     fn finish(&mut self, app: &mut AppBuilder) {

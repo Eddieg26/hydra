@@ -1786,6 +1786,7 @@ dependencies = [
  "math",
  "serde",
  "smol",
+ "thiserror 2.0.12",
  "tobj",
  "transform",
  "uuid",
@@ -1803,6 +1804,7 @@ dependencies = [
  "math",
  "render",
  "transform",
+ "uuid",
  "window",
 ]
 

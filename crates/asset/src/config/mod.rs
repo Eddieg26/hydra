@@ -46,6 +46,10 @@ impl AssetConfigBuilder {
         }
     }
 
+    pub fn registry(&self) -> &AssetRegistry {
+        &self.registry
+    }
+
     pub fn register<A: Asset>(&mut self) -> AssetType {
         self.registry.register::<A>()
     }
@@ -60,6 +64,10 @@ impl AssetConfigBuilder {
         self.processors.add::<P>();
         self.register::<P::Output>();
         self.register::<<P::Input as AssetImporter>::Asset>();
+    }
+
+    pub fn set_default_processor<P: AssetProcessor>(&mut self) {
+        self.processors.set_default::<P>();
     }
 
     pub fn add_source<F: FileSystem>(&mut self, name: impl Into<SourceName<'static>>, fs: F) {

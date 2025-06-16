@@ -40,7 +40,7 @@ pub trait AssetProcessor: Send + Sync + 'static {
     type Error: std::error::Error + Send + Sync + 'static;
 
     fn process(
-        ctx: &mut ProcessContext,
+        ctx: &mut ProcessContext<'_>,
         asset: <Self::Input as AssetImporter>::Asset,
         metadata: &AssetMetadata<<Self::Input as AssetImporter>::Settings>,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send;
@@ -111,6 +111,16 @@ impl AssetProcessors {
 
     pub fn get(&self, ty: TypeId) -> Option<&ErasedProcesser> {
         self.processors.get(&ty)
+    }
+
+    pub fn set_default<P: AssetProcessor>(&mut self) {
+        let ty = TypeId::of::<P>();
+        if !self.processors.contains_key(&ty) {
+            self.processors.insert(ty, ErasedProcesser::new::<P>());
+        }
+        for ext in P::Input::extensions() {
+            self.default_processors.insert(ext, ty);
+        }
     }
 
     pub fn get_default(&self, ext: &str) -> Option<u32> {

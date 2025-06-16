@@ -76,6 +76,7 @@ pub trait AssetAppExt {
         &mut self,
         path: impl Into<LoadPath<'static>>,
     ) -> &mut Self;
+    fn set_default_processor<P: AssetProcessor>(&mut self) -> &mut Self;
     fn set_cache(&mut self, cache: AssetCache) -> &mut Self;
 }
 
@@ -124,6 +125,11 @@ impl AssetAppExt for ecs::AppBuilder {
         path: impl Into<LoadPath<'static>>,
     ) -> &mut Self {
         self.world_mut().load_asset::<A>(path);
+        self
+    }
+
+    fn set_default_processor<P: AssetProcessor>(&mut self) -> &mut Self {
+        self.world_mut().set_default_processor::<P>();
         self
     }
 
@@ -203,6 +209,13 @@ impl AssetAppExt for ecs::World {
 
         let config = self.resource_mut::<AssetConfigBuilder>();
         config.load_asset::<A>(path);
+
+        self
+    }
+
+    fn set_default_processor<P: AssetProcessor>(&mut self) -> &mut Self {
+        let config = self.get_or_insert_resource(AssetConfigBuilder::new);
+        config.set_default_processor::<P>();
 
         self
     }

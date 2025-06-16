@@ -15,6 +15,7 @@ bitflags = { workspace = true }
 smol = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true }
+thiserror = { workspace = true }
 downcast-rs = { workspace = true }
 wgpu = { workspace = true, features = ["spirv", "glsl", "serde"] }
 encase = { version = "0.10.0", features = ["glam"] }

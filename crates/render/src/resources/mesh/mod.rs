@@ -4,12 +4,16 @@ use super::{
     extract::{ExtractError, ReadWrite, RenderAsset, RenderAssetExtractor},
 };
 use crate::{RenderAssetType, device::RenderDevice, types::Color};
-use asset::{Asset, Settings, importer::AssetImporter};
+use asset::{Asset, Settings, importer::AssetImporter, processor::AssetProcessor};
 use derive_render::RenderAsset;
-use ecs::system::{ArgItem, unlifetime::Read};
+use ecs::{
+    IndexMap,
+    system::{ArgItem, unlifetime::Read},
+};
 use math::bounds::Bounds;
 use smol::io::AsyncAsSync;
-use std::{hash::Hash, ops::Range};
+use std::{borrow::Cow, hash::Hash, ops::Range};
+use thiserror::Error;
 use waker_fn::waker_fn;
 use wgpu::{BufferUsages, VertexStepMode};
 
@@ -286,6 +290,10 @@ impl Mesh {
         }
     }
 
+    pub fn has_attribute(&self, kind: MeshAttributeType) -> bool {
+        self.attribute_index(kind).is_some()
+    }
+
     pub fn dirty(&self) -> MeshDirty {
         self.dirty
     }
@@ -515,12 +523,169 @@ impl Mesh {
             }
         }
     }
+
+    fn calculate_normals(positions: &[math::Vec3], indices: &[u32]) -> Vec<math::Vec3> {
+        let mut normals = vec![math::Vec3::ZERO; positions.len()];
+
+        for chunk in indices.chunks(3) {
+            if chunk.len() < 3 {
+                continue;
+            }
+
+            let a = positions[chunk[0] as usize];
+            let b = positions[chunk[1] as usize];
+            let c = positions[chunk[2] as usize];
+
+            let normal = (b - a).cross(c - a).normalize();
+
+            normals[chunk[0] as usize] += normal;
+            normals[chunk[1] as usize] += normal;
+            normals[chunk[2] as usize] += normal;
+        }
+
+        for normal in &mut normals {
+            *normal = normal.normalize();
+        }
+
+        normals
+    }
+
+    fn generate_tex_coords(positions: &[math::Vec3], indices: &[u32]) -> Vec<math::Vec2> {
+        let mut tex_coords = vec![math::Vec2::ZERO; positions.len()];
+
+        for chunk in indices.chunks(3) {
+            if chunk.len() < 3 {
+                continue;
+            }
+
+            let a = positions[chunk[0] as usize];
+            let b = positions[chunk[1] as usize];
+            let c = positions[chunk[2] as usize];
+
+            let edge1 = b - a;
+            let edge2 = c - a;
+
+            let delta_uv1 = math::Vec2::new(edge1.x, edge1.y);
+            let delta_uv2 = math::Vec2::new(edge2.x, edge2.y);
+
+            let f = 1.0 / (delta_uv1.x * delta_uv2.y - delta_uv1.y * delta_uv2.x);
+
+            if f.is_finite() {
+                let tex_coord = math::Vec2::new(
+                    f * (delta_uv2.y * edge1.x - delta_uv1.y * edge2.x),
+                    f * (delta_uv2.y * edge1.y - delta_uv1.y * edge2.y),
+                );
+
+                tex_coords[chunk[0] as usize] += tex_coord;
+                tex_coords[chunk[1] as usize] += tex_coord;
+                tex_coords[chunk[2] as usize] += tex_coord;
+            }
+        }
+
+        for tex_coord in &mut tex_coords {
+            *tex_coord = tex_coord.normalize();
+        }
+
+        tex_coords
+    }
+
+    fn calculate_tangents(
+        positions: &[math::Vec3],
+        tex_coords: &[math::Vec2],
+        indices: &[u32],
+    ) -> Vec<math::Vec4> {
+        let mut tangents = vec![math::Vec4::ZERO; positions.len()];
+
+        for chunk in indices.chunks(3) {
+            if chunk.len() < 3 {
+                continue;
+            }
+
+            let a = positions[chunk[0] as usize];
+            let b = positions[chunk[1] as usize];
+            let c = positions[chunk[2] as usize];
+
+            let ta = tex_coords[chunk[0] as usize];
+            let tb = tex_coords[chunk[1] as usize];
+            let tc = tex_coords[chunk[2] as usize];
+
+            let edge1 = b - a;
+            let edge2 = c - a;
+
+            let delta_uv1 = tb - ta;
+            let delta_uv2 = tc - ta;
+
+            let f = 1.0 / (delta_uv1.x * delta_uv2.y - delta_uv1.y * delta_uv2.x);
+
+            if f.is_finite() {
+                let tangent = math::Vec4::new(
+                    f * (delta_uv2.y * edge1.x - delta_uv1.y * edge2.x),
+                    f * (delta_uv2.y * edge1.y - delta_uv1.y * edge2.y),
+                    f * (delta_uv2.y * edge1.z - delta_uv1.y * edge2.z),
+                    0.0,
+                )
+                .normalize();
+
+                tangents[chunk[0] as usize] += tangent;
+                tangents[chunk[1] as usize] += tangent;
+                tangents[chunk[2] as usize] += tangent;
+            }
+        }
+
+        for tangent in &mut tangents {
+            *tangent = tangent.normalize();
+        }
+
+        tangents
+    }
+
+    fn build_indices(positions: &[math::Vec3]) -> Vec<u32> {
+        #[derive(Hash, Eq, PartialEq, Clone, Copy)]
+        struct VertexKey {
+            x: i32,
+            y: i32,
+            z: i32,
+        }
+
+        impl From<&math::Vec3> for VertexKey {
+            fn from(vec: &math::Vec3) -> Self {
+                const SCALE: f32 = 1000.0; // Scale to avoid floating point precision issues
+
+                Self {
+                    x: (vec.x * SCALE) as i32,
+                    y: (vec.y * SCALE) as i32,
+                    z: (vec.z * SCALE) as i32,
+                }
+            }
+        }
+
+        let mut keys = IndexMap::new();
+        let mut indices = Vec::new();
+
+        for (i, position) in positions.iter().enumerate() {
+            let key = VertexKey::from(position);
+            if let Some(&index) = keys.get(&key) {
+                indices.push(index as u32);
+            } else {
+                keys.insert(key, i);
+                indices.push(i as u32);
+            }
+        }
+
+        indices
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MeshAttributeLayout {
     pub ty: MeshAttributeType,
     pub format: wgpu::VertexFormat,
+}
+
+impl MeshAttributeLayout {
+    pub const fn new(ty: MeshAttributeType, format: wgpu::VertexFormat) -> Self {
+        Self { ty, format }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -648,7 +813,7 @@ impl RenderAssetExtractor for Mesh {
 }
 
 #[derive(Default, Settings, serde::Serialize, serde::Deserialize)]
-pub struct MeshImportSettings {
+pub struct ObjImportSettings {
     read_write: ReadWrite,
 }
 
@@ -657,7 +822,7 @@ pub struct ObjImporter;
 impl AssetImporter for ObjImporter {
     type Asset = Mesh;
 
-    type Settings = MeshImportSettings;
+    type Settings = ObjImportSettings;
 
     type Error = tobj::LoadError;
 
@@ -671,14 +836,21 @@ impl AssetImporter for ObjImporter {
         let reader = AsyncAsSync::new(&mut context, reader);
         let mut reader = std::io::BufReader::new(reader);
 
-        let (models, _) = tobj::load_obj_buf(&mut reader, &tobj::LoadOptions::default(), |_| {
-            Ok((vec![], Default::default()))
-        })?;
+        let (models, _) = tobj::load_obj_buf(
+            &mut reader,
+            &tobj::LoadOptions {
+                triangulate: true,
+                single_index: true,
+                ..Default::default()
+            },
+            |_| Ok((vec![], Default::default())),
+        )?;
 
         let mut positions = Vec::new();
         let mut tex_coords = Vec::new();
         let mut normals = Vec::new();
         let mut indices = Vec::new();
+        let flatten = models.len() == 1;
 
         for model in models {
             let start_vertex = positions.len();
@@ -688,21 +860,12 @@ impl AssetImporter for ObjImporter {
                 positions.push(math::Vec3::from_slice(vertices));
             }
 
-            for tex_coord in model.mesh.texcoord_indices.chunks(2) {
-                let coord = math::Vec2::new(
-                    model.mesh.texcoords[tex_coord[0] as usize],
-                    model.mesh.texcoords[tex_coord[1] as usize],
-                );
-                tex_coords.push(coord);
+            for tex_coord in model.mesh.texcoords.chunks(2) {
+                tex_coords.push(math::Vec2::from_slice(tex_coord));
             }
 
-            for normal in model.mesh.normal_indices.chunks(3) {
-                let normal = math::Vec3::new(
-                    model.mesh.normals[normal[0] as usize],
-                    model.mesh.normals[normal[1] as usize],
-                    model.mesh.normals[normal[2] as usize],
-                );
-                normals.push(normal);
+            for normal in model.mesh.normals.chunks(3) {
+                normals.push(math::Vec3::from_slice(normal));
             }
 
             indices.extend(model.mesh.indices);
@@ -710,15 +873,19 @@ impl AssetImporter for ObjImporter {
             let vertex_count = positions.len() - start_vertex;
             let index_count = indices.len() - start_index;
 
-            let _ = ctx.add_child(
-                model.name,
-                SubMesh {
-                    start_vertex: start_vertex as u32,
-                    vertex_count: vertex_count as u32,
-                    start_index: start_index as u32,
-                    index_count: index_count as u32,
-                },
-            );
+            // If we have multiple models, we create a submesh for each model.
+            // If we have a single model, we can flatten it into the main mesh.
+            if !flatten {
+                let _ = ctx.add_child(
+                    model.name,
+                    SubMesh {
+                        start_vertex: start_vertex as u32,
+                        vertex_count: vertex_count as u32,
+                        start_index: start_index as u32,
+                        index_count: index_count as u32,
+                    },
+                );
+            }
         }
 
         let mut mesh = Mesh::new(MeshTopology::TriangleList);
@@ -750,6 +917,118 @@ impl AssetImporter for ObjImporter {
         mesh.read_write = metadata.read_write;
 
         Ok(mesh)
+    }
+
+    fn extensions() -> &'static [&'static str] {
+        &["obj"]
+    }
+}
+
+#[derive(Error, Debug)]
+pub struct ProcessError;
+impl std::fmt::Display for ProcessError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Failed to process mesh asset")
+    }
+}
+
+impl AssetProcessor for Mesh {
+    type Input = ObjImporter;
+
+    type Output = Mesh;
+
+    type Error = ProcessError;
+
+    async fn process(
+        _: &mut asset::processor::ProcessContext<'_>,
+        mut asset: <Self::Input as AssetImporter>::Asset,
+        _: &asset::AssetMetadata<<Self::Input as AssetImporter>::Settings>,
+    ) -> Result<Self::Output, Self::Error> {
+        let Some(mut positions) = asset
+            .attribute_mut(MeshAttributeType::Position)
+            .and_then(|a| match a.values.clone() {
+                MeshAttributeValues::Vec3(v) => Some(v),
+                _ => None,
+            })
+        else {
+            return Ok(asset);
+        };
+
+        let indices = match asset.indices() {
+            Some(indices) => indices,
+            None => {
+                let indices = Mesh::build_indices(&positions);
+                positions = indices
+                    .iter()
+                    .map(|index| positions[*index as usize])
+                    .collect::<Vec<_>>();
+
+                asset.set_indices(Indices::new(&indices));
+                asset.indices().unwrap()
+            }
+        };
+
+        let mut attributes = Vec::new();
+
+        if !asset.has_attribute(MeshAttributeType::Normal) {
+            let indices = bytemuck::cast_slice(indices.data());
+            let normals = MeshAttribute {
+                ty: MeshAttributeType::Normal,
+                values: MeshAttributeValues::Vec3(Mesh::calculate_normals(&positions, indices)),
+            };
+
+            attributes.push(normals);
+        }
+
+        if !asset.has_attribute(MeshAttributeType::TexCoord0)
+            && !asset.has_attribute(MeshAttributeType::TexCoord1)
+        {
+            let indices = bytemuck::cast_slice(indices.data());
+            let tex_coords = MeshAttribute {
+                ty: MeshAttributeType::TexCoord0,
+                values: MeshAttributeValues::Vec2(Mesh::generate_tex_coords(&positions, indices)),
+            };
+
+            attributes.push(tex_coords);
+        }
+
+        if !asset.has_attribute(MeshAttributeType::Tangent) {
+            let tex_coords = asset
+                .attribute(MeshAttributeType::TexCoord0)
+                .or(asset.attribute(MeshAttributeType::TexCoord1))
+                .and_then(|a| match &a.values {
+                    MeshAttributeValues::Vec2(v) => Some(Cow::Borrowed(v)),
+                    _ => None,
+                })
+                .expect("Mesh must have texture coordinates to calculate tangents");
+
+            let indices = bytemuck::cast_slice(indices.data());
+            let tangents = MeshAttribute {
+                ty: MeshAttributeType::Tangent,
+                values: MeshAttributeValues::Vec4(Mesh::calculate_tangents(
+                    &positions,
+                    &tex_coords,
+                    indices,
+                )),
+            };
+
+            attributes.push(tangents);
+        }
+
+        for attribute in attributes {
+            asset.add_attribute(attribute);
+        }
+
+        asset.add_attribute(MeshAttribute {
+            ty: MeshAttributeType::Position,
+            values: MeshAttributeValues::Vec3(positions),
+        });
+
+        asset.calculate_bounds();
+
+        asset.attributes.sort_by_key(|a| a.ty);
+
+        Ok(asset)
     }
 }
 
