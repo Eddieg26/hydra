@@ -1,5 +1,5 @@
 use crate::{
-    Color, DepthOutput, ExtractResource, PassBuilder, RenderGraphPass, RenderItem, RenderOutput,
+    Color, DepthOutput, ExtractResource, PassBuilder, RenderGraphPass, RenderOutput, SubMesh,
     device::RenderDevice,
     renderer::{Camera, RenderContext, RenderState},
     resources::{
@@ -280,6 +280,10 @@ pub trait Draw: Component + Clone {
 
     fn mesh(&self) -> AssetId<Mesh>;
 
+    fn sub_mesh(&self) -> Option<AssetId<SubMesh>> {
+        None
+    }
+
     fn data(&self, transform: &GlobalTransform) -> Self::Mesh;
 
     fn primitive_state() -> wgpu::PrimitiveState {
@@ -328,6 +332,7 @@ impl<D: Draw> ExtractedDraws<D> {
 pub struct BatchKey {
     pub material: ErasedId,
     pub mesh: AssetId<Mesh>,
+    pub sub_mesh: Option<AssetId<SubMesh>>,
 }
 
 pub struct DrawCall<V: View, P: RenderPhase> {
@@ -378,6 +383,7 @@ impl<V: View, P: RenderPhase> ViewDrawCalls<V, P> {
                     let key = BatchKey {
                         material: extracted.draw.material().into(),
                         mesh: extracted.draw.mesh(),
+                        sub_mesh: extracted.draw.sub_mesh(),
                     };
 
                     let (draw_index, data) = batches.entry(key).or_insert((index, vec![]));
@@ -409,6 +415,7 @@ impl<V: View, P: RenderPhase> ViewDrawCalls<V, P> {
                     let key = BatchKey {
                         material: extracted.draw.material().into(),
                         mesh: extracted.draw.mesh(),
+                        sub_mesh: extracted.draw.sub_mesh(),
                     };
 
                     let item = extracted
@@ -449,6 +456,7 @@ impl<V: View, P: RenderPhase> ViewDrawCalls<V, P> {
         view: &QueuedView<V>,
         views: &ViewBuffer<V>,
         meshes: &RenderAssets<RenderMesh>,
+        sub_meshes: &RenderAssets<SubMesh>,
         functions: &DrawFunctions<V>,
     ) {
         let Some(calls) = self.0.get(entity) else {
@@ -458,7 +466,16 @@ impl<V: View, P: RenderPhase> ViewDrawCalls<V, P> {
         for call in calls {
             let function = &functions.0[call.function.0];
 
-            function(state, ctx, meshes, views, view, &call.key, &call.instances);
+            function(
+                state,
+                ctx,
+                meshes,
+                sub_meshes,
+                views,
+                view,
+                &call.key,
+                &call.instances,
+            );
         }
     }
 }
@@ -606,6 +623,7 @@ pub type DrawFunction<V> = fn(
     &mut RenderState,
     &RenderContext,
     &RenderAssets<RenderMesh>,
+    &RenderAssets<SubMesh>,
     &ViewBuffer<V>,
     &QueuedView<V>,
     &BatchKey,
@@ -628,55 +646,61 @@ impl<V: View> DrawFunctions<V> {
 
         let id = DrawFunctionId(self.0.len(), Default::default());
 
-        let f: DrawFunction<V> = |state, ctx, meshes, view_buffer, view, key, instances| {
-            const VIEW_GROUP: u32 = 0;
-            const MATERIAL_GROUP: u32 = 1;
-            const VERTEX_BUFFER_SLOT: u32 = 0;
-            const INSTANCE_BUFFER_SLOT: u32 = 1;
+        let f: DrawFunction<V> =
+            |state, ctx, meshes, sub_meshes, view_buffer, view, key, instances| {
+                const VIEW_GROUP: u32 = 0;
+                const MATERIAL_GROUP: u32 = 1;
+                const VERTEX_BUFFER_SLOT: u32 = 0;
+                const INSTANCE_BUFFER_SLOT: u32 = 1;
 
-            let mesh_data = ctx.world().resource::<MeshDataBuffer<D::Mesh>>();
+                let mesh_data = ctx.world().resource::<MeshDataBuffer<D::Mesh>>();
 
-            let mesh = match meshes.get(&(key.mesh).into()) {
-                Some(mesh) => mesh,
-                None => return,
-            };
+                let mesh = match meshes.get(&(key.mesh).into()) {
+                    Some(mesh) => mesh,
+                    None => return,
+                };
 
-            let materials = ctx
-                .world()
-                .resource::<RenderAssets<MaterialBinding<D::Material>>>();
+                let sub_mesh = match key.sub_mesh.and_then(|id| sub_meshes.get(&(id.into()))) {
+                    Some(sub_mesh) => *sub_mesh,
+                    None => SubMesh::from(mesh),
+                };
 
-            let material = match materials.get(&(key.material.into())) {
-                Some(material) => material,
-                None => return,
-            };
+                let materials = ctx
+                    .world()
+                    .resource::<RenderAssets<MaterialBinding<D::Material>>>();
 
-            let Some(pipeline) = ctx
-                .world()
-                .try_resource::<DrawPipeline<D>>()
-                .and_then(|id| ctx.get_render_pipeline(id))
-            else {
-                return;
-            };
+                let material = match materials.get(&(key.material.into())) {
+                    Some(material) => material,
+                    None => return,
+                };
 
-            let vertices = 0..mesh.vertex_count() as u32;
-            let indices = 0..mesh.index_count() as u32;
+                let Some(pipeline) = ctx
+                    .world()
+                    .try_resource::<DrawPipeline<D>>()
+                    .and_then(|id| ctx.get_render_pipeline(id))
+                else {
+                    return;
+                };
 
-            state.set_pipeline(pipeline);
-            state.set_bind_group(VIEW_GROUP, view_buffer.bind_group(), &[view.dynamic_index]);
-            state.set_bind_group(MATERIAL_GROUP, material, &[]);
-            state.set_vertex_buffer(VERTEX_BUFFER_SLOT, mesh.vertex_buffer().slice(..));
-            state.set_vertex_buffer(INSTANCE_BUFFER_SLOT, mesh_data.buffer().slice(..));
+                let vertices = sub_mesh.start_vertex..sub_mesh.start_vertex + sub_mesh.vertex_count;
+                let indices = sub_mesh.start_index..sub_mesh.start_index + sub_mesh.index_count;
 
-            match mesh.index_buffer() {
-                Some(buffer) => {
-                    state.set_index_buffer(buffer.slice(..));
-                    state.draw_indexed(indices, vertices.start as i32, instances.clone());
+                state.set_pipeline(pipeline);
+                state.set_bind_group(VIEW_GROUP, view_buffer.bind_group(), &[view.dynamic_index]);
+                state.set_bind_group(MATERIAL_GROUP, material, &[]);
+                state.set_vertex_buffer(VERTEX_BUFFER_SLOT, mesh.vertex_buffer().slice(..));
+                state.set_vertex_buffer(INSTANCE_BUFFER_SLOT, mesh_data.buffer().slice(..));
+
+                match mesh.index_buffer() {
+                    Some(buffer) => {
+                        state.set_index_buffer(buffer.slice(..));
+                        state.draw_indexed(indices, vertices.start as i32, instances.clone());
+                    }
+                    None => {
+                        state.draw(vertices, instances.clone());
+                    }
                 }
-                None => {
-                    state.draw(vertices, instances.clone());
-                }
-            }
-        };
+            };
 
         self.0.insert(ty, f);
 
@@ -694,6 +718,7 @@ impl RenderPhases {
                 let views = ctx.world().resource::<ViewBuffer<V>>();
                 let draw_calls = ctx.world().resource::<ViewDrawCalls<V, P>>();
                 let meshes = ctx.world().resource::<RenderAssets<RenderMesh>>();
+                let sub_meshes = ctx.world().resource::<RenderAssets<SubMesh>>();
 
                 let Some(calls) = draw_calls.get(&entity) else {
                     return;
@@ -706,7 +731,16 @@ impl RenderPhases {
                 for call in calls {
                     let function = functions.0[*call.function];
 
-                    function(state, ctx, meshes, views, view, &call.key, &call.instances);
+                    function(
+                        state,
+                        ctx,
+                        meshes,
+                        sub_meshes,
+                        views,
+                        view,
+                        &call.key,
+                        &call.instances,
+                    );
                 }
             },
             P::QUEUE,

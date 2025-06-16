@@ -70,6 +70,12 @@ impl AssetConfigBuilder {
         self.cache = cache
     }
 
+    pub fn set_deserialize<A: Asset + for<'a> Deserialize<'a>>(&mut self) {
+        let ty = self.register::<A>();
+
+        self.registry.set_deserialize::<A>(ty);
+    }
+
     pub fn is_registered<A: Asset>(&self) -> bool {
         self.registry.contains(TypeId::of::<A>())
     }

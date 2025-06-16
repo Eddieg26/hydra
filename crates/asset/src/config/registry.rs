@@ -67,6 +67,10 @@ impl AssetMeta {
         (self.loaded)(world, id)
     }
 
+    pub fn can_load(&self) -> bool {
+        self.deserialize.is_some()
+    }
+
     pub fn deserialize(&self, data: &[u8]) -> Option<Result<ErasedAsset, AssetIoError>> {
         self.deserialize.map(|deserialize| deserialize(data))
     }

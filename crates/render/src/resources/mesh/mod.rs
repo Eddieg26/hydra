@@ -3,8 +3,9 @@ use super::{
     buffer::{IndexBuffer, Indices, VertexBuffer},
     extract::{ExtractError, ReadWrite, RenderAsset, RenderAssetExtractor},
 };
-use crate::{device::RenderDevice, types::Color};
+use crate::{RenderAssetType, device::RenderDevice, types::Color};
 use asset::{Asset, Settings, importer::AssetImporter};
+use derive_render::RenderAsset;
 use ecs::system::{ArgItem, unlifetime::Read};
 use math::bounds::Bounds;
 use smol::io::AsyncAsSync;
@@ -188,16 +189,27 @@ bitflags::bitflags! {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Asset, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Eq,
+    PartialEq,
+    Hash,
+    Asset,
+    RenderAsset,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct SubMesh {
-    pub start_vertex: u64,
-    pub vertex_count: u64,
-    pub start_index: u64,
-    pub index_count: u64,
+    pub start_vertex: u32,
+    pub vertex_count: u32,
+    pub start_index: u32,
+    pub index_count: u32,
 }
 
 impl SubMesh {
-    pub fn new(start_vertex: u64, vertex_count: u64, start_index: u64, index_count: u64) -> Self {
+    pub fn new(start_vertex: u32, vertex_count: u32, start_index: u32, index_count: u32) -> Self {
         Self {
             start_vertex,
             vertex_count,
@@ -211,9 +223,9 @@ impl From<&Mesh> for SubMesh {
     fn from(mesh: &Mesh) -> Self {
         Self {
             start_vertex: 0,
-            vertex_count: mesh.vertex_count() as u64,
+            vertex_count: mesh.vertex_count() as u32,
             start_index: 0,
-            index_count: mesh.index_count() as u64,
+            index_count: mesh.index_count() as u32,
         }
     }
 }
@@ -274,7 +286,6 @@ impl Mesh {
         }
     }
 
-
     pub fn dirty(&self) -> MeshDirty {
         self.dirty
     }
@@ -334,7 +345,6 @@ impl Mesh {
     pub fn attribute_index(&self, ty: MeshAttributeType) -> Option<usize> {
         self.attributes.iter().position(|a| a.ty == ty)
     }
-
 
     pub fn clear(&mut self) {
         for attribute in &mut self.attributes {
@@ -617,7 +627,7 @@ impl RenderMesh {
 
 impl From<&RenderMesh> for SubMesh {
     fn from(mesh: &RenderMesh) -> Self {
-        SubMesh::new(0, mesh.vertex_count() as u64, 0, mesh.index_count() as u64)
+        SubMesh::new(0, mesh.vertex_count() as u32, 0, mesh.index_count() as u32)
     }
 }
 
@@ -703,10 +713,10 @@ impl AssetImporter for ObjImporter {
             let _ = ctx.add_child(
                 model.name,
                 SubMesh {
-                    start_vertex: start_vertex as u64,
-                    vertex_count: vertex_count as u64,
-                    start_index: start_index as u64,
-                    index_count: index_count as u64,
+                    start_vertex: start_vertex as u32,
+                    vertex_count: vertex_count as u32,
+                    start_index: start_index as u32,
+                    index_count: index_count as u32,
                 },
             );
         }
@@ -740,5 +750,22 @@ impl AssetImporter for ObjImporter {
         mesh.read_write = metadata.read_write;
 
         Ok(mesh)
+    }
+}
+
+impl RenderAssetExtractor for SubMesh {
+    type RenderAsset = SubMesh;
+
+    type Arg = ();
+
+    fn extract(
+        asset: Self,
+        _: &mut ArgItem<Self::Arg>,
+    ) -> Result<Self::RenderAsset, ExtractError<Self>> {
+        Ok(asset)
+    }
+
+    fn dependencies() -> Vec<super::RenderAssetType> {
+        vec![RenderAssetType::of::<RenderMesh>()]
     }
 }

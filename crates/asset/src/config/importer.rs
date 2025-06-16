@@ -83,6 +83,13 @@ impl<'a> ImportContext<'a> {
                 std::any::type_name::<A>()
             ));
 
+        if !asset_meta.can_load() {
+            return Err(AssetIoError::Unknown(format!(
+                "Asset type {} cannot be loaded. Please ensure a loader is registered for this type.",
+                asset_meta.name
+            )));
+        }
+
         let name = name.to_string();
         let id = AssetId::from(uuid::Uuid::new_v5(self.id.uuid(), name.as_bytes()));
         let path = self.path.with_name(name).into_owned();

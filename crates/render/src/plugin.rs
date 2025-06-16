@@ -1,6 +1,6 @@
 use crate::{
-    CameraSubGraph, DrawPass, ExtractError, IntoRenderItem, MeshData, ProcessAssets, Renderer,
-    Shader,
+    CameraSubGraph, DrawPass, ExtractError, IntoRenderItem, MeshData, ObjImporter, ProcessAssets,
+    Renderer, Shader, SubMesh,
     app::{
         PostRender, PreRender, Present, Process, ProcessPipelines, Queue, QueueDraws, QueueViews,
         Render, RenderApp,
@@ -57,8 +57,11 @@ impl Plugin for RenderPlugin {
             .extract_render_asset::<Mesh>()
             .extract_render_asset::<Texture>()
             .extract_render_asset::<RenderTexture>()
+            .extract_render_asset::<SubMesh>()
             .extract_render_asset::<ShaderSource>()
-            .add_importer::<ShaderSource>();
+            .add_importer::<ShaderSource>()
+            .add_importer::<ObjImporter>()
+            .add_loader::<SubMesh>();
     }
 
     fn finish(&mut self, app: &mut AppBuilder) {

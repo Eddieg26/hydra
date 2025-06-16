@@ -58,6 +58,7 @@ impl Plugin for AssetPlugin {
 
 pub trait AssetAppExt {
     fn register_asset<A: Asset>(&mut self) -> &mut Self;
+    fn add_loader<A: Asset + for<'a> Deserialize<'a>>(&mut self) -> &mut Self;
     fn add_importer<I: AssetImporter>(&mut self) -> &mut Self;
     fn add_processor<P: AssetProcessor>(&mut self) -> &mut Self;
     fn add_source<S: FileSystem>(
@@ -81,6 +82,11 @@ pub trait AssetAppExt {
 impl AssetAppExt for ecs::AppBuilder {
     fn register_asset<A: Asset>(&mut self) -> &mut Self {
         self.world_mut().register_asset::<A>();
+        self
+    }
+
+    fn add_loader<A: Asset + for<'a> Deserialize<'a>>(&mut self) -> &mut Self {
+        self.world_mut().add_loader::<A>();
         self
     }
 
@@ -135,6 +141,15 @@ impl AssetAppExt for ecs::World {
             self.add_resource(Assets::<A>::new());
             self.register_event::<AssetEvent<A>>();
         }
+
+        self
+    }
+
+    fn add_loader<A: Asset + for<'a> Deserialize<'a>>(&mut self) -> &mut Self {
+        self.register_asset::<A>();
+
+        let config = self.resource_mut::<AssetConfigBuilder>();
+        config.set_deserialize::<A>();
 
         self
     }

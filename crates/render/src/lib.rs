@@ -19,4 +19,4 @@ pub mod wgpu {
 
 pub use encase::*;
 
-pub use derive_render::{AsBinding, ShaderType};
+pub use derive_render::{AsBinding, ShaderType, RenderAsset};
