@@ -524,33 +524,7 @@ impl Mesh {
         }
     }
 
-    fn calculate_normals(positions: &[math::Vec3], indices: &[u32]) -> Vec<math::Vec3> {
-        let mut normals = vec![math::Vec3::ZERO; positions.len()];
-
-        for chunk in indices.chunks(3) {
-            if chunk.len() < 3 {
-                continue;
-            }
-
-            let a = positions[chunk[0] as usize];
-            let b = positions[chunk[1] as usize];
-            let c = positions[chunk[2] as usize];
-
-            let normal = (b - a).cross(c - a).normalize();
-
-            normals[chunk[0] as usize] += normal;
-            normals[chunk[1] as usize] += normal;
-            normals[chunk[2] as usize] += normal;
-        }
-
-        for normal in &mut normals {
-            *normal = normal.normalize();
-        }
-
-        normals
-    }
-
-    fn generate_tex_coords(positions: &[math::Vec3], indices: &[u32]) -> Vec<math::Vec2> {
+    pub fn calculate_tex_coords(positions: &[math::Vec3], indices: &[u32]) -> Vec<math::Vec2> {
         let mut tex_coords = vec![math::Vec2::ZERO; positions.len()];
 
         for chunk in indices.chunks(3) {
@@ -589,7 +563,33 @@ impl Mesh {
         tex_coords
     }
 
-    fn calculate_tangents(
+    pub fn calculate_normals(positions: &[math::Vec3], indices: &[u32]) -> Vec<math::Vec3> {
+        let mut normals = vec![math::Vec3::ZERO; positions.len()];
+
+        for chunk in indices.chunks(3) {
+            if chunk.len() < 3 {
+                continue;
+            }
+
+            let a = positions[chunk[0] as usize];
+            let b = positions[chunk[1] as usize];
+            let c = positions[chunk[2] as usize];
+
+            let normal = (b - a).cross(c - a).normalize();
+
+            normals[chunk[0] as usize] += normal;
+            normals[chunk[1] as usize] += normal;
+            normals[chunk[2] as usize] += normal;
+        }
+
+        for normal in &mut normals {
+            *normal = normal.normalize();
+        }
+
+        normals
+    }
+
+    pub fn calculate_tangents(
         positions: &[math::Vec3],
         tex_coords: &[math::Vec2],
         indices: &[u32],
@@ -639,7 +639,7 @@ impl Mesh {
         tangents
     }
 
-    fn build_indices(positions: &[math::Vec3]) -> Vec<u32> {
+    pub fn build_indices(positions: &[math::Vec3]) -> Vec<u32> {
         #[derive(Hash, Eq, PartialEq, Clone, Copy)]
         struct VertexKey {
             x: i32,
@@ -986,7 +986,7 @@ impl AssetProcessor for Mesh {
             let indices = bytemuck::cast_slice(indices.data());
             let tex_coords = MeshAttribute {
                 ty: MeshAttributeType::TexCoord0,
-                values: MeshAttributeValues::Vec2(Mesh::generate_tex_coords(&positions, indices)),
+                values: MeshAttributeValues::Vec2(Mesh::calculate_tex_coords(&positions, indices)),
             };
 
             attributes.push(tex_coords);
