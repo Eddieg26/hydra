@@ -17,7 +17,14 @@ pub struct Fallbacks {
 
 impl Fallbacks {
     pub fn new(device: &RenderDevice) -> Self {
-        let sampler = Sampler::new(device, &SamplerDesc::default());
+        let sampler = Sampler::new(
+            device,
+            &SamplerDesc {
+                label: Some("fallback_sampler".into()),
+                ..Default::default()
+            },
+        );
+
         let d1 = GpuTexture::create(
             device,
             &Texture::default_white(TextureDimension::D1),

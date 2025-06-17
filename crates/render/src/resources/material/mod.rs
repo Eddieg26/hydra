@@ -179,4 +179,8 @@ impl<M: Material> RenderAssetExtractor for M {
             _marker: std::marker::PhantomData,
         })
     }
+
+    fn usage(_: &Self) -> super::AssetUsage {
+        super::AssetUsage::Keep
+    }
 }

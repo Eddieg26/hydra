@@ -209,7 +209,7 @@ impl ToTokens for LayoutDefinition<'_> {
                     tokens.extend(quote! {
                         builder.with_texture(
                             #index,
-                            #visibility,
+                            ShaderStages::all(),
                             #dimension,
                             #sample_ty
                         );
@@ -223,7 +223,7 @@ impl ToTokens for LayoutDefinition<'_> {
                     tokens.extend(quote! {
                         builder.with_sampler(
                             #index,
-                            #visibility,
+                            ShaderStages::all(),
                             #ty
                         );
                     });
@@ -290,7 +290,7 @@ impl ToTokens for BindingDefinition<'_> {
                         let id = self.#name.into_optional_id();
                         let sampler = match id.and_then(|id| textures.get(&id)) {
                             Some(texture) => texture.sampler(),
-                            None => fallbacks.sampler.clone(),
+                            None => &fallbacks.sampler,
                         };
 
                         builder.with_sampler(
@@ -587,7 +587,7 @@ impl BindingType {
             Ok(meta) => meta,
             Err(_) => Punctuated::new(),
         };
-        let mut ty = SamplerType::Filtering;
+        let mut ty = SamplerType::NonFiltering;
         let mut visibility = Visibility::empty();
 
         for meta in meta {

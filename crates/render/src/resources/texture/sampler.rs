@@ -20,7 +20,7 @@ impl Default for SamplerDesc {
         Self {
             label: None,
             wrap_mode: WrapMode::ClampToEdge,
-            filter_mode: FilterMode::Linear,
+            filter_mode: FilterMode::Nearest,
             lod_min_clamp: 0.0,
             lod_max_clamp: 100.0,
             compare: None,

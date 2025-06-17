@@ -84,18 +84,6 @@ impl Into<wgpu::AddressMode> for WrapMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct TextureFace {
-    pub start: usize,
-    pub size: usize,
-}
-
-impl TextureFace {
-    pub const fn new(start: usize, size: usize) -> Self {
-        Self { start, size }
-    }
-}
-
 #[derive(Clone, serde::Serialize, serde::Deserialize, Asset)]
 pub struct Texture {
     pub label: Label,
@@ -128,7 +116,7 @@ impl Texture {
             mipmaps: false,
             format,
             dimension,
-            filter: FilterMode::Linear,
+            filter: FilterMode::Nearest,
             wrap: WrapMode::ClampToBorder,
             usage: wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_DST

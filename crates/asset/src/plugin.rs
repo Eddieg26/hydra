@@ -66,12 +66,7 @@ pub trait AssetAppExt {
         name: impl Into<SourceName<'static>>,
         source: S,
     ) -> &mut Self;
-    fn add_asset<A: Asset>(
-        &mut self,
-        id: AssetId<A>,
-        asset: A,
-        dependencies: Option<LoadDependencies>,
-    ) -> &mut Self;
+    fn add_asset<A: Asset>(&mut self, id: AssetId<A>, asset: A) -> &mut Self;
     fn load_asset<A: Asset + for<'a> Deserialize<'a>>(
         &mut self,
         path: impl Into<LoadPath<'static>>,
@@ -110,13 +105,8 @@ impl AssetAppExt for ecs::AppBuilder {
         self
     }
 
-    fn add_asset<A: Asset>(
-        &mut self,
-        id: AssetId<A>,
-        asset: A,
-        dependencies: Option<LoadDependencies>,
-    ) -> &mut Self {
-        self.world_mut().add_asset(id, asset, dependencies);
+    fn add_asset<A: Asset>(&mut self, id: AssetId<A>, asset: A) -> &mut Self {
+        self.world_mut().add_asset(id, asset);
         self
     }
 
@@ -187,16 +177,20 @@ impl AssetAppExt for ecs::World {
         self
     }
 
-    fn add_asset<A: Asset>(
-        &mut self,
-        id: AssetId<A>,
-        asset: A,
-        dependencies: Option<LoadDependencies>,
-    ) -> &mut Self {
+    fn add_asset<A: Asset>(&mut self, id: AssetId<A>, asset: A) -> &mut Self {
         self.register_asset::<A>();
 
+        let mut dependencies = Vec::new();
+        asset.get(&mut dependencies);
+
+        let load_deps = if dependencies.is_empty() {
+            None
+        } else {
+            Some(LoadDependencies::new(None, dependencies))
+        };
+
         let config = self.resource_mut::<AssetConfigBuilder>();
-        config.add_asset(id, asset, dependencies);
+        config.add_asset(id, asset, load_deps);
 
         self
     }

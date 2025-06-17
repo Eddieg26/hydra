@@ -420,7 +420,7 @@ impl<A: Asset> Assets<A> {
 
 pub struct Test;
 
-#[derive(Debug, Event)]
+#[derive(Event)]
 /// Event representing changes to an [`Asset`] in the [`AssetDatabase`].
 pub enum AssetEvent<A: Asset> {
     /// An asset was added, modified, removed, or loaded.
@@ -431,6 +431,21 @@ pub enum AssetEvent<A: Asset> {
     Removed { id: AssetId<A>, asset: A },
     /// An asset and its dependencies were loaded.
     Loaded { id: AssetId<A> },
+}
+
+impl<A: Asset> std::fmt::Debug for AssetEvent<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AssetEvent::Added { id } => f.write_fmt(format_args!("AssetEvent::Added({:?})", id)),
+            AssetEvent::Modified { id } => {
+                f.write_fmt(format_args!("AssetEvent::Modified({:?})", id))
+            }
+            AssetEvent::Removed { id, .. } => {
+                f.write_fmt(format_args!("AssetEvent::Removed({:?})", id))
+            }
+            AssetEvent::Loaded { id } => f.write_fmt(format_args!("AssetEvent::Loaded({:?})", id)),
+        }
+    }
 }
 
 impl<A: Asset> AssetEvent<A> {

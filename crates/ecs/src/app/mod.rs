@@ -13,7 +13,7 @@ use std::{
 #[allow(unused_variables)]
 pub trait Plugin: 'static {
     fn name(&self) -> &'static str {
-        ext::short_type_name::<Self>()
+        std::any::type_name::<Self>()
     }
 
     /// Setup is called when the plugin is added to the app.

@@ -11,6 +11,9 @@ struct VertexInput {
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
+    @location(0) normal: vec3<f32>,
+    @location(1) texcoord: vec2<f32>,
+    @location(2) tangent: vec4<f32>,
 }
 
 struct Camera {
@@ -31,5 +34,9 @@ fn main(input: VertexInput) -> VertexOutput {
         input.object_3
     );
     output.position = camera.projection * camera.view * object * vec4<f32>(input.position, 1.0);
+    output.normal = (camera.view * object * vec4<f32>(input.normal, 0.0)).xyz;
+    output.tangent = (camera.view * object * vec4<f32>(input.tangent.xyz, 0.0)).xyzw;
+    output.tangent.w = input.tangent.w; // Preserve the handedness of the tangent
+    output.texcoord = input.texcoord;
     return output;
 }
