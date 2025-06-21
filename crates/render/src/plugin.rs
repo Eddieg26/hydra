@@ -1,15 +1,10 @@
 use crate::{
-    CameraSubGraph, DrawPass, ExtractError, IntoRenderItem, MeshData, ObjImporter, ProcessAssets,
-    Renderer, Shader, SubMesh, Texture2dImporter,
+    CameraSubGraph, ExtractError, ObjImporter, ProcessAssets, Shader, SubMesh, Texture2dImporter,
     app::{
         PostRender, PreRender, Present, Process, ProcessPipelines, Queue, QueueDraws, QueueViews,
         Render, RenderApp,
     },
-    renderer::{
-        Camera, Draw, DrawItem, DrawPhase, DrawPipeline, EntityCameras, ExtractedDraws,
-        ExtractedViews, MeshDataBuffer, RenderGraph, RenderGraphPass, SubGraph, View, ViewBuffer,
-        ViewDrawCalls,
-    },
+    renderer::{Camera, EntityCameras, RenderGraph, RenderGraphPass, SubGraph},
     resources::{
         AssetExtractors, ExtractInfo, Fallbacks, Material, MaterialLayout, Mesh, PipelineCache,
         RenderAssetExtractor, RenderAssets, RenderItem, RenderResource, RenderTexture,
@@ -89,23 +84,23 @@ impl Plugin for RenderPlugin {
 }
 
 pub trait RenderAppExt {
-    fn register_draw<D: Draw + IntoRenderItem<<D::Material as Material>::Phase>>(
-        &mut self,
-    ) -> &mut Self;
+    // fn register_draw<D: Draw + IntoRenderItem<<D::Material as Material>::Phase>>(
+    //     &mut self,
+    // ) -> &mut Self;
     fn add_pass<P: RenderGraphPass>(&mut self, pass: P) -> &mut Self;
     fn add_sub_graph<S: SubGraph>(&mut self) -> &mut Self;
     fn add_sub_graph_pass<S: SubGraph, P: RenderGraphPass>(&mut self, pass: P) -> &mut Self;
-    fn add_renderer<R: Renderer>(&mut self) -> &mut Self;
+    // fn add_renderer<R: Renderer>(&mut self) -> &mut Self;
     fn extract_render_asset<R: RenderAssetExtractor>(&mut self) -> &mut Self;
     fn extract_render_resource<R: RenderResource>(&mut self) -> &mut Self;
 }
 
 impl RenderAppExt for AppBuilder {
-    fn register_draw<D: Draw + IntoRenderItem<<D::Material as Material>::Phase>>(
-        &mut self,
-    ) -> &mut Self {
-        self.add_plugins(DrawPlugin::<D>::new())
-    }
+    // fn register_draw<D: Draw + IntoRenderItem<<D::Material as Material>::Phase>>(
+    //     &mut self,
+    // ) -> &mut Self {
+    //     self.add_plugins(DrawPlugin::<D>::new())
+    // }
 
     fn add_pass<P: RenderGraphPass>(&mut self, pass: P) -> &mut Self {
         self.scoped_sub_app(RenderApp, |render_app| {
@@ -131,15 +126,15 @@ impl RenderAppExt for AppBuilder {
         })
     }
 
-    fn add_renderer<R: Renderer>(&mut self) -> &mut Self {
-        self.scoped_sub_app(RenderApp, |render_app| {
-            render_app
-                .get_or_insert_resource(RenderGraph::new)
-                .add_sub_graph_pass::<CameraSubGraph, DrawPass<R>>(DrawPass::new());
-        });
+    // fn add_renderer<R: Renderer>(&mut self) -> &mut Self {
+    //     self.scoped_sub_app(RenderApp, |render_app| {
+    //         render_app
+    //             .get_or_insert_resource(RenderGraph::new)
+    //             .add_sub_graph_pass::<CameraSubGraph, DrawPass<R>>(DrawPass::new());
+    //     });
 
-        self
-    }
+    //     self
+    // }
 
     fn extract_render_asset<R: RenderAssetExtractor>(&mut self) -> &mut Self {
         let app = self.sub_app_mut(RenderApp).unwrap();
@@ -165,118 +160,118 @@ impl RenderAppExt for AppBuilder {
     }
 }
 
-pub struct RendererPlugin<R: Renderer> {
-    render_pass: Option<DrawPass<R>>,
-}
+// pub struct RendererPlugin<R: Renderer> {
+//     render_pass: Option<DrawPass<R>>,
+// }
 
-impl<R: Renderer> RendererPlugin<R> {
-    pub fn new() -> Self {
-        Self {
-            render_pass: Some(DrawPass::<R>::new()),
-        }
-    }
-}
+// impl<R: Renderer> RendererPlugin<R> {
+//     pub fn new() -> Self {
+//         Self {
+//             render_pass: Some(DrawPass::<R>::new()),
+//         }
+//     }
+// }
 
-impl<R: Renderer> Plugin for RendererPlugin<R> {
-    fn setup(&mut self, app: &mut AppBuilder) {
-        app.add_plugins(RenderPlugin)
-            .add_pass(self.render_pass.take().unwrap());
-    }
-}
+// impl<R: Renderer> Plugin for RendererPlugin<R> {
+//     fn setup(&mut self, app: &mut AppBuilder) {
+//         app.add_plugins(RenderPlugin)
+//             .add_pass(self.render_pass.take().unwrap());
+//     }
+// }
 
-pub struct MaterialPlugin<M: Material>(std::marker::PhantomData<M>);
-impl<M: Material> MaterialPlugin<M> {
-    pub fn new() -> Self {
-        Self(Default::default())
-    }
-}
+// pub struct MaterialPlugin<M: Material>(std::marker::PhantomData<M>);
+// impl<M: Material> MaterialPlugin<M> {
+//     pub fn new() -> Self {
+//         Self(Default::default())
+//     }
+// }
 
-impl<M: Material> Plugin for MaterialPlugin<M> {
-    fn setup(&mut self, app: &mut ecs::AppBuilder) {
-        app.add_plugins(RenderPlugin)
-            .register_asset::<M>()
-            .register_resource::<MaterialLayout<M>>()
-            .extract_render_asset::<M>();
-    }
-}
+// impl<M: Material> Plugin for MaterialPlugin<M> {
+//     fn setup(&mut self, app: &mut ecs::AppBuilder) {
+//         app.add_plugins(RenderPlugin)
+//             .register_asset::<M>()
+//             .register_resource::<MaterialLayout<M>>()
+//             .extract_render_asset::<M>();
+//     }
+// }
 
-struct ViewPlugin<V: View>(std::marker::PhantomData<V>);
-impl<V: View> ViewPlugin<V> {
-    pub fn new() -> Self {
-        Self(Default::default())
-    }
-}
+// struct ViewPlugin<V: View>(std::marker::PhantomData<V>);
+// impl<V: View> ViewPlugin<V> {
+//     pub fn new() -> Self {
+//         Self(Default::default())
+//     }
+// }
 
-impl<V: View> Plugin for ViewPlugin<V> {
-    fn setup(&mut self, app: &mut AppBuilder) {
-        app.scoped_sub_app(RenderApp, |render_app| {
-            render_app
-                .add_resource(ExtractedViews::<V>::new())
-                .add_systems(Extract, ExtractedViews::<V>::extract)
-                .add_systems(QueueViews, ExtractedViews::<V>::queue)
-                .add_systems(PreRender, ViewBuffer::<V>::update_buffer)
-                .add_systems(PostRender, ViewBuffer::<V>::clear_buffer);
-        })
-        .register::<V>()
-        .extract_render_resource::<ViewBuffer<V>>();
-    }
-}
+// impl<V: View> Plugin for ViewPlugin<V> {
+//     fn setup(&mut self, app: &mut AppBuilder) {
+//         app.scoped_sub_app(RenderApp, |render_app| {
+//             render_app
+//                 .add_resource(ExtractedViews::<V>::new())
+//                 .add_systems(Extract, ExtractedViews::<V>::extract)
+//                 .add_systems(QueueViews, ExtractedViews::<V>::queue)
+//                 .add_systems(PreRender, ViewBuffer::<V>::update_buffer)
+//                 .add_systems(PostRender, ViewBuffer::<V>::clear_buffer);
+//         })
+//         .register::<V>()
+//         .extract_render_resource::<ViewBuffer<V>>();
+//     }
+// }
 
-struct MeshDataPlugin<S: MeshData>(std::marker::PhantomData<S>);
-impl<S: MeshData> MeshDataPlugin<S> {
-    pub fn new() -> Self {
-        Self(Default::default())
-    }
-}
+// struct MeshDataPlugin<S: MeshData>(std::marker::PhantomData<S>);
+// impl<S: MeshData> MeshDataPlugin<S> {
+//     pub fn new() -> Self {
+//         Self(Default::default())
+//     }
+// }
 
-impl<T: MeshData> Plugin for MeshDataPlugin<T> {
-    fn setup(&mut self, app: &mut AppBuilder) {
-        app.scoped_sub_app(RenderApp, |render_app| {
-            render_app
-                .add_systems(PreRender, MeshDataBuffer::<T>::update_buffer)
-                .add_systems(PostRender, MeshDataBuffer::<T>::clear_buffer);
-        })
-        .extract_render_resource::<MeshDataBuffer<T>>();
-    }
-}
+// impl<T: MeshData> Plugin for MeshDataPlugin<T> {
+//     fn setup(&mut self, app: &mut AppBuilder) {
+//         app.scoped_sub_app(RenderApp, |render_app| {
+//             render_app
+//                 .add_systems(PreRender, MeshDataBuffer::<T>::update_buffer)
+//                 .add_systems(PostRender, MeshDataBuffer::<T>::clear_buffer);
+//         })
+//         .extract_render_resource::<MeshDataBuffer<T>>();
+//     }
+// }
 
-pub struct DrawPlugin<D: Draw>(std::marker::PhantomData<D>);
-impl<D: Draw> DrawPlugin<D> {
-    fn new() -> Self {
-        Self(Default::default())
-    }
-}
+// pub struct DrawPlugin<D: Draw>(std::marker::PhantomData<D>);
+// impl<D: Draw> DrawPlugin<D> {
+//     fn new() -> Self {
+//         Self(Default::default())
+//     }
+// }
 
-impl<D: Draw + IntoRenderItem<<D::Material as Material>::Phase>> Plugin for DrawPlugin<D> {
-    fn setup(&mut self, app: &mut AppBuilder) {
-        app.add_plugins((
-            RenderPlugin,
-            MaterialPlugin::<D::Material>::new(),
-            ViewPlugin::<D::View>::new(),
-            MeshDataPlugin::<D::Mesh>::new(),
-        ))
-        .scoped_sub_app(RenderApp, |sub_app| {
-            sub_app
-                .add_resource(ExtractedDraws::<D>::new())
-                .add_resource(ViewDrawCalls::<D::View, DrawPhase<D>>::new())
-                .add_systems(Extract, ExtractedDraws::<D>::extract)
-                .add_systems(
-                    QueueDraws,
-                    ViewDrawCalls::<D::View, DrawPhase<D>>::queue::<D>,
-                )
-                .add_systems(
-                    PostRender,
-                    ViewDrawCalls::<D::View, DrawPhase<D>>::clear_draws,
-                );
+// impl<D: Draw + IntoRenderItem<<D::Material as Material>::Phase>> Plugin for DrawPlugin<D> {
+//     fn setup(&mut self, app: &mut AppBuilder) {
+//         app.add_plugins((
+//             RenderPlugin,
+//             MaterialPlugin::<D::Material>::new(),
+//             ViewPlugin::<D::View>::new(),
+//             MeshDataPlugin::<D::Mesh>::new(),
+//         ))
+//         .scoped_sub_app(RenderApp, |sub_app| {
+//             sub_app
+//                 .add_resource(ExtractedDraws::<D>::new())
+//                 .add_resource(ViewDrawCalls::<D::View, DrawPhase<D>>::new())
+//                 .add_systems(Extract, ExtractedDraws::<D>::extract)
+//                 .add_systems(
+//                     QueueDraws,
+//                     ViewDrawCalls::<D::View, DrawPhase<D>>::queue::<D>,
+//                 )
+//                 .add_systems(
+//                     PostRender,
+//                     ViewDrawCalls::<D::View, DrawPhase<D>>::clear_draws,
+//                 );
 
-            if DrawItem::<D>::SORT {
-                sub_app.add_systems(PreRender, ViewDrawCalls::<D::View, DrawPhase<D>>::sort);
-            }
-        })
-        .register::<D>()
-        .register::<GlobalTransform>()
-        .load_asset::<Shader>(D::shader().into())
-        .load_asset::<Shader>(D::Material::shader().into())
-        .extract_render_resource::<DrawPipeline<D>>();
-    }
-}
+//             if DrawItem::<D>::SORT {
+//                 sub_app.add_systems(PreRender, ViewDrawCalls::<D::View, DrawPhase<D>>::sort);
+//             }
+//         })
+//         .register::<D>()
+//         .register::<GlobalTransform>()
+//         .load_asset::<Shader>(D::shader().into())
+//         .load_asset::<Shader>(D::Material::shader().into())
+//         .extract_render_resource::<DrawPipeline<D>>();
+//     }
+// }

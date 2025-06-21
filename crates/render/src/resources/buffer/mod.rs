@@ -4,7 +4,6 @@ use bytemuck::NoUninit;
 use std::ops::{Deref, RangeBounds};
 use wgpu::{BufferSize, DynamicOffset, util::DeviceExt};
 
-pub mod array;
 pub mod index;
 pub mod storage;
 pub mod uniform;
