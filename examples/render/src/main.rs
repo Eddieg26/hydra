@@ -210,16 +210,7 @@ pub struct Mesh3d {
     world: [f32; 16],
 }
 
-impl MeshData for Mesh3d {
-    fn formats() -> &'static [render::wgpu::VertexFormat] {
-        &[
-            render::wgpu::VertexFormat::Float32x4,
-            render::wgpu::VertexFormat::Float32x4,
-            render::wgpu::VertexFormat::Float32x4,
-            render::wgpu::VertexFormat::Float32x4,
-        ]
-    }
-}
+impl MeshData for Mesh3d {}
 
 #[derive(ShaderType)]
 pub struct View3dData {

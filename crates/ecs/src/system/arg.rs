@@ -59,6 +59,8 @@ unsafe impl SystemArg for () {
     }
 }
 
+unsafe impl ReadOnly for () {}
+
 unsafe impl SystemArg for &World {
     type Item<'world, 'state> = &'world World;
 
@@ -99,6 +101,8 @@ unsafe impl SystemArg for &Entities {
     }
 }
 
+unsafe impl ReadOnly for &Entities {}
+
 unsafe impl<R: Resource + Send> SystemArg for &R {
     type Item<'world, 'state> = &'world R;
 
@@ -128,6 +132,8 @@ unsafe impl<R: Resource + Send> SystemArg for &R {
             ))
     }
 }
+
+unsafe impl<R: Resource + Send + Sync> ReadOnly for &R {}
 
 unsafe impl<R: Resource + Send> SystemArg for &mut R {
     type Item<'world, 'state> = &'world mut R;
@@ -195,6 +201,8 @@ unsafe impl<R: Resource> SystemArg for NonSend<'_, R> {
         false
     }
 }
+
+unsafe impl<R: Resource> ReadOnly for NonSend<'_, R> {}
 
 unsafe impl<R: Resource> SystemArg for NonSendMut<'_, R> {
     type Item<'world, 'state> = NonSendMut<'world, R>;
@@ -296,6 +304,8 @@ unsafe impl<A: SystemArg> SystemArg for Option<A> {
     }
 }
 
+unsafe impl<A: ReadOnly> ReadOnly for Option<A> {}
+
 unsafe impl<E: Event> SystemArg for EventReader<'_, E> {
     type Item<'world, 'state> = EventReader<'world, E>;
 
@@ -315,6 +325,8 @@ unsafe impl<E: Event> SystemArg for EventReader<'_, E> {
         EventReader::new(events)
     }
 }
+
+unsafe impl<E: Event> ReadOnly for EventReader<'_, E> {}
 
 unsafe impl<E: Event> SystemArg for EventWriter<'_, E> {
     type Item<'world, 'state> = EventWriter<'state, E>;
@@ -362,6 +374,8 @@ unsafe impl SystemArg for Option<ModeId> {
         unsafe { world.get() }.modes.current()
     }
 }
+
+unsafe impl ReadOnly for Option<ModeId> {}
 
 macro_rules! impl_into_system_configs {
     ($($arg:ident),*) => {

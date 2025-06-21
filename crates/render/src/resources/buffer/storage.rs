@@ -83,7 +83,7 @@ impl<T: ShaderType + WriteInto> AsRef<Buffer> for StorageBuffer<T> {
 }
 
 pub struct StorageBufferArray<T: ShaderType> {
-    data: EncaseDynamicStorageBuffer<Vec<u8>>,
+    pub(super) data: EncaseDynamicStorageBuffer<Vec<u8>>,
     buffer: Buffer,
     alignment: u64,
     is_dirty: bool,
@@ -93,6 +93,19 @@ pub struct StorageBufferArray<T: ShaderType> {
 impl<T: ShaderType> StorageBufferArray<T> {
     pub fn new(device: &RenderDevice, label: Label, usage: Option<BufferUsages>) -> Self {
         let alignment = AlignmentValue::new(T::min_size().get().next_power_of_two())
+            .get()
+            .max(device.limits().min_storage_buffer_offset_alignment as u64);
+
+        Self::with_alignment(device, alignment, label, usage)
+    }
+
+    pub fn with_alignment(
+        device: &RenderDevice,
+        alignment: u64,
+        label: Label,
+        usage: Option<BufferUsages>,
+    ) -> Self {
+        let alignment = AlignmentValue::new(alignment)
             .get()
             .max(device.limits().min_storage_buffer_offset_alignment as u64);
 

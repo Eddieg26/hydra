@@ -40,6 +40,13 @@ impl<T: ShaderType> GpuBufferArray<T> {
         }
     }
 
+    pub fn size(&self) -> usize {
+        match self {
+            GpuBufferArray::Uniform(buffer) => buffer.data().len(),
+            GpuBufferArray::Storage(buffer) => buffer.data().len(),
+        }
+    }
+
     pub fn buffer(&self) -> &super::Buffer {
         match self {
             GpuBufferArray::Uniform(buffer) => buffer.buffer(),
