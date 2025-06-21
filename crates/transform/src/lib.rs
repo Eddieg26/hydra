@@ -6,14 +6,14 @@ use math::{Affine3A, Mat4, Quat, Vec2, Vec3, Vec3A};
 
 pub mod plugin;
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub struct Transform {
     pub translation: Vec3,
     pub scale: Vec3,
     pub rotation: Vec3,
 }
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub struct Transform2d {
     pub translation: Vec2,
     pub scale: Vec2,
@@ -103,7 +103,7 @@ pub struct Transform2dKit {
     pub global: GlobalTransform,
 }
 
-pub trait LocalTransform: Component {
+pub trait LocalTransform: Component + Copy {
     fn local(&self) -> Affine3A;
 }
 

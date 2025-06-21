@@ -1,6 +1,5 @@
-use super::{RenderAssetExtractor, RenderResource};
 use crate::{
-    ExtractResource,
+    AssetUsage, ExtractError, ExtractResource, RenderAssetExtractor, RenderResource,
     device::RenderDevice,
     resources::{
         Shader,
@@ -13,7 +12,6 @@ use ecs::{
     Resource,
     system::unlifetime::{Read, SCommands},
 };
-use transform::GlobalTransform;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -52,35 +50,18 @@ pub enum DepthWrite {
     On,
 }
 
-pub trait RenderItem:
-    Copy + Clone + Eq + PartialEq + Ord + PartialEq + Send + Sync + Sized + 'static
-{
-    const SORT: bool = false;
-
-    fn new(_: &GlobalTransform, _: &GlobalTransform) -> Self;
-}
-
-impl RenderItem for () {
-    const SORT: bool = false;
-
-    fn new(_: &GlobalTransform, _: &GlobalTransform) -> Self {
-        ()
-    }
-}
-
 pub trait RenderPhase: Send + Sync + 'static {
-    type Item: RenderItem;
-
     const QUEUE: i32 = 0;
 
     fn mode() -> BlendMode;
-    fn depth_write() -> DepthWrite {
-        DepthWrite::On
-    }
 }
 
 pub trait Material: Asset + AsBinding + Clone + Sized {
     type Phase: RenderPhase;
+
+    fn depth_write() -> DepthWrite {
+        DepthWrite::On
+    }
 
     fn shader() -> impl Into<AssetId<Shader>>;
 }
@@ -127,7 +108,7 @@ impl<M: Material> Resource for MaterialLayout<M> {}
 impl<M: Material> RenderResource for MaterialLayout<M> {
     type Arg = Read<RenderDevice>;
 
-    fn extract(device: ecs::system::ArgItem<Self::Arg>) -> Result<Self, super::ExtractError<()>> {
+    fn extract(device: ecs::system::ArgItem<Self::Arg>) -> Result<Self, ExtractError<()>> {
         Ok(Self::new(&device))
     }
 }
@@ -147,40 +128,40 @@ impl<M: Material> std::ops::Deref for MaterialBinding<M> {
 
 impl<M: Material> RenderAsset for MaterialBinding<M> {}
 
-// impl<M: Material> RenderAssetExtractor for M {
-//     type RenderAsset = MaterialBinding<M>;
+impl<M: Material> RenderAssetExtractor for M {
+    type RenderAsset = MaterialBinding<M>;
 
-//     type Arg = (
-//         Read<RenderDevice>,
-//         Option<Read<MaterialLayout<M>>>,
-//         SCommands,
-//         M::Arg,
-//     );
+    type Arg = (
+        Read<RenderDevice>,
+        Option<Read<MaterialLayout<M>>>,
+        SCommands,
+        M::Arg,
+    );
 
-//     fn extract(
-//         asset: Self,
-//         arg: &mut ecs::ArgItem<Self::Arg>,
-//     ) -> Result<Self::RenderAsset, super::ExtractError<Self>> {
-//         let (device, layout, commands, arg) = arg;
-//         let layout = match layout.as_ref() {
-//             Some(layout) => layout,
-//             None => {
-//                 commands.add(ExtractResource::<MaterialLayout<M>>::new());
-//                 return Err(super::ExtractError::Retry(asset));
-//             }
-//         };
+    fn extract(
+        asset: Self,
+        arg: &mut ecs::ArgItem<Self::Arg>,
+    ) -> Result<Self::RenderAsset, ExtractError<Self>> {
+        let (device, layout, commands, arg) = arg;
+        let layout = match layout.as_ref() {
+            Some(layout) => layout,
+            None => {
+                commands.add(ExtractResource::<MaterialLayout<M>>::new());
+                return Err(ExtractError::Retry(asset));
+            }
+        };
 
-//         let binding = asset
-//             .create_bind_group(device, &layout, arg)
-//             .map_err(|_| super::ExtractError::Retry(asset))?;
+        let binding = asset
+            .create_bind_group(device, &layout, arg)
+            .map_err(|_| ExtractError::Retry(asset))?;
 
-//         Ok(MaterialBinding {
-//             bind_group: binding,
-//             _marker: std::marker::PhantomData,
-//         })
-//     }
+        Ok(MaterialBinding {
+            bind_group: binding,
+            _marker: std::marker::PhantomData,
+        })
+    }
 
-//     fn usage(_: &Self) -> super::AssetUsage {
-//         super::AssetUsage::Keep
-//     }
-// }
+    fn usage(_: &Self) -> AssetUsage {
+        AssetUsage::Keep
+    }
+}

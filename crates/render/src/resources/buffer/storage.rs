@@ -84,7 +84,7 @@ impl<T: ShaderType + WriteInto> AsRef<Buffer> for StorageBuffer<T> {
 
 pub struct StorageBufferArray<T: ShaderType> {
     data: EncaseDynamicStorageBuffer<Vec<u8>>,
-    buffer: Buffer,
+    inner: Buffer,
     alignment: u64,
     is_dirty: bool,
     _marker: std::marker::PhantomData<T>,
@@ -107,19 +107,19 @@ impl<T: ShaderType> StorageBufferArray<T> {
 
         Self {
             data,
-            buffer,
+            inner: buffer,
             is_dirty: false,
             alignment,
             _marker: std::marker::PhantomData,
         }
     }
 
-    pub fn buffer(&self) -> &Buffer {
-        &self.buffer
+    pub fn inner(&self) -> &Buffer {
+        &self.inner
     }
 
     pub fn binding(&self) -> BindingResource {
-        self.buffer.as_entire_binding()
+        self.inner.as_entire_binding()
     }
 
     pub fn data(&self) -> &[u8] {
@@ -143,19 +143,19 @@ impl<T: ShaderType> StorageBufferArray<T> {
     /// Returns the new buffer size if the buffer was resized.
     pub fn update(&mut self, device: &RenderDevice) -> Option<BufferSize> {
         let size = self.data.as_ref().len() as u64;
-        if size > 0 && size > self.buffer.size() {
+        if size > 0 && size > self.inner.size() {
             let data = self.data.as_ref().as_slice();
-            self.buffer.resize_with_data(device, data);
+            self.inner.resize_with_data(device, data);
             self.is_dirty = false;
-            return BufferSize::new(self.buffer.size());
-        } else if size > 0 && size < self.buffer.size() / 2 {
+            return BufferSize::new(self.inner.size());
+        } else if size > 0 && size < self.inner.size() / 2 {
             let data = self.data.as_ref().as_slice();
-            self.buffer.resize_with_data(device, data);
+            self.inner.resize_with_data(device, data);
             self.is_dirty = false;
-            return BufferSize::new(self.buffer.size());
+            return BufferSize::new(self.inner.size());
         } else if self.is_dirty {
             let data = self.data.as_ref().as_slice();
-            device.queue.write_buffer(self.buffer.as_ref(), 0, data);
+            device.queue.write_buffer(self.inner.as_ref(), 0, data);
             self.is_dirty = false;
         }
 
@@ -193,6 +193,6 @@ impl<T: ShaderType + WriteInto> StorageBufferArray<T> {
 
 impl<T: ShaderType> AsRef<Buffer> for StorageBufferArray<T> {
     fn as_ref(&self) -> &Buffer {
-        &self.buffer
+        &self.inner
     }
 }

@@ -188,14 +188,14 @@ impl<'a> BindGroupBuilder<'a> {
     pub fn with_buffer(
         &mut self,
         binding: u32,
-        buffer: &'a Buffer,
+        buffer: &'a (impl AsRef<Buffer> + 'a),
         offset: wgpu::BufferAddress,
         size: Option<wgpu::BufferSize>,
     ) -> &mut Self {
         self.entries.push(wgpu::BindGroupEntry {
             binding,
             resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                buffer: buffer.as_ref(),
+                buffer: buffer.as_ref().as_ref(),
                 offset,
                 size,
             }),
@@ -206,7 +206,7 @@ impl<'a> BindGroupBuilder<'a> {
     pub fn with_uniform(
         &mut self,
         binding: u32,
-        buffer: &'a Buffer,
+        buffer: &'a (impl AsRef<Buffer> + 'a),
         offset: wgpu::BufferAddress,
         size: Option<wgpu::BufferSize>,
     ) -> &mut Self {
@@ -216,7 +216,7 @@ impl<'a> BindGroupBuilder<'a> {
     pub fn with_storage(
         &mut self,
         binding: u32,
-        buffer: &'a Buffer,
+        buffer: &'a (impl AsRef<Buffer> + 'a),
         offset: wgpu::BufferAddress,
         size: Option<wgpu::BufferSize>,
     ) -> &mut Self {
@@ -280,7 +280,7 @@ impl Error for CreateBindGroupError {}
 pub trait AsBinding {
     type Arg: SystemArg;
 
-    fn label() -> Option<& 'static str> {
+    fn label() -> Option<&'static str> {
         None
     }
 
