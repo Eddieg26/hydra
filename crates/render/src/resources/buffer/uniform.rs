@@ -96,6 +96,15 @@ impl<T: ShaderType> UniformBufferArray<T> {
             .get()
             .max(device.limits().min_uniform_buffer_offset_alignment as u64);
 
+        Self::with_alignment(device, alignment, label, usage)
+    }
+
+    pub fn with_alignment(
+        device: &RenderDevice,
+        alignment: u64,
+        label: Label,
+        usage: Option<BufferUsages>,
+    ) -> Self {
         let data = EncaseDynamicUniformBuffer::new_with_alignment(Vec::new(), alignment);
 
         let usage = match usage {

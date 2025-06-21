@@ -96,6 +96,15 @@ impl<T: ShaderType> StorageBufferArray<T> {
             .get()
             .max(device.limits().min_storage_buffer_offset_alignment as u64);
 
+        Self::with_alignment(device, alignment, label, usage)
+    }
+
+    pub fn with_alignment(
+        device: &RenderDevice,
+        alignment: u64,
+        label: Label,
+        usage: Option<BufferUsages>,
+    ) -> Self {
         let data = EncaseDynamicStorageBuffer::new_with_alignment(Vec::new(), alignment);
 
         let usage = match usage {
