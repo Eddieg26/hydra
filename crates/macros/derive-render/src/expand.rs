@@ -325,7 +325,7 @@ impl ToTokens for BindingDefinition<'_> {
 
                 builder.with_uniform(
                     #index,
-                    buffer.as_ref(),
+                    &buffer,
                     0,
                     None,
                 );

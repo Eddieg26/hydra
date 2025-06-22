@@ -800,7 +800,7 @@ unsafe impl<S: SystemArg> SystemArg for Main<'_, '_, S> {
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         mut world: WorldCell<'world>,
-        system: &crate::SystemMeta,
+        system: &'world crate::SystemMeta,
     ) -> Self::Item<'world, 'state> {
         let main = unsafe { world.get_mut().resource_mut::<MainWorld>().cell() };
         let arg = unsafe { S::get(state, main, system) };

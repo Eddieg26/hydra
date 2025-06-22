@@ -1,14 +1,14 @@
 use crate::{
     BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, Buffer, RenderDevice,
-    storage::StorageBufferArray, uniform::UniformBufferArray,
+    RenderResource, storage::StorageBufferArray, uniform::UniformBufferArray,
 };
-use ecs::Resource;
+use ecs::{Resource, system::unlifetime::Read};
 use encase::{ShaderType, internal::WriteInto};
 use std::{num::NonZero, ops::Range};
 use wgpu::{BufferUsages, ShaderStages};
 
-pub trait ShaderData: ShaderType + WriteInto + 'static {}
-impl<S: ShaderType + WriteInto + 'static> ShaderData for S {}
+pub trait ShaderData: ShaderType + WriteInto + Send + Sync + 'static {}
+impl<S: ShaderType + WriteInto + Send + Sync + 'static> ShaderData for S {}
 
 pub enum GpuBufferArray<S: ShaderType> {
     Uniform(UniformBufferArray<S>),
@@ -66,7 +66,7 @@ pub struct ShaderDataBuffer<S: ShaderData> {
 
 impl<S: ShaderData> ShaderDataBuffer<S> {
     fn new(device: &RenderDevice, dynamic: bool) -> Self {
-        if device.limits().max_storage_buffers_per_shader_stage > 0 {
+        if device.limits().max_storage_buffers_per_shader_stage == 0 {
             let item_size = if dynamic {
                 device.limits().min_uniform_buffer_offset_alignment
             } else {
@@ -84,11 +84,12 @@ impl<S: ShaderData> ShaderDataBuffer<S> {
             );
 
             let layout = BindGroupLayoutBuilder::new()
+                .with_label(ecs::ext::short_type_name::<Self>())
                 .with_uniform(
                     0,
                     ShaderStages::VERTEX | ShaderStages::COMPUTE,
                     dynamic,
-                    NonZero::new(batch_size as u64),
+                    None,
                     None,
                 )
                 .build(device);
@@ -118,12 +119,14 @@ impl<S: ShaderData> ShaderDataBuffer<S> {
             );
 
             let layout = BindGroupLayoutBuilder::new()
+                .with_label(ecs::ext::short_type_name::<Self>())
                 .with_storage(
                     0,
                     ShaderStages::VERTEX | ShaderStages::COMPUTE,
                     dynamic,
-                    NonZero::new(batch_size as u64),
                     None,
+                    None,
+                    true,
                 )
                 .build(device);
 
@@ -142,18 +145,19 @@ impl<S: ShaderData> ShaderDataBuffer<S> {
             return;
         };
 
-        let batch_size = NonZero::new(self.batch_size as u64);
-        let new_capacity = self.batch_size as usize / buffer_size.get() as usize;
+        let new_capacity = buffer_size.get() as usize / self.batch_size as usize
+            + (buffer_size.get() as usize % self.batch_size as usize).min(1);
         let mut bind_groups = Vec::with_capacity(new_capacity);
 
         for index in 0..new_capacity {
             let offset = index as u64 * self.batch_size as u64;
+            let size = NonZero::new((buffer_size.get() - offset).min(self.batch_size as u64));
             let bind_group = match &self.buffer {
                 GpuBufferArray::Uniform(buffer) => BindGroupBuilder::new(&self.layout)
-                    .with_uniform(0, &buffer, offset, batch_size)
+                    .with_uniform(0, &buffer, offset, size)
                     .build(device),
                 GpuBufferArray::Storage(buffer) => BindGroupBuilder::new(&self.layout)
-                    .with_storage(0, &buffer, offset, batch_size)
+                    .with_storage(0, &buffer, offset, size)
                     .build(device),
             };
             bind_groups.push(bind_group);
@@ -194,6 +198,15 @@ impl<S: ShaderData> MeshDataBuffer<S> {
     }
 }
 
+impl<S: ShaderData> RenderResource for MeshDataBuffer<S> {
+    type Arg = Read<RenderDevice>;
+
+    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
+        let buffer = ShaderDataBuffer::new(device, true);
+        Ok(Self(buffer))
+    }
+}
+
 pub struct BatchIndex {
     pub bind_group: usize,
     pub instances: Range<u32>,
@@ -208,12 +221,14 @@ impl<S: ShaderData> BatchedMeshDataBuffer<S> {
         }
 
         let batch_count = self.0.batch_size / self.0.item_size;
-        let offset = ((self.0.buffer.data().len() % self.0.batch_size as usize)
-            / self.0.item_size as usize)
-            .min(values.len());
-        let initial = self.create_batch(offset as u32, batch_count, &values[0..offset]);
+        let current_batch_count = ((self.0.buffer.data().len() % self.0.batch_size as usize)
+            / self.0.item_size as usize) as u32;
+        let remaining = (batch_count - current_batch_count).min(values.len() as u32) as usize;
+        let initial =
+            self.create_batch(current_batch_count, remaining as u32, &values[0..remaining]);
+
         let mut batches = vec![initial];
-        for values in values.chunks(batch_count as usize) {
+        for values in values[remaining..].chunks(batch_count as usize) {
             let batch = self.create_batch(0, batch_count, values);
             batches.push(batch);
         }
@@ -234,4 +249,30 @@ impl<S: ShaderData> BatchedMeshDataBuffer<S> {
             instances,
         }
     }
+}
+
+impl<S: ShaderData> RenderResource for BatchedMeshDataBuffer<S> {
+    type Arg = Read<RenderDevice>;
+
+    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
+        let buffer = ShaderDataBuffer::new(device, false);
+        Ok(Self(buffer))
+    }
+}
+
+pub(crate) fn update_mesh_data_buffers<S: ShaderData>(
+    device: &RenderDevice,
+    mesh_data: &mut MeshDataBuffer<S>,
+    batched_mesh_data: &mut BatchedMeshDataBuffer<S>,
+) {
+    mesh_data.0.update(device);
+    batched_mesh_data.0.update(device);
+}
+
+pub(crate) fn clear_mesh_data_buffers<S: ShaderData>(
+    mesh_data: &mut MeshDataBuffer<S>,
+    batched_mesh_data: &mut BatchedMeshDataBuffer<S>,
+) {
+    mesh_data.0.clear();
+    batched_mesh_data.0.clear();
 }

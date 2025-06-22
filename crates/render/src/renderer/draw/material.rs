@@ -51,7 +51,7 @@ pub enum DepthWrite {
 }
 
 pub trait RenderPhase: Send + Sync + 'static {
-    const QUEUE: i32 = 0;
+    const SORT: bool = false;
 
     fn mode() -> BlendMode;
 }
@@ -66,6 +66,7 @@ pub trait Material: Asset + AsBinding + Clone + Sized {
     fn shader() -> impl Into<AssetId<Shader>>;
 }
 
+#[derive(Resource)]
 pub struct MaterialLayout<M: Material> {
     layout: BindGroupLayout,
     _marker: std::marker::PhantomData<M>,
@@ -104,7 +105,6 @@ impl<M: Material> AsRef<BindGroupLayout> for MaterialLayout<M> {
     }
 }
 
-impl<M: Material> Resource for MaterialLayout<M> {}
 impl<M: Material> RenderResource for MaterialLayout<M> {
     type Arg = Read<RenderDevice>;
 

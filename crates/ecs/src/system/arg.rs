@@ -23,7 +23,7 @@ pub unsafe trait SystemArg: Sized {
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         world: WorldCell<'world>,
-        system: &SystemMeta,
+        system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state>;
 
     fn exclusive() -> bool {
@@ -53,11 +53,13 @@ unsafe impl SystemArg for () {
     unsafe fn get<'world, 'state>(
         _state: &'state mut Self::State,
         _world: WorldCell<'world>,
-        _system: &SystemMeta,
+        _system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         ()
     }
 }
+
+unsafe impl ReadOnly for () {}
 
 unsafe impl SystemArg for &World {
     type Item<'world, 'state> = &'world World;
@@ -71,15 +73,17 @@ unsafe impl SystemArg for &World {
     unsafe fn get<'world, 'state>(
         _state: &'state mut Self::State,
         world: WorldCell<'world>,
-        _system: &SystemMeta,
+        _system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         unsafe { world.get() }
     }
 
     fn exclusive() -> bool {
-        false
+        true
     }
 }
+
+unsafe impl ReadOnly for &World {}
 
 unsafe impl SystemArg for &Entities {
     type Item<'world, 'state> = &'world Entities;
@@ -93,11 +97,13 @@ unsafe impl SystemArg for &Entities {
     unsafe fn get<'world, 'state>(
         _state: &'state mut Self::State,
         world: WorldCell<'world>,
-        _system: &SystemMeta,
+        _system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         unsafe { world.get().entities() }
     }
 }
+
+unsafe impl ReadOnly for &Entities {}
 
 unsafe impl<R: Resource + Send> SystemArg for &R {
     type Item<'world, 'state> = &'world R;
@@ -117,7 +123,7 @@ unsafe impl<R: Resource + Send> SystemArg for &R {
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         world: WorldCell<'world>,
-        _system: &SystemMeta,
+        _system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         unsafe { world.get() }
             .resources()
@@ -128,6 +134,8 @@ unsafe impl<R: Resource + Send> SystemArg for &R {
             ))
     }
 }
+
+unsafe impl<R: Resource + Send> ReadOnly for &R {}
 
 unsafe impl<R: Resource + Send> SystemArg for &mut R {
     type Item<'world, 'state> = &'world mut R;
@@ -147,7 +155,7 @@ unsafe impl<R: Resource + Send> SystemArg for &mut R {
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         mut world: WorldCell<'world>,
-        _system: &SystemMeta,
+        _system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         let world = unsafe { world.get_mut() };
         world
@@ -159,6 +167,8 @@ unsafe impl<R: Resource + Send> SystemArg for &mut R {
             ))
     }
 }
+
+unsafe impl<R: Resource> ReadOnly for NonSend<'_, R> {}
 
 unsafe impl<R: Resource> SystemArg for NonSend<'_, R> {
     type Item<'world, 'state> = NonSend<'world, R>;
@@ -178,7 +188,7 @@ unsafe impl<R: Resource> SystemArg for NonSend<'_, R> {
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         world: WorldCell<'world>,
-        _system: &SystemMeta,
+        _system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         let resource = unsafe { world.get() }
             .resources()
@@ -214,7 +224,7 @@ unsafe impl<R: Resource> SystemArg for NonSendMut<'_, R> {
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         mut world: WorldCell<'world>,
-        _system: &SystemMeta,
+        _system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         let world = unsafe { world.get_mut() };
         let resource = world
@@ -249,7 +259,7 @@ unsafe impl<R: Resource + Send + Clone> SystemArg for Cloned<R> {
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         world: WorldCell<'world>,
-        _: &SystemMeta,
+        _system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         let resource = unsafe { world.get() }
             .resources()
@@ -280,7 +290,7 @@ unsafe impl<A: SystemArg> SystemArg for Option<A> {
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         world: WorldCell<'world>,
-        system: &SystemMeta,
+        system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         unsafe {
             if A::validate(state, world, system) {
@@ -296,6 +306,8 @@ unsafe impl<A: SystemArg> SystemArg for Option<A> {
     }
 }
 
+unsafe impl<T: ReadOnly> ReadOnly for Option<T> {}
+
 unsafe impl<E: Event> SystemArg for EventReader<'_, E> {
     type Item<'world, 'state> = EventReader<'world, E>;
 
@@ -309,12 +321,14 @@ unsafe impl<E: Event> SystemArg for EventReader<'_, E> {
     unsafe fn get<'world, 'state>(
         _: &'state mut Self::State,
         world: super::WorldCell<'world>,
-        _: &crate::system::SystemMeta,
+        _: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         let events = unsafe { world.get().resource::<Events<E>>() };
         EventReader::new(events)
     }
 }
+
+unsafe impl<E: Event> ReadOnly for EventReader<'_, E> {}
 
 unsafe impl<E: Event> SystemArg for EventWriter<'_, E> {
     type Item<'world, 'state> = EventWriter<'state, E>;
@@ -329,7 +343,7 @@ unsafe impl<E: Event> SystemArg for EventWriter<'_, E> {
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         _: super::WorldCell<'world>,
-        _: &crate::system::SystemMeta,
+        _system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         EventWriter::new(state)
     }
@@ -357,11 +371,33 @@ unsafe impl SystemArg for Option<ModeId> {
     unsafe fn get<'world, 'state>(
         _: &'state mut Self::State,
         world: WorldCell<'world>,
-        _: &SystemMeta,
+        _system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         unsafe { world.get() }.modes.current()
     }
 }
+
+unsafe impl ReadOnly for Option<ModeId> {}
+
+unsafe impl SystemArg for &SystemMeta {
+    type Item<'world, 'state> = &'world SystemMeta;
+
+    type State = ();
+
+    fn init(_: &mut World, _: &mut WorldAccess) -> Self::State {
+        ()
+    }
+
+    unsafe fn get<'world, 'state>(
+        _: &'state mut Self::State,
+        _: WorldCell<'world>,
+        system: &'world SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        system
+    }
+}
+
+unsafe impl ReadOnly for &SystemMeta {}
 
 macro_rules! impl_into_system_configs {
     ($($arg:ident),*) => {
@@ -416,7 +452,7 @@ macro_rules! impl_into_system_configs {
                 ($($arg,)*)
             }
 
-            unsafe fn get<'world, 'state>(state: &'state mut Self::State, world: WorldCell<'world>, system: &SystemMeta,) -> Self::Item<'world, 'state> {
+            unsafe fn get<'world, 'state>(state: &'state mut Self::State, world: WorldCell<'world>, system: &'world SystemMeta,) -> Self::Item<'world, 'state> {
                 let ($($arg,)*) = state;
                 let ($($arg,)*) = unsafe {($($arg::get($arg, world, system),)*)};
                 ($($arg,)*)
@@ -509,7 +545,7 @@ pub mod unlifetime {
         unsafe fn get<'world, 'state>(
             state: &'state mut Self::State,
             world: crate::world::WorldCell<'world>,
-            system: &crate::SystemMeta,
+            system: &'world crate::SystemMeta,
         ) -> Self::Item<'world, 'state> {
             unsafe { StaticArg(S::get(state, world, system)) }
         }

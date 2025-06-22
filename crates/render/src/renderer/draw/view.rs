@@ -1,28 +1,39 @@
 use crate::{
-    BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, Camera, RenderDevice,
-    uniform::UniformBufferArray,
+    BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, BlendMode, Camera,
+    RenderDevice, RenderResource, RenderSurface, uniform::UniformBufferArray,
 };
-use ecs::{Component, Entity, Resource, app::Main, system::unlifetime::SQuery};
+use ecs::{
+    Component, Entity, Resource,
+    app::Main,
+    system::unlifetime::{Read, SQuery},
+};
 use encase::{ShaderType, internal::WriteInto};
 use std::collections::HashMap;
 use transform::{GlobalTransform, LocalTransform};
 use wgpu::{BufferUsages, ShaderStages};
 
 pub trait View: Component + Clone {
-    type Data: ShaderType + WriteInto;
+    type Data: ShaderType + WriteInto + Send + Sync + 'static;
 
     type Transform: LocalTransform;
 
-    type Key: Copy + Eq + Ord + Send + Sync + 'static;
+    type Item: Default + Copy + PartialOrd + Send + Sync + 'static;
 
-    fn data(&self, camera: &Camera, transform: &GlobalTransform) -> Self::Data;
+    fn data(
+        &self,
+        screen_width: u32,
+        screen_height: u32,
+        camera: &Camera,
+        transform: &GlobalTransform,
+    ) -> Self::Data;
 
-    fn key(
+    fn item(
         &self,
         data: &Self::Data,
-        local_entity_transform: &Self::Transform,
-        global_entity_transform: &GlobalTransform,
-    ) -> Self::Key;
+        mode: BlendMode,
+        local_transform: &Self::Transform,
+        global_transform: &GlobalTransform,
+    ) -> Self::Item;
 }
 
 pub struct RenderView<V: View> {
@@ -30,6 +41,18 @@ pub struct RenderView<V: View> {
     pub data: V::Data,
     pub transform: GlobalTransform,
     pub dynamic_offset: u32,
+}
+
+impl<V: View> RenderView<V> {
+    pub fn item(
+        &self,
+        mode: BlendMode,
+        local_transform: &V::Transform,
+        global_transform: &GlobalTransform,
+    ) -> V::Item {
+        self.view
+            .item(&self.data, mode, local_transform, global_transform)
+    }
 }
 
 #[derive(Resource)]
@@ -62,6 +85,10 @@ impl<V: View> ViewDataBuffer<V> {
         }
     }
 
+    pub fn views(&self) -> impl Iterator<Item = (&Entity, &RenderView<V>)> {
+        self.views.iter()
+    }
+
     pub fn get(&self, entity: &Entity) -> Option<&RenderView<V>> {
         self.views.get(entity)
     }
@@ -77,13 +104,14 @@ impl<V: View> ViewDataBuffer<V> {
     pub(crate) fn extract(
         buffer: &mut Self,
         query: Main<SQuery<(Entity, &V, &GlobalTransform, &Camera)>>,
+        surface: &RenderSurface,
     ) {
         buffer.as_mut().clear();
 
         buffer.views = query
             .iter()
             .map(|(entity, view, transform, camera)| {
-                let data = view.data(camera, transform);
+                let data = view.data(surface.width(), surface.height(), camera, transform);
                 let dynamic_offset = buffer.as_mut().push(&data);
                 let view = RenderView {
                     view: view.clone(),
@@ -103,6 +131,14 @@ impl<V: View> ViewDataBuffer<V> {
                 .with_uniform(Self::BINDING, buffer.as_ref(), 0, None)
                 .build(device);
         }
+    }
+}
+
+impl<V: View> RenderResource for ViewDataBuffer<V> {
+    type Arg = Read<RenderDevice>;
+
+    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
+        Ok(Self::new(device))
     }
 }
 

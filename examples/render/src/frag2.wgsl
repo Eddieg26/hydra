@@ -3,8 +3,8 @@ struct FragmentInput {
     @location(1) tex_coord: vec2<f32>,
 }
 
-@group(1) @binding(0) var texture: texture_2d<f32>;
-@group(1) @binding(1) var tex_sampler: sampler;
+@group(2) @binding(0) var texture: texture_2d<f32>;
+@group(2) @binding(1) var tex_sampler: sampler;
 
 @fragment
 fn main(input: FragmentInput) -> @location(0) vec4<f32> {

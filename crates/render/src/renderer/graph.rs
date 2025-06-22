@@ -4,7 +4,7 @@ use crate::{
     resources::{ComputePipeline, PipelineCache, PipelineId, RenderPipeline},
     surface::{RenderSurface, RenderSurfaceTexture},
 };
-use ecs::{IndexMap, Resource, world::World};
+use ecs::{IndexMap, Resource, SystemMeta, world::World};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -396,8 +396,14 @@ impl RenderGraph {
         self.entries.get(&TypeId::of::<G>())
     }
 
-    pub fn run(&mut self, world: &World, device: &RenderDevice, surface: &RenderSurface) {
-        let mut ctx = RenderContext::new(self, world, device, surface);
+    pub fn run(
+        &mut self,
+        world: &World,
+        device: &RenderDevice,
+        surface: &RenderSurface,
+        meta: &SystemMeta,
+    ) {
+        let mut ctx = RenderContext::new(self, world, device, surface, meta);
         ctx.run();
     }
 
@@ -407,6 +413,7 @@ impl RenderGraph {
         device: &RenderDevice,
         surface: &RenderSurface,
         world: &World,
+        meta: &SystemMeta,
     ) {
         let Some(output) = surface_texture
             .get()
@@ -418,7 +425,7 @@ impl RenderGraph {
 
         graph.import::<RenderOutput>(Some(output));
 
-        graph.run(world, &device, &surface);
+        graph.run(world, &device, &surface, meta);
 
         graph.destroy::<RenderOutput>();
     }
@@ -431,6 +438,7 @@ pub struct RenderContext<'a> {
     device: &'a RenderDevice,
     surface: &'a RenderSurface,
     pipelines: &'a PipelineCache,
+    meta: &'a SystemMeta,
     buffers: Vec<wgpu::CommandBuffer>,
 }
 
@@ -440,6 +448,7 @@ impl<'a> RenderContext<'a> {
         world: &'a World,
         device: &'a RenderDevice,
         surface: &'a RenderSurface,
+        meta: &'a SystemMeta,
     ) -> Self {
         Self {
             camera: None,
@@ -447,6 +456,7 @@ impl<'a> RenderContext<'a> {
             world,
             device,
             surface,
+            meta,
             pipelines: world.resource::<PipelineCache>(),
             buffers: Vec::new(),
         }
@@ -466,6 +476,10 @@ impl<'a> RenderContext<'a> {
 
     pub fn surface(&self) -> &'a RenderSurface {
         self.surface
+    }
+
+    pub fn meta(&self) -> &SystemMeta {
+        self.meta
     }
 
     pub fn get_render_pipeline(&self, id: &PipelineId) -> Option<&RenderPipeline> {

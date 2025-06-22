@@ -4,19 +4,19 @@ use asset::{
 };
 use ecs::{App, Component, EventReader, Init, Spawner, Start};
 use render::{
-    AsBinding, Camera, Color, Material, Mesh, MeshAttribute, MeshAttributeType,
-    MeshAttributeValues, MeshTopology, ObjImportSettings, Projection, RenderPhase, Shader,
-    ShaderSource, ShaderType, Texture, Texture2dSettings,
+    AsBinding, BlendMode, Camera, Color, Draw, Material, Mesh, MeshAttribute, MeshAttributeType,
+    MeshAttributeValues, MeshTopology, ObjImportSettings, Projection, RenderPhase, Renderer,
+    Shader, ShaderSource, ShaderType, Texture, Texture2dSettings, View,
     plugin::{RenderAppExt, RenderPlugin},
 };
-use transform::GlobalTransform;
+use transform::{GlobalTransform, Transform};
 
 const VERT_ID: AssetId<Shader> = AssetId::from_u128(0xabcdef0123456789);
 const VERT_ID_2: AssetId<Shader> = AssetId::from_u128(0x7fa18a3696e84df5848822a3b417e3f3u128);
 const FRAG_ID: AssetId<Shader> = AssetId::from_u128(0x123456789abcdef0);
 const FRAG_ID_2: AssetId<Shader> = AssetId::from_u128(0x9876543210fedcba);
-// const RED_MAT: AssetId<UnlitColor> = AssetId::from_u128(0xa0cc79971c2d4206874539cb5ac54fe2u128);
-// const BLUE_MAT: AssetId<UnlitColor> = AssetId::from_u128(0x87654321fedcba98);
+const RED_MAT: AssetId<UnlitColor> = AssetId::from_u128(0xa0cc79971c2d4206874539cb5ac54fe2u128);
+const BLUE_MAT: AssetId<UnlitColor> = AssetId::from_u128(0x87654321fedcba98);
 const QUAD_ID: AssetId<Mesh> = AssetId::from_u128(0xe51f72d138f747c6b22e2ac8a64b7b92u128);
 const CUBE_ID: AssetId<Mesh> = AssetId::from_u128(0x9d3919f428f8429a80e195849b3b6c21u128);
 const SWORD_ID: AssetId<Mesh> = AssetId::from_u128(0x6d3d79f5c6764b43993ae8de7ed0219bu128);
@@ -43,136 +43,118 @@ const QUAD_TEX_COORDS: &[math::Vec2] = &[
 ];
 
 fn main() {
-    // let fs = EmbeddedFs::new();
-    // embed_asset!(fs, VERT_ID, "vert.wgsl", DefaultSettings::default());
-    // embed_asset!(fs, VERT_ID_2, "vert2.wgsl", DefaultSettings::default());
-    // embed_asset!(fs, FRAG_ID, "frag.wgsl", DefaultSettings::default());
-    // embed_asset!(fs, FRAG_ID_2, "frag2.wgsl", DefaultSettings::default());
-    // embed_asset!(fs, CUBE_ID, "cube.obj", ObjImportSettings::default());
-    // embed_asset!(fs, SWORD_ID, "sword.obj", ObjImportSettings::default());
-    // embed_asset!(fs, GENGAR_ID, "gengar.png", Texture2dSettings::default());
+    let fs = EmbeddedFs::new();
+    embed_asset!(fs, VERT_ID, "vert.wgsl", DefaultSettings::default());
+    embed_asset!(fs, VERT_ID_2, "vert2.wgsl", DefaultSettings::default());
+    embed_asset!(fs, FRAG_ID, "frag.wgsl", DefaultSettings::default());
+    embed_asset!(fs, FRAG_ID_2, "frag2.wgsl", DefaultSettings::default());
+    embed_asset!(fs, CUBE_ID, "cube.obj", ObjImportSettings::default());
+    embed_asset!(fs, SWORD_ID, "sword.obj", ObjImportSettings::default());
+    embed_asset!(fs, GENGAR_ID, "gengar.png", Texture2dSettings::default());
 
-    // let quad = Mesh::new(MeshTopology::TriangleList)
-    //     .with_attribute(MeshAttribute::new(
-    //         MeshAttributeType::Position,
-    //         MeshAttributeValues::Vec2(QUAD.to_vec()),
-    //     ))
-    //     .with_attribute(MeshAttribute::new(
-    //         MeshAttributeType::TexCoord0,
-    //         MeshAttributeValues::Vec2(QUAD_TEX_COORDS.to_vec()),
-    //     ));
+    let quad = Mesh::new(MeshTopology::TriangleList)
+        .with_attribute(MeshAttribute::new(
+            MeshAttributeType::Position,
+            MeshAttributeValues::Vec2(QUAD.to_vec()),
+        ))
+        .with_attribute(MeshAttribute::new(
+            MeshAttributeType::TexCoord0,
+            MeshAttributeValues::Vec2(QUAD_TEX_COORDS.to_vec()),
+        ));
 
-    // App::new()
-    //     .add_plugins(RenderPlugin)
-    //     .add_source("embedded", fs)
-    //     .register_draw::<DrawMesh<UnlitColor>>()
-    // .register_draw::<DrawMesh<UnlitTexture>>()
-    // .register_draw::<DrawSprite<UnlitTexture>>()
-    // .add_renderer::<BasicRenderer>()
-    // .add_asset(RED_MAT, UnlitColor::from(Color::red()))
-    // .add_asset(BLUE_MAT, UnlitColor::from(Color::blue()))
-    // .add_asset(UNLIT_TEX_ID, UnlitTexture::from(GENGAR_ID))
-    // .add_asset(QUAD_ID, quad)
-    // .load_asset::<Mesh>(SWORD_ID)
-    // .load_asset::<Mesh>(CUBE_ID)
-    // .load_asset::<Texture>(GENGAR_ID)
-    // .add_systems(Init, |mut spawner: Spawner| {
-    //     spawner
-    //         .spawn()
-    //         .with_component(GlobalTransform::with_translation(math::Vec3::Z * 5.0))
-    //         .with_component(Camera::default())
-    //         .with_component(View3d::default())
-    //         .finish();
-    // spawner
-    //     .spawn()
-    //     .with_component(GlobalTransform::IDENTITY)
-    //     .with_component(DrawMesh::<UnlitColor> {
-    //         material: RED_MAT,
-    //         mesh: SWORD_ID,
-    //     })
-    //     .finish();
+    App::new()
+        .add_plugins(RenderPlugin)
+        .add_source("embedded", fs)
+        .register_draw::<DrawMesh<UnlitColor>>()
+        .add_renderer::<BasicRenderer>()
+        .add_asset(RED_MAT, UnlitColor::from(Color::red()))
+        .add_asset(BLUE_MAT, UnlitColor::from(Color::blue()))
+        .add_asset(QUAD_ID, quad)
+        .load_asset::<Mesh>(SWORD_ID)
+        .load_asset::<Mesh>(CUBE_ID)
+        .load_asset::<Texture>(GENGAR_ID)
+        .add_systems(Init, |mut spawner: Spawner| {
+            spawner
+                .spawn()
+                .with_component(GlobalTransform::with_translation(math::Vec3::Z * 5.0))
+                .with_component(Camera::default())
+                .with_component(View3d::default())
+                .finish();
+            spawner
+                .spawn()
+                .with_component(GlobalTransform::IDENTITY)
+                .with_component(Transform::default())
+                .with_component(DrawMesh::<UnlitColor> {
+                    material: RED_MAT,
+                    mesh: SWORD_ID,
+                })
+                .finish();
 
-    // let transform = GlobalTransform::new(
-    //     math::Vec3::new(0.0, 0.0, 0.0),
-    //     math::Quat::IDENTITY,
-    //     math::Vec3::new(1.0, 1.0, 1.0),
-    // );
-    // spawner
-    //     .spawn()
-    //     .with_component(GlobalTransform::IDENTITY)
-    //     .with_component(DrawMesh {
-    //         material: UNLIT_TEX_ID,
-    //         mesh: CUBE_ID,
-    //     })
-    //     .finish();
+            // spawner
+            //     .spawn()
+            //     .with_component(GlobalTransform::IDENTITY)
+            //     .with_component(DrawMesh {
+            //         material: BLUE_MAT,
+            //         mesh: QUAD_ID,
+            //     })
+            //     .finish();
+        })
+        .add_systems(
+            Start,
+            |import_errors: EventReader<ImportError>,
+             load_errors: EventReader<LoadError>,
+             events: EventReader<AssetEvent<ShaderSource>>,
+             texture_events: EventReader<AssetEvent<Texture>>,
+             material_events: EventReader<AssetEvent<UnlitColor>>| {
+                for error in import_errors {
+                    println!("Import error: {}", error);
+                }
+                for error in load_errors {
+                    println!("Load error: {}", error);
+                }
+                for event in events {
+                    println!("Event: {:?}", event);
+                }
 
-    //     spawner
-    //         .spawn()
-    //         .with_component(GlobalTransform::IDENTITY)
-    //         .with_component(DrawSprite {
-    //             material: UNLIT_TEX_ID,
-    //             mesh: QUAD_ID,
-    //         })
-    //         .finish();
-    // })
-    // .add_systems(
-    //     Start,
-    //     |import_errors: EventReader<ImportError>,
-    //      load_errors: EventReader<LoadError>,
-    //      events: EventReader<AssetEvent<ShaderSource>>,
-    //      texture_events: EventReader<AssetEvent<Texture>>,
-    //      material_events: EventReader<AssetEvent<UnlitTexture>>| {
-    //         for error in import_errors {
-    //             println!("Import error: {}", error);
-    //         }
-    //         for error in load_errors {
-    //             println!("Load error: {}", error);
-    //         }
-    //         for event in events {
-    //             println!("Event: {:?}", event);
-    //         }
+                for event in texture_events {
+                    println!("Event: {:?}", event);
+                }
 
-    //         for event in texture_events {
-    //             println!("Event: {:?}", event);
-    //         }
-
-    //         for event in material_events {
-    //             println!("Event: {:?}", event);
-    //         }
-    //     },
-    // )
-    // .run();
+                for event in material_events {
+                    println!("Event: {:?}", event);
+                }
+            },
+        )
+        .run();
 }
 
-// pub struct Opaque3d;
-// impl RenderPhase for Opaque3d {
-//     type Item = ();
+pub struct Opaque3d;
+impl RenderPhase for Opaque3d {
+    fn mode() -> render::BlendMode {
+        render::BlendMode::Opaque
+    }
+}
 
-//     fn mode() -> render::BlendMode {
-//         render::BlendMode::Opaque
-//     }
-// }
+#[derive(Clone, Asset, AsBinding)]
+#[uniform(0)]
+pub struct UnlitColor {
+    #[uniform]
+    color: Color,
+}
 
-// #[derive(Clone, Asset, AsBinding)]
-// #[uniform(0)]
-// pub struct UnlitColor {
-//     #[uniform]
-//     color: Color,
-// }
+impl From<Color> for UnlitColor {
+    fn from(color: Color) -> Self {
+        Self { color }
+    }
+}
 
-// impl From<Color> for UnlitColor {
-//     fn from(color: Color) -> Self {
-//         Self { color }
-//     }
-// }
+impl Material for UnlitColor {
+    type Phase = Opaque3d;
 
-// impl Material for UnlitColor {
-//     type Phase = Opaque3d;
-
-//     fn shader() -> impl Into<asset::AssetId<render::Shader>> {
-//         FRAG_ID
-//     }
-// }
+    fn shader() -> impl Into<asset::AssetId<render::Shader>> {
+        FRAG_ID
+    }
+}
 
 // pub struct Transparent2d;
 // impl RenderPhase for Transparent2d {
@@ -205,126 +187,140 @@ fn main() {
 //     }
 // }
 
-// #[derive(ShaderType)]
-// pub struct Mesh3d {
-//     world: [f32; 16],
-// }
+#[derive(ShaderType)]
+pub struct Mesh3d {
+    world: math::Mat4,
+}
 
-// impl MeshData for Mesh3d {
-//     fn formats() -> &'static [render::wgpu::VertexFormat] {
-//         &[
-//             render::wgpu::VertexFormat::Float32x4,
-//             render::wgpu::VertexFormat::Float32x4,
-//             render::wgpu::VertexFormat::Float32x4,
-//             render::wgpu::VertexFormat::Float32x4,
-//         ]
-//     }
-// }
+#[derive(ShaderType)]
+pub struct View3dData {
+    world: math::Mat4,
+    view: math::Mat4,
+    projection: math::Mat4,
+}
 
-// #[derive(ShaderType)]
-// pub struct View3dData {
-//     world: math::Mat4,
-//     view: math::Mat4,
-//     projection: math::Mat4,
-// }
+#[derive(Clone, Component)]
+pub struct View3d {
+    projection: Projection,
+}
 
-// #[derive(Clone, Component)]
-// pub struct View3d {
-//     projection: Projection,
-// }
+impl View3d {
+    fn orthographic() -> Self {
+        Self {
+            projection: Projection::Orthographic {
+                near: 0.01,
+                far: 100.0,
+                size: 1.0,
+            },
+        }
+    }
+}
 
-// impl View3d {
-//     fn orthographic() -> Self {
-//         Self {
-//             projection: Projection::Orthographic {
-//                 near: 0.01,
-//                 far: 100.0,
-//                 size: 1.0,
-//             },
-//         }
-//     }
-// }
+impl Default for View3d {
+    fn default() -> Self {
+        Self {
+            projection: Projection::Perspective {
+                fov: 60.0f32.to_radians(),
+                near: 0.01,
+                far: 100.0,
+            },
+        }
+    }
+}
 
-// impl Default for View3d {
-//     fn default() -> Self {
-//         Self {
-//             projection: Projection::Perspective {
-//                 fov: 60.0f32.to_radians(),
-//                 near: 0.01,
-//                 far: 100.0,
-//             },
-//         }
-//     }
-// }
+#[derive(Default, Clone, Copy, PartialEq, PartialOrd)]
+pub struct ZDistance(f32);
 
-// impl View for View3d {
-//     type Data = View3dData;
+impl View for View3d {
+    type Data = View3dData;
 
-//     fn data(&self, width: u32, height: u32, transform: &GlobalTransform) -> Self::Data {
-//         let projection = match self.projection {
-//             Projection::Orthographic { near, far, size } => {
-//                 let aspect_ratio = width as f32 / height as f32;
-//                 let width = size * aspect_ratio;
-//                 math::Mat4::orthographic_rh(-width, width, -size, size, near, far)
-//             }
-//             Projection::Perspective { fov, near, .. } => {
-//                 let aspect_ratio = width as f32 / height as f32;
-//                 math::Mat4::perspective_infinite_reverse_rh(fov, aspect_ratio, near)
-//             }
-//         };
+    type Transform = Transform;
 
-//         let world = transform.matrix();
-//         let view = world.inverse();
+    type Item = ZDistance;
 
-//         View3dData {
-//             world,
-//             view,
-//             projection,
-//         }
-//     }
-// }
+    fn data(&self, width: u32, height: u32, _: &Camera, transform: &GlobalTransform) -> Self::Data {
+        let projection = match self.projection {
+            Projection::Orthographic { near, far, size } => {
+                let aspect_ratio = width as f32 / height as f32;
+                let width = size * aspect_ratio;
+                math::Mat4::orthographic_rh(-width, width, -size, size, near, far)
+            }
+            Projection::Perspective { fov, near, .. } => {
+                let aspect_ratio = width as f32 / height as f32;
+                math::Mat4::perspective_infinite_reverse_rh(fov, aspect_ratio, near)
+            }
+        };
 
-// #[derive(Clone, Component)]
-// pub struct DrawMesh<M: Material> {
-//     material: AssetId<M>,
-//     mesh: AssetId<Mesh>,
-// }
+        let world = transform.matrix();
+        let view = world.inverse();
 
-// impl<M: Material> Draw for DrawMesh<M> {
-//     type View = View3d;
+        View3dData {
+            world,
+            view,
+            projection,
+        }
+    }
 
-//     type Mesh = Mesh3d;
+    fn item(
+        &self,
+        data: &Self::Data,
+        mode: BlendMode,
+        _: &Self::Transform,
+        global_transform: &GlobalTransform,
+    ) -> Self::Item {
+        let view_from_world = &data.view;
+        let range_row = view_from_world.row(2);
 
-//     type Material = M;
+        match mode {
+            BlendMode::Opaque => ZDistance::default(),
+            BlendMode::Transparent | BlendMode::Transmissive | BlendMode::AlphaMask => {
+                let distance = range_row.dot(global_transform.matrix().row(3));
+                ZDistance(distance)
+            }
+        }
+    }
+}
 
-//     fn material(&self) -> AssetId<Self::Material> {
-//         self.material
-//     }
+#[derive(Clone, Component)]
+pub struct DrawMesh<M: Material> {
+    material: AssetId<M>,
+    mesh: AssetId<Mesh>,
+}
 
-//     fn mesh(&self) -> AssetId<Mesh> {
-//         self.mesh
-//     }
+impl<M: Material> Draw for DrawMesh<M> {
+    type View = View3d;
 
-//     fn data(&self, transform: &GlobalTransform) -> Self::Mesh {
-//         Mesh3d {
-//             world: transform.matrix().to_cols_array(),
-//         }
-//     }
+    type Mesh = Mesh3d;
 
-//     fn shader() -> impl Into<AssetId<render::Shader>> {
-//         VERT_ID
-//     }
-// }
+    type Material = M;
 
-// impl<M: Material> IntoRenderItem<Opaque3d> for DrawMesh<M> {
-//     fn render_item(
-//         &self,
-//         _: &GlobalTransform,
-//         _: &GlobalTransform,
-//     ) -> <Opaque3d as RenderPhase>::Item {
-//         ()
-//     }
-// }
+    fn material(&self) -> AssetId<Self::Material> {
+        self.material
+    }
+
+    fn mesh(&self) -> AssetId<Mesh> {
+        self.mesh
+    }
+
+    fn data(&self, transform: &GlobalTransform) -> Self::Mesh {
+        Mesh3d {
+            world: transform.matrix(),
+        }
+    }
+
+    fn shader() -> impl Into<AssetId<render::Shader>> {
+        VERT_ID
+    }
+
+    fn formats() -> &'static [render::wgpu::VertexFormat] {
+        &[
+            render::wgpu::VertexFormat::Float32x3,
+            render::wgpu::VertexFormat::Float32x3,
+            render::wgpu::VertexFormat::Float32x2,
+            render::wgpu::VertexFormat::Float32x4,
+        ]
+    }
+}
 
 // #[derive(Clone, Component)]
 // pub struct DrawSprite<M: Material> {
@@ -365,25 +361,14 @@ fn main() {
 //     }
 // }
 
-// impl<M: Material> IntoRenderItem<Transparent2d> for DrawSprite<M> {
-//     fn render_item(
-//         &self,
-//         _: &GlobalTransform,
-//         _: &GlobalTransform,
-//     ) -> <Opaque3d as RenderPhase>::Item {
-//         ()
-//     }
-// }
+pub struct BasicRenderer;
 
-// pub struct BasicRenderer;
+impl Renderer for BasicRenderer {
+    type Data = ();
 
-// impl Renderer for BasicRenderer {
-//     type Data = ();
+    const NAME: render::renderer::Name = "Basic Renderer";
 
-//     const NAME: render::renderer::Name = "Basic Renderer";
-
-//     fn setup(_: &mut render::PassBuilder, phases: &mut render::RenderPhases) -> Self::Data {
-//         phases.add_phase::<View3d, Opaque3d>();
-//         phases.add_phase::<View3d, Transparent2d>();
-//     }
-// }
+    fn setup(_: &mut render::PassBuilder, phases: &mut render::RenderPhases) -> Self::Data {
+        phases.add_phase::<View3d, Opaque3d>();
+    }
+}

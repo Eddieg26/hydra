@@ -4,5 +4,6 @@ pub mod graph;
 pub mod state;
 
 pub use camera::*;
+pub use draw::*;
 pub use graph::*;
 pub use state::*;

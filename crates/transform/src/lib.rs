@@ -13,11 +13,31 @@ pub struct Transform {
     pub rotation: Vec3,
 }
 
+impl Default for Transform {
+    fn default() -> Self {
+        Self {
+            translation: Vec3::ZERO,
+            scale: Vec3::ONE,
+            rotation: Vec3::ZERO,
+        }
+    }
+}
+
 #[derive(Component, Clone, Copy)]
 pub struct Transform2d {
     pub translation: Vec2,
     pub scale: Vec2,
     pub rotation: f32,
+}
+
+impl Default for Transform2d {
+    fn default() -> Self {
+        Self {
+            translation: Vec2::ZERO,
+            scale: Vec2::ONE,
+            rotation: 0.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Component)]

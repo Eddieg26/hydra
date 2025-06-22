@@ -19,7 +19,9 @@ pub enum AssetUsage {
     Discard,
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Default, Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum ReadWrite {
     Enabled,
     #[default]

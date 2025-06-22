@@ -59,12 +59,14 @@ impl AsRef<wgpu::BindGroup> for BindGroup {
 }
 
 pub struct BindGroupLayoutBuilder {
+    label: Option<String>,
     entries: Vec<wgpu::BindGroupLayoutEntry>,
 }
 
 impl BindGroupLayoutBuilder {
     pub fn new() -> Self {
         Self {
+            label: None,
             entries: Vec::new(),
         }
     }
@@ -116,11 +118,12 @@ impl BindGroupLayoutBuilder {
         dynamic: bool,
         size: Option<wgpu::BufferSize>,
         count: Option<NonZero<u32>>,
+        read_only: bool,
     ) -> &mut Self {
         self.with_buffer(
             binding,
             visibility,
-            wgpu::BufferBindingType::Storage { read_only: false },
+            wgpu::BufferBindingType::Storage { read_only },
             dynamic,
             size,
             count,
@@ -162,17 +165,23 @@ impl BindGroupLayoutBuilder {
         self
     }
 
+    pub fn with_label(&mut self, label: impl ToString) -> &mut Self {
+        self.label = Some(label.to_string());
+        self
+    }
+
     pub fn build(&self, device: &RenderDevice) -> BindGroupLayout {
         BindGroupLayout::from(
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &self.entries,
-                label: None,
+                label: self.label.as_ref().map(|x| x.as_str()),
             }),
         )
     }
 }
 
 pub struct BindGroupBuilder<'a> {
+    label: Option<String>,
     layout: &'a BindGroupLayout,
     entries: Vec<wgpu::BindGroupEntry<'a>>,
 }
@@ -180,6 +189,7 @@ pub struct BindGroupBuilder<'a> {
 impl<'a> BindGroupBuilder<'a> {
     pub fn new(layout: &'a BindGroupLayout) -> Self {
         Self {
+            label: None,
             layout,
             entries: Vec::new(),
         }
@@ -239,11 +249,16 @@ impl<'a> BindGroupBuilder<'a> {
         self
     }
 
+    pub fn with_label(&mut self, label: impl ToString) -> &mut Self {
+        self.label = Some(label.to_string());
+        self
+    }
+
     pub fn build(&self, device: &RenderDevice) -> BindGroup {
         BindGroup::from(device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: self.layout,
             entries: &self.entries,
-            label: None,
+            label: self.label.as_ref().map(|x| x.as_str()),
         }))
     }
 }
