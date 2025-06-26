@@ -61,9 +61,7 @@ impl Archetype {
     }
 
     pub fn matches(&self, query: &ArchetypeQuery) -> bool {
-        self.bitset.is_superset(&query.required)
-            && self.bitset.is_disjoint(&query.excluded)
-            && (query.included.is_clear() || !self.bitset.is_disjoint(&query.included))
+        self.bitset.is_superset(&query.included) && self.bitset.is_disjoint(&query.excluded)
     }
 
     pub fn has_components(&self, components: &FixedBitSet) -> bool {
@@ -542,7 +540,6 @@ impl EntityIndex {
 }
 
 pub struct ArchetypeQuery {
-    pub required: FixedBitSet,
     pub included: FixedBitSet,
     pub excluded: FixedBitSet,
 }
@@ -550,15 +547,9 @@ pub struct ArchetypeQuery {
 impl ArchetypeQuery {
     pub fn new() -> Self {
         Self {
-            required: FixedBitSet::new(),
             included: FixedBitSet::new(),
             excluded: FixedBitSet::new(),
         }
-    }
-
-    pub fn require(&mut self, component: ComponentId) {
-        self.required.grow(component.to_usize() + 1);
-        self.required.set(component.to_usize(), true);
     }
 
     pub fn include(&mut self, component: ComponentId) {
@@ -575,7 +566,6 @@ impl ArchetypeQuery {
 impl From<ArchetypeAccess> for ArchetypeQuery {
     fn from(value: ArchetypeAccess) -> Self {
         Self {
-            required: value.required.collect(),
             included: value.includes,
             excluded: value.excludes,
         }
@@ -697,8 +687,8 @@ mod tests {
         archetypes.add_component(entity, Name("Bob"), Frame::ZERO);
 
         let mut query = ArchetypeQuery::new();
-        query.require(age);
-        query.require(name);
+        query.include(age);
+        query.include(name);
 
         let result = archetypes.query(&query);
         let has_entity = result.iter().any(|archetype| archetype.contains(entity));
@@ -718,7 +708,7 @@ mod tests {
         archetypes.add_component(entity, Name("Bob"), Frame::ZERO);
 
         let mut query = ArchetypeQuery::new();
-        query.require(age);
+        query.include(age);
         query.exclude(name);
 
         let result = archetypes.query(&query);

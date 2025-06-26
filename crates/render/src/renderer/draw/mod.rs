@@ -303,10 +303,18 @@ impl<D: Draw> DrawTree<D> {
 
     pub(crate) fn extract(
         tree: &mut Self,
-        query: Main<SQuery<(Entity, &<D::View as View>::Transform, &GlobalTransform, &D)>>,
+        query: Main<
+            SQuery<(
+                Entity,
+                &<D::View as View>::Transform,
+                &GlobalTransform,
+                &D,
+                Option<&DisableCulling>,
+            )>,
+        >,
         meshes: &RenderAssets<RenderMesh>,
     ) {
-        for (entity, transform, global_transform, draw) in query.iter() {
+        for (entity, transform, global_transform, draw, disable_culling) in query.iter() {
             let Some(mesh) = meshes.get(&draw.mesh()) else {
                 continue;
             };
@@ -318,7 +326,7 @@ impl<D: Draw> DrawTree<D> {
                 draw: draw.clone(),
             };
 
-            if D::CULL {
+            if D::CULL && disable_culling.is_none() {
                 let bounds = mesh.bounds().transform_affine(global_transform.get());
                 tree.insert(draw, bounds);
             } else {

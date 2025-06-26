@@ -111,7 +111,7 @@ impl<I: SparseIndex> Into<FixedBitSet> for Access<I> {
 
 #[derive(Clone)]
 pub struct ArchetypeAccess {
-    pub(crate) required: Access<ComponentId>,
+    pub(crate) access: Access<ComponentId>,
     pub(crate) includes: FixedBitSet,
     pub(crate) excludes: FixedBitSet,
 }
@@ -119,14 +119,22 @@ pub struct ArchetypeAccess {
 impl ArchetypeAccess {
     pub fn new() -> Self {
         Self {
-            required: Access::new(),
+            access: Access::new(),
             includes: FixedBitSet::new(),
             excludes: FixedBitSet::new(),
         }
     }
 
-    pub fn required(&self) -> &Access<ComponentId> {
-        &self.required
+    pub fn access(&self) -> &Access<ComponentId> {
+        &self.access
+    }
+
+    pub fn reads(&self) -> &FixedBitSet {
+        &self.access.read
+    }
+
+    pub fn writes(&self) -> &FixedBitSet {
+        &self.access.write
     }
 
     pub fn includes(&self) -> &FixedBitSet {
@@ -138,12 +146,26 @@ impl ArchetypeAccess {
     }
 
     pub fn read(&mut self, component: ComponentId) -> ComponentId {
-        self.required.read(component);
+        self.access.read(component);
+        self.includes.grow(component.to_usize() + 1);
+        self.includes.set(component.to_usize(), true);
         component
     }
 
     pub fn write(&mut self, component: ComponentId) -> ComponentId {
-        self.required.write(component);
+        self.access.write(component);
+        self.includes.grow(component.to_usize() + 1);
+        self.includes.set(component.to_usize(), true);
+        component
+    }
+
+    pub fn read_optional(&mut self, component: ComponentId) -> ComponentId {
+        self.access.read(component);
+        component
+    }
+
+    pub fn write_optional(&mut self, component: ComponentId) -> ComponentId {
+        self.access.write(component);
         component
     }
 
@@ -160,12 +182,19 @@ impl ArchetypeAccess {
     }
 
     pub fn is_disjoint(&self, other: &Self) -> bool {
-        !self.required.get_read().is_disjoint(&other.excludes)
-            || !self.required.get_write().is_disjoint(&other.excludes)
-            || !self.includes.is_disjoint(&other.excludes)
-            || !other.required.get_read().is_disjoint(&self.excludes)
-            || !other.required.get_write().is_disjoint(&self.excludes)
-            || !other.includes.is_disjoint(&self.excludes)
+        if self.reads().intersects(other.excludes())
+            || self.writes().intersects(other.excludes())
+            || self.includes().intersects(other.excludes())
+            || other.reads().intersects(self.excludes())
+            || other.writes().intersects(self.excludes())
+            || other.includes().intersects(self.excludes())
+        {
+            return true;
+        }
+
+        self.reads().is_disjoint(other.writes())
+            && self.writes().is_disjoint(other.writes())
+            && self.writes().is_disjoint(other.reads())
     }
 
     pub fn conflicts(&self, other: &Self) -> Result<(), usize> {
@@ -173,7 +202,17 @@ impl ArchetypeAccess {
             return Ok(());
         }
 
-        self.required.conflicts(&other.required)
+        self.access.conflicts(&other.access)
+    }
+}
+
+pub trait FixedBitSetExt {
+    fn intersects(&self, other: &FixedBitSet) -> bool;
+}
+
+impl FixedBitSetExt for FixedBitSet {
+    fn intersects(&self, other: &FixedBitSet) -> bool {
+        self.intersection_count(other) > 0
     }
 }
 
@@ -242,7 +281,7 @@ impl WorldAccess {
         };
 
         for access in &self.archetypes {
-            if let Err(conflict) = access.required.conflicts(&other.components) {
+            if let Err(conflict) = access.access.conflicts(&other.components) {
                 return Err(AccessError::from(ComponentId::from_usize(conflict)));
             }
 
@@ -251,7 +290,7 @@ impl WorldAccess {
                     return Err(AccessError::from(ComponentId::from_usize(conflict)));
                 }
 
-                if let Err(conflict) = other.required.conflicts(&self.components) {
+                if let Err(conflict) = other.access.conflicts(&self.components) {
                     return Err(AccessError::from(ComponentId::from_usize(conflict)));
                 }
             }
@@ -261,11 +300,10 @@ impl WorldAccess {
     }
 }
 
-
 #[allow(unused_imports, dead_code)]
 mod test {
-    use crate::{ArchetypeAccess, ComponentId, ResourceId, SparseIndex};
     use super::WorldAccess;
+    use crate::{ArchetypeAccess, ComponentId, ResourceId, SparseIndex};
 
     #[test]
     fn disjoint_archetype_access() {

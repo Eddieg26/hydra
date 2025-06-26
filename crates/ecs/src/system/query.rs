@@ -244,7 +244,7 @@ impl<C: Component> BaseQuery for Option<&C> {
     type Data = <&'static C as BaseQuery>::Data;
 
     fn init(world: &mut World, access: &mut ArchetypeAccess) -> Self::Data {
-        <&C as BaseQuery>::init(world, access)
+        access.read_optional(world.register::<C>())
     }
 
     fn state<'w>(
@@ -284,7 +284,7 @@ impl<C: Component> BaseQuery for Option<&mut C> {
     type Data = <&'static mut C as BaseQuery>::Data;
 
     fn init(world: &mut World, access: &mut ArchetypeAccess) -> Self::Data {
-        <&mut C as BaseQuery>::init(world, access)
+        access.write_optional(world.register::<C>())
     }
 
     fn state<'w>(
