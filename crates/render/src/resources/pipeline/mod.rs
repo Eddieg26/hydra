@@ -1,5 +1,6 @@
-use super::{AtomicId, Id, Label, binding::BindGroupLayout, extract::RenderAssets, shader::Shader};
+use super::{AtomicId, Label, binding::BindGroupLayout, extract::RenderAssets, shader::Shader};
 use crate::device::RenderDevice;
+use asset::AssetId;
 use std::{borrow::Cow, sync::Arc};
 use wgpu::{
     BufferAddress, ColorTargetState, DepthStencilState, MultisampleState, PrimitiveState,
@@ -22,14 +23,14 @@ pub struct VertexBufferLayout {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct VertexState {
-    pub shader: Id<Shader>,
+    pub shader: AssetId<Shader>,
     pub entry: Cow<'static, str>,
     pub buffers: Vec<VertexBufferLayout>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FragmentState {
-    pub shader: Id<Shader>,
+    pub shader: AssetId<Shader>,
     pub entry: Cow<'static, str>,
     pub targets: Vec<Option<ColorTargetState>>,
 }
@@ -70,10 +71,10 @@ impl RenderPipeline {
         id: PipelineId,
         desc: &RenderPipelineDesc,
     ) -> Option<Self> {
-        let vertex_shader = shaders.get(&desc.vertex.shader)?;
+        let vertex_shader = shaders.get(desc.vertex.shader.as_ref())?;
 
         let fragment_shader = match &desc.fragment {
-            Some(fragment) => Some(shaders.get(&fragment.shader)?),
+            Some(fragment) => Some(shaders.get(fragment.shader.as_ref())?),
             None => None,
         };
 
@@ -154,7 +155,7 @@ impl AsRef<wgpu::RenderPipeline> for RenderPipeline {
 pub struct ComputePipelineDesc {
     pub label: Label,
     pub layout: Vec<BindGroupLayout>,
-    pub shader: Id<Shader>,
+    pub shader: AssetId<Shader>,
     pub entry: Cow<'static, str>,
 }
 
@@ -177,7 +178,7 @@ impl ComputePipeline {
         id: PipelineId,
         desc: &ComputePipelineDesc,
     ) -> Option<Self> {
-        let shader = shaders.get(&desc.shader)?;
+        let shader = shaders.get(desc.shader.as_ref())?;
 
         let bind_group_layouts = desc
             .layout

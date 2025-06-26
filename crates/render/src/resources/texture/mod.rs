@@ -1,4 +1,4 @@
-use super::{Label, RenderAssetExtractor, extract::RenderAsset};
+use super::{Label, RenderAsset};
 use crate::device::RenderDevice;
 use asset::{Asset, Settings, importer::AssetImporter};
 use ecs::system::unlifetime::Read;
@@ -369,17 +369,15 @@ impl AsRef<wgpu::TextureView> for GpuTexture {
     }
 }
 
-impl RenderAsset for GpuTexture {}
-
-impl RenderAssetExtractor for Texture {
-    type RenderAsset = GpuTexture;
+impl RenderAsset for GpuTexture {
+    type Source = Texture;
 
     type Arg = Read<RenderDevice>;
 
     fn extract(
-        texture: Self,
+        texture: Self::Source,
         device: &mut ecs::system::ArgItem<Self::Arg>,
-    ) -> Result<Self::RenderAsset, super::ExtractError<Self>> {
+    ) -> Result<Self, super::ExtractError<Self::Source>> {
         let sampler = Sampler::from_texture(device, &texture);
         Ok(GpuTexture::create(device, &texture, sampler))
     }

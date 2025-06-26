@@ -116,7 +116,7 @@ pub fn expand_create_bind_group(input: &mut DeriveInput) -> Result<TokenStream> 
                 layout: &#render::BindGroupLayout,
                 arg: &#ecs::system::ArgItem<Self::Arg>
             ) -> Result<#render::BindGroup, #render::CreateBindGroupError> {
-                use #render::{BindGroupBuilder, AsOptionalId, uniform::UniformBuffer, GpuTexture, ShaderType, TextureDimension, wgpu::TextureViewDimension};
+                use #render::{BindGroupBuilder, OptionalAssetId, uniform::UniformBuffer, GpuTexture, ShaderType, TextureDimension, wgpu::TextureViewDimension};
                 let (textures, fallbacks) = arg;
                 #binding_def
             }

@@ -103,6 +103,12 @@ impl<A: Asset> ToString for AssetId<A> {
     }
 }
 
+impl<A: Asset, O: Asset> AsRef<AssetId<A>> for AssetId<O> {
+    fn as_ref(&self) -> &AssetId<A> {
+        unsafe { std::mem::transmute(self) }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ErasedId(uuid::Uuid);
 impl ErasedId {

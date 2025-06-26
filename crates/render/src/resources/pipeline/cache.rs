@@ -1,8 +1,9 @@
 use super::{ComputePipeline, ComputePipelineDesc, PipelineId, RenderPipeline, RenderPipelineDesc};
 use crate::{
     device::RenderDevice,
-    resources::{ExtractInfo, Id, ShaderSource, extract::RenderAssets, shader::Shader},
+    resources::{ExtractInfo, extract::RenderAssets, shader::Shader},
 };
+use asset::AssetId;
 use ecs::{IndexMap, IndexSet, Resource};
 use std::collections::HashMap;
 
@@ -24,7 +25,7 @@ pub enum QueuedPipeline {
 
 #[derive(Default)]
 pub struct PipelineCache {
-    shaders: HashMap<Id<Shader>, ShaderPipelines>,
+    shaders: HashMap<AssetId<Shader>, ShaderPipelines>,
     render_pipelines: HashMap<PipelineId, RenderPipeline>,
     compute_pipelines: HashMap<PipelineId, ComputePipeline>,
     pipeline_queue: IndexMap<PipelineId, QueuedPipeline>,
@@ -88,7 +89,7 @@ impl PipelineCache {
         pipeline
     }
 
-    pub fn remove_shader(&mut self, shader: &Id<Shader>) {
+    pub fn remove_shader(&mut self, shader: &AssetId<Shader>) {
         self.shaders.remove(shader);
     }
 
@@ -123,9 +124,9 @@ impl PipelineCache {
         self.pipeline_queue = queue;
     }
 
-    fn add_shader_dependency(&mut self, shader: &Id<Shader>, id: PipelineId) {
+    fn add_shader_dependency(&mut self, shader: &AssetId<Shader>, id: PipelineId) {
         self.shaders
-            .entry(shader.clone())
+            .entry(*shader)
             .or_default()
             .pipelines
             .insert(id);
@@ -133,13 +134,13 @@ impl PipelineCache {
 
     pub(crate) fn process(
         pipelines: &mut PipelineCache,
-        info: &ExtractInfo<ShaderSource>,
+        info: &ExtractInfo<Shader>,
         device: &RenderDevice,
         shaders: &RenderAssets<Shader>,
     ) {
         pipelines.process_queue(&device, &shaders);
         for id in &info.removed {
-            pipelines.remove_shader(id);
+            pipelines.remove_shader(id.as_ref());
         }
     }
 }

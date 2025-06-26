@@ -103,7 +103,7 @@ impl<D: Draw> DrawTreeNode<D> {
         self.children.as_deref()
     }
 
-    pub fn get(&self, f: impl Fn(&Aabb, &DrawIndex<D>) -> bool) -> Vec<&DrawIndex<D>> {
+    pub fn get(&self, f: impl Fn(&Aabb, &DrawIndex<D>) -> bool + Copy) -> Vec<&DrawIndex<D>> {
         let mut results = Vec::new();
 
         if !self.bounds.intersects(self.bounds) {
@@ -118,7 +118,7 @@ impl<D: Draw> DrawTreeNode<D> {
 
         if let Some(children) = &self.children {
             for child in children.iter() {
-                results.extend(child.get(&f));
+                results.extend(child.get(f));
             }
         }
 

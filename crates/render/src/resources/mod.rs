@@ -1,4 +1,4 @@
-use asset::{Asset, AssetId, ErasedId};
+use asset::{Asset, AssetId};
 use std::{
     borrow::Cow,
     hash::{Hash, Hasher},
@@ -21,96 +21,6 @@ pub use shader::*;
 pub use texture::*;
 
 pub type Label = Option<Cow<'static, str>>;
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct Id<T> {
-    id: u128,
-    _marker: std::marker::PhantomData<T>,
-}
-
-impl<T> Id<T> {
-    pub const fn new(value: u128) -> Self {
-        Self {
-            id: value,
-            _marker: std::marker::PhantomData,
-        }
-    }
-
-    pub fn generate() -> Self {
-        Self::new(uuid::Uuid::new_v4().as_u128())
-    }
-
-    pub fn to<S>(&self) -> Id<S> {
-        Id::new(self.id)
-    }
-}
-
-impl<T> From<ErasedId> for Id<T> {
-    fn from(value: ErasedId) -> Self {
-        Self::new(value.uuid().as_u128())
-    }
-}
-
-impl<T> From<&ErasedId> for Id<T> {
-    fn from(value: &ErasedId) -> Self {
-        Self::new(value.uuid().as_u128())
-    }
-}
-
-impl<T, A: Asset> From<AssetId<A>> for Id<T> {
-    fn from(value: AssetId<A>) -> Self {
-        Self::new(value.uuid().as_u128())
-    }
-}
-
-impl<T, A: Asset> From<&AssetId<A>> for Id<T> {
-    fn from(value: &AssetId<A>) -> Self {
-        Self::new(value.uuid().as_u128())
-    }
-}
-
-impl<T> std::fmt::Debug for Id<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:x}", self.id)
-    }
-}
-
-impl<T> std::fmt::Display for Id<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:x}", self.id)
-    }
-}
-
-impl<T> std::hash::Hash for Id<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state)
-    }
-}
-
-impl<T> PartialEq for Id<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl<T> Eq for Id<T> {}
-
-impl<T> Clone for Id<T> {
-    fn clone(&self) -> Self {
-        Self {
-            id: self.id,
-            _marker: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<T> Copy for Id<T> {}
-
-impl<T> Id<T> {
-    pub fn id(&self) -> u128 {
-        self.id
-    }
-}
 
 pub struct AtomicId<T> {
     id: u32,
@@ -193,33 +103,12 @@ impl<T> Ord for AtomicId<T> {
     }
 }
 
-pub trait AsOptionalId<T> {
-    fn into_optional_id(self) -> Option<Id<T>>;
+pub trait OptionalAssetId<A: Asset> {
+    fn into_optional_id(self) -> Option<AssetId<A>>;
 }
 
-impl<T, S> AsOptionalId<T> for Id<S> {
-    fn into_optional_id(self) -> Option<Id<T>> {
-        Some(self.to())
-    }
-}
-
-impl<T, S> AsOptionalId<T> for Option<Id<S>> {
-    fn into_optional_id(self) -> Option<Id<T>> {
-        self.map(|id| id.to())
-    }
-}
-
-impl<T, S> AsOptionalId<T> for Option<&Id<S>> {
-    fn into_optional_id(self) -> Option<Id<T>> {
-        self.map(|id| id.to())
-    }
-}
-
-impl<T, S> AsOptionalId<T> for &S
-where
-    for<'a> &'a S: Into<Id<T>>,
-{
-    fn into_optional_id(self) -> Option<Id<T>> {
-        Some(self.into())
+impl<A: Asset, S: AsRef<AssetId<A>>> OptionalAssetId<A> for S {
+    fn into_optional_id(self) -> Option<AssetId<A>> {
+        Some(*self.as_ref())
     }
 }

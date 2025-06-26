@@ -1,3 +1,4 @@
+use super::RenderAsset;
 use crate::device::RenderDevice;
 use asset::{
     Asset, AssetMetadata, DefaultSettings,
@@ -7,8 +8,6 @@ use asset::{
 use ecs::system::{ArgItem, unlifetime::Read};
 use smol::io::AsyncReadExt;
 use std::{borrow::Cow, sync::Arc};
-
-use super::{RenderAssetExtractor, extract::RenderAsset};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ShaderStage {
@@ -117,7 +116,22 @@ impl AsRef<wgpu::ShaderModule> for Shader {
     }
 }
 
-impl RenderAsset for Shader {}
+impl RenderAsset for Shader {
+    type Source = ShaderSource;
+
+    type Arg = Read<RenderDevice>;
+
+    fn extract(
+        asset: Self::Source,
+        device: &mut ArgItem<Self::Arg>,
+    ) -> Result<Self, super::ExtractError<Self::Source>> {
+        Ok(Shader::new(device, asset))
+    }
+
+    fn usage(_: &Self::Source) -> super::AssetUsage {
+        super::AssetUsage::Discard
+    }
+}
 
 #[derive(Debug)]
 pub enum ShaderLoadError {
@@ -263,22 +277,5 @@ impl AssetImporter for ShaderSource {
 
     fn extensions() -> &'static [&'static str] {
         &["spv", "wgsl", "vert", "frag", "comp"]
-    }
-}
-
-impl RenderAssetExtractor for ShaderSource {
-    type RenderAsset = Shader;
-
-    type Arg = Read<RenderDevice>;
-
-    fn extract(
-        asset: Self,
-        device: &mut ArgItem<Self::Arg>,
-    ) -> Result<Self::RenderAsset, super::ExtractError<Self>> {
-        Ok(Shader::new(device, asset))
-    }
-
-    fn usage(_: &Self) -> super::AssetUsage {
-        super::AssetUsage::Discard
     }
 }

@@ -1,11 +1,10 @@
 use super::{
     VertexBufferLayout,
     buffer::{IndexBuffer, Indices, VertexBuffer},
-    extract::{ExtractError, ReadWrite, RenderAsset, RenderAssetExtractor},
+    extract::{ExtractError, ReadWrite, RenderAsset},
 };
 use crate::{RenderAssetType, device::RenderDevice, types::Color};
 use asset::{Asset, Settings, importer::AssetImporter, processor::AssetProcessor};
-use derive_render::RenderAsset;
 use ecs::{
     IndexMap,
     system::{ArgItem, unlifetime::Read},
@@ -193,18 +192,7 @@ bitflags::bitflags! {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Eq,
-    PartialEq,
-    Hash,
-    Asset,
-    RenderAsset,
-    serde::Serialize,
-    serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Asset, serde::Serialize, serde::Deserialize)]
 pub struct SubMesh {
     pub start_vertex: u32,
     pub vertex_count: u32,
@@ -231,6 +219,23 @@ impl From<&Mesh> for SubMesh {
             start_index: 0,
             index_count: mesh.index_count() as u32,
         }
+    }
+}
+
+impl RenderAsset for SubMesh {
+    type Source = Self;
+
+    type Arg = ();
+
+    fn extract(
+        asset: Self::Source,
+        _arg: &mut ArgItem<Self::Arg>,
+    ) -> Result<Self, ExtractError<Self::Source>> {
+        Ok(asset)
+    }
+
+    fn dependencies() -> Vec<super::RenderAssetType> {
+        vec![RenderAssetType::of::<RenderMesh>()]
     }
 }
 
@@ -796,17 +801,15 @@ impl From<&RenderMesh> for SubMesh {
     }
 }
 
-impl RenderAsset for RenderMesh {}
-
-impl RenderAssetExtractor for Mesh {
-    type RenderAsset = RenderMesh;
+impl RenderAsset for RenderMesh {
+    type Source = Mesh;
 
     type Arg = Read<RenderDevice>;
 
     fn extract(
-        mut asset: Self,
+        mut asset: Self::Source,
         arg: &mut ArgItem<Self::Arg>,
-    ) -> Result<Self::RenderAsset, ExtractError<Self>> {
+    ) -> Result<Self, ExtractError<Self::Source>> {
         let mesh = asset.create_render_mesh(arg);
         Ok(mesh)
     }
@@ -1029,22 +1032,5 @@ impl AssetProcessor for Mesh {
         asset.attributes.sort_by_key(|a| a.ty);
 
         Ok(asset)
-    }
-}
-
-impl RenderAssetExtractor for SubMesh {
-    type RenderAsset = SubMesh;
-
-    type Arg = ();
-
-    fn extract(
-        asset: Self,
-        _: &mut ArgItem<Self::Arg>,
-    ) -> Result<Self::RenderAsset, ExtractError<Self>> {
-        Ok(asset)
-    }
-
-    fn dependencies() -> Vec<super::RenderAssetType> {
-        vec![RenderAssetType::of::<RenderMesh>()]
     }
 }

@@ -1,9 +1,6 @@
-use super::{
-    AtomicId, Id,
-    buffer::Buffer,
-    texture::{GpuTexture, Sampler},
-};
-use crate::device::RenderDevice;
+use super::{AtomicId, buffer::Buffer};
+use crate::{Texture, device::RenderDevice};
+use asset::AssetId;
 use ecs::system::{ArgItem, SystemArg};
 use std::{error::Error, num::NonZero, sync::Arc};
 
@@ -267,8 +264,7 @@ impl<'a> BindGroupBuilder<'a> {
 pub enum CreateBindGroupError {
     Error(Arc<dyn Error + Send + Sync + 'static>),
     InvalidLayout,
-    MissingTexture { id: Id<GpuTexture> },
-    MissingSampler { id: Id<Sampler> },
+    MissingTexture { id: AssetId<Texture> },
     MissingBuffer,
 }
 
@@ -284,7 +280,6 @@ impl std::fmt::Display for CreateBindGroupError {
             Self::Error(error) => write!(f, "{}", error),
             Self::InvalidLayout => write!(f, "Invalid bind group layout"),
             Self::MissingTexture { id } => write!(f, "Missing texture: {:?}", id),
-            Self::MissingSampler { id } => write!(f, "Missing sampler: {:?}", id),
             Self::MissingBuffer => write!(f, "Missing buffer"),
         }
     }

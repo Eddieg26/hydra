@@ -1,12 +1,6 @@
-use super::{FilterMode, GpuTexture, Sampler, SamplerDesc, WrapMode};
-use crate::{
-    device::RenderDevice,
-    resources::{ExtractError, RenderAssetExtractor},
-    surface::RenderSurface,
-};
+use super::{FilterMode, WrapMode};
+use crate::{RenderAsset, device::RenderDevice, surface::RenderSurface};
 use asset::Asset;
-use ecs::system::unlifetime::Read;
-use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Asset, serde::Serialize, serde::Deserialize)]
 pub struct RenderTexture {
@@ -49,41 +43,56 @@ impl RenderTexture {
     }
 }
 
-impl RenderAssetExtractor for RenderTexture {
-    type RenderAsset = GpuTexture;
+pub struct RenderTarget {}
+impl RenderAsset for RenderTarget {
+    type Source = RenderTexture;
 
-    type Arg = (Read<RenderDevice>, Read<RenderSurface>);
+    type Arg = ();
 
     fn extract(
-        asset: Self,
-        arg: &mut ecs::ArgItem<Self::Arg>,
-    ) -> Result<Self::RenderAsset, ExtractError<Self>> {
-        let (device, surface) = arg;
-
-        let texture = asset.create_texture(device, surface);
-        let sampler = Sampler::new(
-            &device,
-            &SamplerDesc {
-                label: None,
-                wrap_mode: asset.wrap,
-                filter_mode: asset.filter,
-                border_color: match asset.wrap {
-                    WrapMode::ClampToBorder => Some(wgpu::SamplerBorderColor::TransparentBlack),
-                    _ => None,
-                },
-                ..Default::default()
-            },
-        );
-
-        let texture = GpuTexture::new(
-            Arc::new(texture),
-            sampler,
-            surface.format(),
-            asset.width,
-            asset.height,
-            1,
-        );
-
-        Ok(texture)
+        _asset: Self::Source,
+        _arg: &mut ecs::ArgItem<Self::Arg>,
+    ) -> Result<Self, crate::ExtractError<Self::Source>> {
+        Ok(Self {})
     }
 }
+
+// TODO: Extract RenderTexture into RenderTargets
+// impl RenderAssetExtractor for RenderTexture {
+//     type RenderAsset = GpuTexture;
+
+//     type Arg = (Read<RenderDevice>, Read<RenderSurface>);
+
+//     fn extract(
+//         asset: Self,
+//         arg: &mut ecs::ArgItem<Self::Arg>,
+//     ) -> Result<Self::RenderAsset, ExtractError<Self>> {
+//         let (device, surface) = arg;
+
+//         let texture = asset.create_texture(device, surface);
+//         let sampler = Sampler::new(
+//             &device,
+//             &SamplerDesc {
+//                 label: None,
+//                 wrap_mode: asset.wrap,
+//                 filter_mode: asset.filter,
+//                 border_color: match asset.wrap {
+//                     WrapMode::ClampToBorder => Some(wgpu::SamplerBorderColor::TransparentBlack),
+//                     _ => None,
+//                 },
+//                 ..Default::default()
+//             },
+//         );
+
+//         let texture = GpuTexture::new(
+//             Arc::new(texture),
+//             sampler,
+//             surface.format(),
+//             asset.width,
+//             asset.height,
+//             1,
+//         );
+
+//         Ok(texture)
+//     }
+// }

@@ -1,10 +1,9 @@
 use crate::{
-    AssetUsage, ExtractError, ExtractResource, RenderAssetExtractor, RenderResource,
+    AssetUsage, ExtractError, ExtractResource, RenderAsset, RenderResource,
     device::RenderDevice,
     resources::{
         Shader,
         binding::{AsBinding, BindGroup, BindGroupLayout},
-        extract::RenderAsset,
     },
 };
 use asset::{Asset, AssetId};
@@ -126,10 +125,8 @@ impl<M: Material> std::ops::Deref for MaterialBinding<M> {
     }
 }
 
-impl<M: Material> RenderAsset for MaterialBinding<M> {}
-
-impl<M: Material> RenderAssetExtractor for M {
-    type RenderAsset = MaterialBinding<M>;
+impl<M: Material> RenderAsset for MaterialBinding<M> {
+    type Source = M;
 
     type Arg = (
         Read<RenderDevice>,
@@ -139,9 +136,9 @@ impl<M: Material> RenderAssetExtractor for M {
     );
 
     fn extract(
-        asset: Self,
+        asset: Self::Source,
         arg: &mut ecs::ArgItem<Self::Arg>,
-    ) -> Result<Self::RenderAsset, ExtractError<Self>> {
+    ) -> Result<Self, ExtractError<Self::Source>> {
         let (device, layout, commands, arg) = arg;
         let layout = match layout.as_ref() {
             Some(layout) => layout,
@@ -161,7 +158,7 @@ impl<M: Material> RenderAssetExtractor for M {
         })
     }
 
-    fn usage(_: &Self) -> AssetUsage {
+    fn usage(_: &Self::Source) -> AssetUsage {
         AssetUsage::Keep
     }
 }

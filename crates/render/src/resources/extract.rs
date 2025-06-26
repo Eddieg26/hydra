@@ -1,4 +1,3 @@
-use super::Id;
 use asset::{AssetEvent, AssetId, Assets, asset::Asset};
 use ecs::{
     Command, Commands, Event, EventReader, EventWriter, IndexMap, IntoSystemConfig, Resource,
@@ -36,11 +35,31 @@ impl RenderAssetType {
     }
 }
 
-pub trait RenderAsset: Send + Sync + 'static {}
+#[allow(unused_variables)]
+pub trait RenderAsset: Sized + Send + Sync + 'static {
+    type Source: Asset + Clone;
+
+    type Arg: SystemArg;
+
+    fn extract(
+        asset: Self::Source,
+        arg: &mut ArgItem<Self::Arg>,
+    ) -> Result<Self, ExtractError<Self::Source>>;
+
+    fn removed(id: &AssetId<Self::Source>, asset: &Self, arg: &mut ArgItem<Self::Arg>) {}
+
+    fn usage(asset: &Self::Source) -> AssetUsage {
+        AssetUsage::Discard
+    }
+
+    fn dependencies() -> Vec<RenderAssetType> {
+        Vec::new()
+    }
+}
 
 #[derive(Resource)]
 pub struct RenderAssets<R: RenderAsset> {
-    assets: HashMap<Id<R>, R>,
+    assets: HashMap<AssetId<R::Source>, R>,
 }
 
 impl<R: RenderAsset> RenderAssets<R> {
@@ -50,31 +69,31 @@ impl<R: RenderAsset> RenderAssets<R> {
         }
     }
 
-    pub fn add(&mut self, id: Id<R>, asset: R) {
+    pub fn add(&mut self, id: AssetId<R::Source>, asset: R) {
         self.assets.insert(id, asset);
     }
 
-    pub fn get(&self, id: &Id<R>) -> Option<&R> {
+    pub fn get(&self, id: &AssetId<R::Source>) -> Option<&R> {
         self.assets.get(id)
     }
 
-    pub fn get_mut(&mut self, id: &Id<R>) -> Option<&mut R> {
+    pub fn get_mut(&mut self, id: &AssetId<R::Source>) -> Option<&mut R> {
         self.assets.get_mut(id)
     }
 
-    pub fn remove(&mut self, id: &Id<R>) -> Option<R> {
+    pub fn remove(&mut self, id: &AssetId<R::Source>) -> Option<R> {
         self.assets.remove(id)
     }
 
-    pub fn contains(&self, id: &Id<R>) -> bool {
+    pub fn contains(&self, id: &AssetId<R::Source>) -> bool {
         self.assets.contains_key(id)
     }
 
-    pub fn iter(&self) -> std::collections::hash_map::Iter<'_, Id<R>, R> {
+    pub fn iter(&self) -> std::collections::hash_map::Iter<'_, AssetId<R::Source>, R> {
         self.assets.iter()
     }
 
-    pub fn iter_mut(&mut self) -> std::collections::hash_map::IterMut<'_, Id<R>, R> {
+    pub fn iter_mut(&mut self) -> std::collections::hash_map::IterMut<'_, AssetId<R::Source>, R> {
         self.assets.iter_mut()
     }
 
@@ -92,19 +111,19 @@ impl<R: RenderAsset> RenderAssets<R> {
 
     pub fn retain<F>(&mut self, f: F)
     where
-        F: FnMut(&Id<R>, &mut R) -> bool,
+        F: FnMut(&AssetId<R::Source>, &mut R) -> bool,
     {
         self.assets.retain(f);
     }
 
-    pub fn drain(&mut self) -> std::collections::hash_map::Drain<'_, Id<R>, R> {
+    pub fn drain(&mut self) -> std::collections::hash_map::Drain<'_, AssetId<R::Source>, R> {
         self.assets.drain()
     }
 }
 
 impl<'a, R: RenderAsset> IntoIterator for &'a RenderAssets<R> {
-    type Item = (&'a Id<R>, &'a R);
-    type IntoIter = std::collections::hash_map::Iter<'a, Id<R>, R>;
+    type Item = (&'a AssetId<R::Source>, &'a R);
+    type IntoIter = std::collections::hash_map::Iter<'a, AssetId<R::Source>, R>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.assets.iter()
@@ -112,8 +131,8 @@ impl<'a, R: RenderAsset> IntoIterator for &'a RenderAssets<R> {
 }
 
 impl<'a, R: RenderAsset> IntoIterator for &'a mut RenderAssets<R> {
-    type Item = (&'a Id<R>, &'a mut R);
-    type IntoIter = std::collections::hash_map::IterMut<'a, Id<R>, R>;
+    type Item = (&'a AssetId<R::Source>, &'a mut R);
+    type IntoIter = std::collections::hash_map::IterMut<'a, AssetId<R::Source>, R>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.assets.iter_mut()
@@ -121,38 +140,17 @@ impl<'a, R: RenderAsset> IntoIterator for &'a mut RenderAssets<R> {
 }
 
 #[derive(Resource)]
-pub struct ExtractInfo<R: RenderAssetExtractor> {
-    pub extracted: Vec<(AssetId<R>, R)>,
-    pub removed: HashSet<Id<R::RenderAsset>>,
+pub struct ExtractInfo<R: RenderAsset> {
+    pub extracted: Vec<(AssetId<R::Source>, R::Source)>,
+    pub removed: HashSet<AssetId<R::Source>>,
 }
 
-impl<R: RenderAssetExtractor> ExtractInfo<R> {
+impl<R: RenderAsset> ExtractInfo<R> {
     pub fn new() -> Self {
         Self {
             extracted: Vec::new(),
             removed: HashSet::new(),
         }
-    }
-}
-
-#[allow(unused_variables)]
-pub trait RenderAssetExtractor: Asset + Clone {
-    type RenderAsset: RenderAsset;
-    type Arg: SystemArg;
-
-    fn extract(
-        asset: Self,
-        arg: &mut ArgItem<Self::Arg>,
-    ) -> Result<Self::RenderAsset, ExtractError<Self>>;
-
-    fn removed(id: &AssetId<Self>, asset: &Self::RenderAsset, arg: &mut ArgItem<Self::Arg>) {}
-
-    fn usage(asset: &Self) -> AssetUsage {
-        AssetUsage::Discard
-    }
-
-    fn dependencies() -> Vec<RenderAssetType> {
-        Vec::new()
     }
 }
 
@@ -169,13 +167,13 @@ pub struct AssetExtractors {
 }
 
 impl AssetExtractors {
-    pub fn add<R: RenderAssetExtractor>(&mut self) -> bool {
+    pub fn add<R: RenderAsset>(&mut self) -> bool {
         let ty = TypeId::of::<R>();
         if self.registry.contains_key(&ty) {
             return false;
         }
 
-        let render_asset_type = RenderAssetType::of::<R::RenderAsset>();
+        let render_asset_type = RenderAssetType::of::<R>();
 
         let config = AssetExtractorConfig {
             ty: render_asset_type,
@@ -195,10 +193,10 @@ impl AssetExtractors {
         true
     }
 
-    fn extractor<R: RenderAssetExtractor>(
-        mut assets: Main<&mut Assets<R>>,
+    fn extractor<R: RenderAsset>(
+        mut assets: Main<&mut Assets<R::Source>>,
         extract_info: &mut ExtractInfo<R>,
-        events: Main<EventReader<AssetEvent<R>>>,
+        events: Main<EventReader<AssetEvent<R::Source>>>,
     ) {
         for event in events.into_inner() {
             match event {
@@ -217,16 +215,16 @@ impl AssetExtractors {
                     extract_info.extracted.push((*id, asset));
                 }
                 AssetEvent::Removed { id, .. } => {
-                    extract_info.removed.insert(id.into());
+                    extract_info.removed.insert(*id);
                 }
             }
         }
     }
 
-    fn process<R: RenderAssetExtractor>(
+    fn process<R: RenderAsset>(
         mut errors: EventWriter<ExtractError<R>>,
         extract_info: &mut ExtractInfo<R>,
-        assets: &mut RenderAssets<R::RenderAsset>,
+        assets: &mut RenderAssets<R>,
         arg: StaticArg<R::Arg>,
     ) {
         let mut arg = arg.into_inner();

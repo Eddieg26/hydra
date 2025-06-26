@@ -1,7 +1,7 @@
 use crate::{
-    CameraSubGraph, DisableCulling, Draw, DrawPipeline, DrawTree, ExtractError, ObjImporter,
-    PostProcess, PreProcess, PreQueue, Shader, SubMesh, Texture2dImporter, ViewDrawCalls,
-    VisibleDraws,
+    CameraSubGraph, DisableCulling, Draw, DrawPipeline, DrawTree, ExtractError, GpuTexture,
+    MaterialBinding, ObjImporter, PostProcess, PreProcess, PreQueue, RenderMesh, RenderTarget,
+    Shader, SubMesh, Texture2dImporter, ViewDrawCalls, VisibleDraws,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     draw::{
         Renderer, RendererPass,
@@ -14,8 +14,8 @@ use crate::{
     },
     renderer::{Camera, EntityCameras, RenderGraph, RenderGraphPass, SubGraph},
     resources::{
-        AssetExtractors, ExtractInfo, Fallbacks, Mesh, PipelineCache, RenderAssetExtractor,
-        RenderAssets, RenderResource, RenderTexture, ResourceExtractors, ShaderSource, Texture,
+        AssetExtractors, ExtractInfo, Fallbacks, Mesh, PipelineCache, RenderAsset, RenderAssets,
+        RenderResource, ResourceExtractors, ShaderSource,
     },
     surface::{RenderSurface, RenderSurfaceTexture},
 };
@@ -54,12 +54,12 @@ impl Plugin for RenderPlugin {
             .register_event::<ExtractError>();
 
         app.register::<Camera>()
-            .extract_render_resource::<Fallbacks>()
-            .extract_render_asset::<Mesh>()
-            .extract_render_asset::<Texture>()
-            .extract_render_asset::<RenderTexture>()
-            .extract_render_asset::<SubMesh>()
-            .extract_render_asset::<ShaderSource>()
+            .add_render_resource::<Fallbacks>()
+            .add_render_asset::<RenderMesh>()
+            .add_render_asset::<GpuTexture>()
+            .add_render_asset::<RenderTarget>()
+            .add_render_asset::<SubMesh>()
+            .add_render_asset::<Shader>()
             .add_importer::<ShaderSource>()
             .add_importer::<ObjImporter>()
             .add_importer::<Texture2dImporter>()
@@ -95,8 +95,8 @@ pub trait RenderAppExt {
     fn add_sub_graph<S: SubGraph>(&mut self) -> &mut Self;
     fn add_sub_graph_pass<S: SubGraph, P: RenderGraphPass>(&mut self, pass: P) -> &mut Self;
     fn add_renderer<R: Renderer>(&mut self) -> &mut Self;
-    fn extract_render_asset<R: RenderAssetExtractor>(&mut self) -> &mut Self;
-    fn extract_render_resource<R: RenderResource>(&mut self) -> &mut Self;
+    fn add_render_asset<R: RenderAsset>(&mut self) -> &mut Self;
+    fn add_render_resource<R: RenderResource>(&mut self) -> &mut Self;
 }
 
 impl RenderAppExt for AppBuilder {
@@ -138,12 +138,12 @@ impl RenderAppExt for AppBuilder {
         self
     }
 
-    fn extract_render_asset<R: RenderAssetExtractor>(&mut self) -> &mut Self {
+    fn add_render_asset<R: RenderAsset>(&mut self) -> &mut Self {
         let app = self.sub_app_mut(RenderApp).unwrap();
         app.resource_mut::<AssetExtractors>().add::<R>();
 
-        if !app.resources().contains::<RenderAssets<R::RenderAsset>>() {
-            app.add_resource(RenderAssets::<R::RenderAsset>::new());
+        if !app.resources().contains::<RenderAssets<R>>() {
+            app.add_resource(RenderAssets::<R>::new());
         }
 
         if !app.resources().contains::<ExtractInfo<R>>() {
@@ -151,10 +151,10 @@ impl RenderAppExt for AppBuilder {
         }
 
         self.register_event::<ExtractError<R>>();
-        self.register_asset::<R>()
+        self.register_asset::<R::Source>()
     }
 
-    fn extract_render_resource<R: RenderResource>(&mut self) -> &mut Self {
+    fn add_render_resource<R: RenderResource>(&mut self) -> &mut Self {
         self.get_or_insert_resource(|| ResourceExtractors::default())
             .add::<R>();
         self.register_event::<ExtractError<R>>();
@@ -174,7 +174,7 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
         app.add_plugins(RenderPlugin)
             .register_asset::<M>()
             .register_resource::<MaterialLayout<M>>()
-            .extract_render_asset::<M>();
+            .add_render_asset::<MaterialBinding<M>>();
     }
 }
 
@@ -196,7 +196,7 @@ impl<V: View> Plugin for ViewPlugin<V> {
                 .add_systems(Process, ViewDataBuffer::<V>::process);
         })
         .register::<V>()
-        .extract_render_resource::<ViewDataBuffer<V>>();
+        .add_render_resource::<ViewDataBuffer<V>>();
     }
 }
 
@@ -214,8 +214,8 @@ impl<S: ShaderData> Plugin for MeshDataPlugin<S> {
                 .add_systems(PreRender, update_mesh_data_buffers::<S>)
                 .add_systems(PostRender, clear_mesh_data_buffers::<S>);
         })
-        .extract_render_resource::<MeshDataBuffer<S>>()
-        .extract_render_resource::<BatchedMeshDataBuffer<S>>();
+        .add_render_resource::<MeshDataBuffer<S>>()
+        .add_render_resource::<BatchedMeshDataBuffer<S>>();
     }
 }
 
@@ -267,7 +267,7 @@ impl<D: Draw> Plugin for DrawPlugin<D> {
         .register::<GlobalTransform>()
         .load_asset::<Shader>(D::shader().into())
         .load_asset::<Shader>(D::Material::shader().into())
-        .extract_render_resource::<DrawPipeline<D>>();
+        .add_render_resource::<DrawPipeline<D>>();
 
         if <D::Material as Material>::Phase::SORT {
             app.add_plugins(SortViewPhasePlugin::<
