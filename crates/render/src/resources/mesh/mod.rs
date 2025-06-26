@@ -506,6 +506,7 @@ impl Mesh {
             layout: layout.into(),
             vertex_buffer,
             index_buffer,
+            bounds: self.bounds,
         }
     }
 
@@ -771,6 +772,7 @@ pub struct RenderMesh {
     layout: MeshLayout,
     vertex_buffer: VertexBuffer,
     index_buffer: Option<IndexBuffer>,
+    bounds: Aabb,
 }
 
 impl RenderMesh {
@@ -792,6 +794,10 @@ impl RenderMesh {
 
     pub fn index_count(&self) -> usize {
         self.index_buffer.as_ref().map_or(0, |i| i.len())
+    }
+
+    pub fn bounds(&self) -> &Aabb {
+        &self.bounds
     }
 }
 

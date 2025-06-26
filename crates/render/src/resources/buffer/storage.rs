@@ -112,7 +112,7 @@ impl<T: ShaderType> StorageBufferArray<T> {
             None => BufferUsages::STORAGE,
         };
 
-        let buffer = Buffer::new(device, alignment, usage, label);
+        let buffer = Buffer::new(device, 1, usage, label);
 
         Self {
             data,

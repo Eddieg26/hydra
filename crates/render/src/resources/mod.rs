@@ -71,7 +71,7 @@ impl<T> Clone for AtomicId<T> {
 
 impl<T> std::fmt::Debug for AtomicId<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:x}", self.id)
+        write!(f, "{}", self.id)
     }
 }
 

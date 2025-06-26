@@ -4,7 +4,7 @@ use crate::{
     RenderOutput, RenderPipelineDesc, RenderResource, RenderState, RenderSurface, Shader, SubMesh,
     VertexState,
 };
-use asset::{AssetId, Assets, ErasedId};
+use asset::{AssetId, ErasedId};
 use ecs::{
     ArgItem, Component, Entity, IndexMap, ReadOnly, Resource, SystemArg, SystemMeta, World,
     WorldAccess,
@@ -303,19 +303,11 @@ impl<D: Draw> DrawTree<D> {
 
     pub(crate) fn extract(
         tree: &mut Self,
-        query: Main<
-            SQuery<(
-                Entity,
-                &<D::View as View>::Transform,
-                &GlobalTransform,
-                &D,
-                Option<&DisableCulling>,
-            )>,
-        >,
-        meshes: Main<Read<Assets<Mesh>>>,
+        query: Main<SQuery<(Entity, &<D::View as View>::Transform, &GlobalTransform, &D)>>,
+        meshes: &RenderAssets<RenderMesh>,
     ) {
-        for (entity, transform, global_transform, draw, disable_culling) in query.iter() {
-            let Some(mesh) = meshes.get(draw.mesh()) else {
+        for (entity, transform, global_transform, draw) in query.iter() {
+            let Some(mesh) = meshes.get(&draw.mesh()) else {
                 continue;
             };
 
@@ -326,7 +318,7 @@ impl<D: Draw> DrawTree<D> {
                 draw: draw.clone(),
             };
 
-            if D::CULL && disable_culling.is_none() {
+            if D::CULL {
                 let bounds = mesh.bounds().transform_affine(global_transform.get());
                 tree.insert(draw, bounds);
             } else {
