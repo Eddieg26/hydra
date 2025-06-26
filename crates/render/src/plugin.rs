@@ -1,6 +1,7 @@
 use crate::{
-    CameraSubGraph, Draw, DrawPipeline, ExtractError, ExtractedDraws, ObjImporter, PostProcess,
-    PreProcess, Shader, SubMesh, Texture2dImporter, ViewDrawCalls,
+    CameraSubGraph, DisableCulling, Draw, DrawPipeline, DrawTree, ExtractError, ObjImporter,
+    PostProcess, PreProcess, PreQueue, Shader, SubMesh, Texture2dImporter, ViewDrawCalls,
+    VisibleDraws,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     draw::{
         Renderer, RendererPass,
@@ -32,6 +33,7 @@ impl Plugin for RenderPlugin {
             .add_sub_phase(Run, PreProcess)
             .add_sub_phase(Run, Process)
             .add_sub_phase(Run, PostProcess)
+            .add_sub_phase(Run, PreQueue)
             .add_sub_phase(Run, Queue)
             .add_sub_phase(Run, PreRender)
             .add_sub_phase(Run, Render)
@@ -246,9 +248,11 @@ impl<D: Draw> Plugin for DrawPlugin<D> {
         ))
         .scoped_sub_app(RenderApp, |sub_app| {
             sub_app
-                .add_resource(ExtractedDraws::<D>::new())
+                .add_resource(DrawTree::<D>::new())
+                .add_resource(VisibleDraws::<D>::new())
                 .add_resource(ViewDrawCalls::<D::View, <D::Material as Material>::Phase>::new())
-                .add_systems(Extract, ExtractedDraws::<D>::extract)
+                .add_systems(Extract, DrawTree::<D>::extract)
+                .add_systems(PreQueue, VisibleDraws::<D>::queue)
                 .add_systems(
                     Queue,
                     ViewDrawCalls::<D::View, <D::Material as Material>::Phase>::queue::<D>
@@ -270,6 +274,10 @@ impl<D: Draw> Plugin for DrawPlugin<D> {
                 D::View,
                 <D::Material as Material>::Phase,
             >::new());
+        }
+
+        if D::CULL {
+            app.register::<DisableCulling>();
         }
     }
 }

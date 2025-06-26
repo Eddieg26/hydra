@@ -13,6 +13,9 @@ pub struct Process;
 pub struct PostProcess;
 
 #[derive(Phase)]
+pub struct PreQueue;
+
+#[derive(Phase)]
 pub struct Queue;
 
 #[derive(Phase)]

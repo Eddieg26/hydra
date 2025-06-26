@@ -89,6 +89,26 @@ impl GlobalTransform {
     pub fn to_scale_rotation_translation(&self) -> (Vec3, Quat, Vec3) {
         self.0.to_scale_rotation_translation()
     }
+
+    pub fn back(&self) -> Vec3 {
+        (self.0.matrix3 * Vec3::Z).normalize()
+    }
+
+    pub fn forward(&self) -> Vec3 {
+        (self.0.matrix3 * Vec3::NEG_Z).normalize()
+    }
+
+    pub fn right(&self) -> Vec3 {
+        (self.0.matrix3 * Vec3::X).normalize()
+    }
+
+    pub fn up(&self) -> Vec3 {
+        (self.0.matrix3 * Vec3::Y).normalize()
+    }
+
+    pub fn inverse(&self) -> Self {
+        GlobalTransform(self.0.inverse())
+    }
 }
 
 impl<L: LocalTransform> std::ops::Mul<&L> for &GlobalTransform {

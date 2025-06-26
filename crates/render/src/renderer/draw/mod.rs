@@ -1,10 +1,10 @@
 use crate::{
-    Color, DepthOutput, ExtractResource, FragmentState, Mesh, MeshLayout, PassBuilder,
+    Color, DepthOutput, ExtractResource, FragmentState, Frustum, Mesh, MeshLayout, PassBuilder,
     PipelineCache, PipelineId, RenderAssets, RenderContext, RenderGraphPass, RenderMesh,
     RenderOutput, RenderPipelineDesc, RenderResource, RenderState, RenderSurface, Shader, SubMesh,
     VertexState,
 };
-use asset::{AssetId, ErasedId};
+use asset::{AssetId, Assets, ErasedId};
 use ecs::{
     ArgItem, Component, Entity, IndexMap, ReadOnly, Resource, SystemArg, SystemMeta, World,
     WorldAccess,
@@ -15,6 +15,7 @@ use ecs::{
     },
     world::WorldCell,
 };
+use math::{Vec3, bounds::Aabb};
 use std::{any::TypeId, collections::HashMap, ops::Range};
 use transform::GlobalTransform;
 use wgpu::{ColorTargetState, VertexFormat, VertexStepMode};
@@ -36,6 +37,8 @@ pub trait Draw: Component + Clone {
 
     const BATCH: bool = true;
 
+    const CULL: bool = false;
+
     fn material(&self) -> AssetId<Self::Material>;
 
     fn mesh(&self) -> AssetId<Mesh>;
@@ -55,43 +58,359 @@ pub trait Draw: Component + Clone {
     fn shader() -> impl Into<AssetId<Shader>>;
 }
 
-pub struct ExtractedDraw<D: Draw> {
+pub struct DrawTreeNode<D: Draw> {
+    bounds: Aabb,
+    items: Vec<DrawIndex<D>>,
+    depth: u32,
+    max_size: usize,
+    max_depth: u32,
+    children: Option<Box<[DrawTreeNode<D>]>>,
+}
+
+impl<D: Draw> DrawTreeNode<D> {
+    fn new(bounds: Aabb, depth: u32, max_size: usize, max_depth: u32) -> Self {
+        DrawTreeNode {
+            bounds,
+            items: Vec::new(),
+            depth,
+            max_size,
+            max_depth,
+            children: None,
+        }
+    }
+
+    pub fn items(&self) -> &[DrawIndex<D>] {
+        &self.items
+    }
+
+    pub fn bounds(&self) -> &Aabb {
+        &self.bounds
+    }
+
+    pub fn depth(&self) -> u32 {
+        self.depth
+    }
+
+    pub fn max_size(&self) -> usize {
+        self.max_size
+    }
+
+    pub fn max_depth(&self) -> u32 {
+        self.max_depth
+    }
+
+    pub fn children(&self) -> Option<&[DrawTreeNode<D>]> {
+        self.children.as_deref()
+    }
+
+    pub fn get(&self, f: impl Fn(&Aabb, &DrawIndex<D>) -> bool) -> Vec<&DrawIndex<D>> {
+        let mut results = Vec::new();
+
+        if !self.bounds.intersects(self.bounds) {
+            return results;
+        }
+
+        for item in &self.items {
+            if f(&self.bounds, item) {
+                results.push(item);
+            }
+        }
+
+        if let Some(children) = &self.children {
+            for child in children.iter() {
+                results.extend(child.get(&f));
+            }
+        }
+
+        results
+    }
+
+    pub fn insert(&mut self, item: DrawIndex<D>, bounds: Aabb) -> Option<DrawIndex<D>> {
+        if !self.bounds.intersects(bounds) {
+            return Some(item);
+        }
+
+        if self.items.len() < self.max_size || self.depth >= self.max_depth {
+            self.items.push(item);
+            return None;
+        }
+
+        if self.children.is_none() {
+            self.split();
+        }
+
+        let mut remaining = Vec::new();
+        for item in self.items.drain(..) {
+            let mut item = Some(item);
+            for child in self.children.as_mut().unwrap().iter_mut() {
+                let Some(remaining_item) = item.take() else {
+                    break;
+                };
+
+                if let Some(remaining_item) = child.insert(remaining_item, bounds) {
+                    item = Some(remaining_item);
+                }
+            }
+
+            if let Some(remaining_item) = item {
+                remaining.push(remaining_item);
+            }
+        }
+
+        self.items = remaining;
+
+        None
+    }
+
+    fn split(&mut self) {
+        let half_size = (self.bounds.max - self.bounds.min) * 0.5;
+        let center = self.bounds.min + half_size;
+
+        let children = [
+            DrawTreeNode::new(
+                Aabb::new(self.bounds.min, center),
+                self.depth + 1,
+                self.max_size,
+                self.max_depth,
+            ),
+            DrawTreeNode::new(
+                Aabb::new(
+                    Vec3::new(center.x, self.bounds.min.y, self.bounds.min.z),
+                    Vec3::new(self.bounds.max.x, center.y, center.z),
+                ),
+                self.depth + 1,
+                self.max_size,
+                self.max_depth,
+            ),
+            DrawTreeNode::new(
+                Aabb::new(
+                    Vec3::new(self.bounds.min.x, center.y, self.bounds.min.z),
+                    Vec3::new(center.x, self.bounds.max.y, center.z),
+                ),
+                self.depth + 1,
+                self.max_size,
+                self.max_depth,
+            ),
+            DrawTreeNode::new(
+                Aabb::new(
+                    Vec3::new(center.x, center.y, self.bounds.min.z),
+                    Vec3::new(self.bounds.max.x, self.bounds.max.y, center.z),
+                ),
+                self.depth + 1,
+                self.max_size,
+                self.max_depth,
+            ),
+            DrawTreeNode::new(
+                Aabb::new(
+                    Vec3::new(self.bounds.min.x, self.bounds.min.y, center.z),
+                    Vec3::new(center.x, center.y, self.bounds.max.z),
+                ),
+                self.depth + 1,
+                self.max_size,
+                self.max_depth,
+            ),
+            DrawTreeNode::new(
+                Aabb::new(
+                    Vec3::new(center.x, self.bounds.min.y, center.z),
+                    Vec3::new(self.bounds.max.x, center.y, self.bounds.max.z),
+                ),
+                self.depth + 1,
+                self.max_size,
+                self.max_depth,
+            ),
+            DrawTreeNode::new(
+                Aabb::new(
+                    Vec3::new(self.bounds.min.x, center.y, center.z),
+                    Vec3::new(center.x, self.bounds.max.y, self.bounds.max.z),
+                ),
+                self.depth + 1,
+                self.max_size,
+                self.max_depth,
+            ),
+            DrawTreeNode::new(
+                Aabb::new(center, self.bounds.max),
+                self.depth + 1,
+                self.max_size,
+                self.max_depth,
+            ),
+        ];
+
+        self.children = Some(Box::new(children));
+    }
+
+    fn clear(&mut self) {
+        self.items.clear();
+        self.children = None;
+    }
+}
+
+#[derive(Resource)]
+pub struct DrawTree<D: Draw> {
+    root: DrawTreeNode<D>,
+    nodes: Vec<DrawNode<D>>,
+}
+
+impl<D: Draw> DrawTree<D> {
+    pub fn new() -> Self {
+        Self {
+            root: DrawTreeNode::new(
+                Aabb::new(Vec3::splat(-10_000.0), Vec3::splat(10_000.0)),
+                0,
+                100,
+                10,
+            ),
+            nodes: Vec::new(),
+        }
+    }
+
+    pub fn insert(&mut self, draw: DrawNode<D>, bounds: Aabb) {
+        let index = DrawIndex::new(self.nodes.len());
+        self.nodes.push(draw);
+        if D::CULL {
+            if let Some(index) = self.root.insert(index, bounds) {
+                self.root.items.push(index);
+            }
+        } else {
+            self.root.items.push(index);
+        }
+    }
+
+    pub fn nodes(&self) -> &[DrawNode<D>] {
+        &self.nodes
+    }
+
+    pub fn get(&self, index: DrawIndex<D>) -> &DrawNode<D> {
+        &self.nodes[index.0]
+    }
+
+    pub fn filter(&self, f: impl Fn(&Aabb, &DrawNode<D>) -> bool) -> Vec<&DrawIndex<D>> {
+        self.root
+            .get(|bounds, index| f(bounds, &self.nodes[index.0]))
+    }
+
+    pub fn cull(&self, frustum: &Frustum) -> Vec<&DrawIndex<D>> {
+        if D::CULL {
+            self.filter(|bounds, _| frustum.intersects_aabb(bounds))
+        } else {
+            self.root.items().iter().collect()
+        }
+    }
+
+    fn clear(&mut self) {
+        self.root.clear();
+        self.nodes.clear();
+    }
+
+    pub(crate) fn extract(
+        tree: &mut Self,
+        query: Main<
+            SQuery<(
+                Entity,
+                &<D::View as View>::Transform,
+                &GlobalTransform,
+                &D,
+                Option<&DisableCulling>,
+            )>,
+        >,
+        meshes: Main<Read<Assets<Mesh>>>,
+    ) {
+        for (entity, transform, global_transform, draw, disable_culling) in query.iter() {
+            let Some(mesh) = meshes.get(draw.mesh()) else {
+                continue;
+            };
+
+            let draw = DrawNode {
+                entity,
+                local_transform: *transform,
+                global_transform: *global_transform,
+                draw: draw.clone(),
+            };
+
+            if D::CULL && disable_culling.is_none() {
+                let bounds = mesh.bounds().transform_affine(global_transform.get());
+                tree.insert(draw, bounds);
+            } else {
+                tree.root.items.push(DrawIndex::new(tree.nodes.len()));
+                tree.nodes.push(draw);
+            }
+        }
+    }
+}
+
+pub struct DrawNode<D: Draw> {
     pub entity: Entity,
     pub local_transform: <D::View as View>::Transform,
     pub global_transform: GlobalTransform,
     draw: D,
 }
 
-impl<D: Draw> ExtractedDraw<D> {
+impl<D: Draw> DrawNode<D> {
     pub fn data(&self) -> D::Mesh {
         self.draw.data(&self.global_transform)
     }
 }
 
-impl<D: Draw> AsRef<D> for ExtractedDraw<D> {
+impl<D: Draw> AsRef<D> for DrawNode<D> {
     fn as_ref(&self) -> &D {
         &self.draw
     }
 }
 
-#[derive(Resource)]
-pub struct ExtractedDraws<D: Draw>(pub(crate) Vec<ExtractedDraw<D>>);
-impl<D: Draw> ExtractedDraws<D> {
-    pub fn new() -> Self {
-        Self(Vec::new())
+#[derive(Clone, Copy, PartialEq, Eq, Component)]
+pub struct DisableCulling;
+
+pub struct DrawIndex<D: Draw>(usize, std::marker::PhantomData<D>);
+impl<D: Draw> DrawIndex<D> {
+    pub fn new(index: usize) -> Self {
+        Self(index, Default::default())
     }
 
-    pub(crate) fn extract(
-        draws: &mut Self,
-        query: Main<SQuery<(Entity, &<D::View as View>::Transform, &GlobalTransform, &D)>>,
+    pub fn get(&self) -> usize {
+        self.0
+    }
+}
+
+impl<D: Draw> Copy for DrawIndex<D> {}
+impl<D: Draw> Clone for DrawIndex<D> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), self.1.clone())
+    }
+}
+
+impl<D: Draw> AsRef<usize> for DrawIndex<D> {
+    fn as_ref(&self) -> &usize {
+        &self.0
+    }
+}
+
+#[derive(Resource)]
+pub struct VisibleDraws<D: Draw>(
+    HashMap<Entity, Vec<DrawIndex<D>>>,
+    std::marker::PhantomData<D>,
+);
+impl<D: Draw> VisibleDraws<D> {
+    pub fn new() -> Self {
+        Self(HashMap::new(), Default::default())
+    }
+
+    pub(crate) fn queue(
+        visible: &mut Self,
+        tree: &mut DrawTree<D>,
+        views: &ViewDataBuffer<D::View>,
     ) {
-        for (entity, local_transform, global_transform, draw) in query.iter() {
-            draws.0.push(ExtractedDraw {
-                entity,
-                local_transform: *local_transform,
-                global_transform: *global_transform,
-                draw: draw.clone(),
-            });
+        if D::CULL {
+            for (entity, view) in views.views() {
+                let mut draws = tree.cull(&view.frustum);
+                visible
+                    .0
+                    .insert(*entity, draws.drain(..).map(|d| *d).collect());
+            }
+        } else {
+            for (entity, _) in views.views() {
+                visible
+                    .0
+                    .insert(*entity, (0..tree.nodes.len()).map(DrawIndex::new).collect());
+            }
         }
     }
 }
@@ -302,8 +621,9 @@ impl<V: View, R: RenderPhase> ViewDrawCalls<V, R> {
     }
 
     pub(crate) fn queue<D: Draw<View = V>>(
-        draws: &mut Self,
-        extracted: &mut ExtractedDraws<D>,
+        view_draws: &mut Self,
+        draws: &mut DrawTree<D>,
+        visible_draws: &VisibleDraws<D>,
         view_buffer: &ViewDataBuffer<D::View>,
         mesh_buffer: &mut MeshDataBuffer<D::Mesh>,
         batched_mesh_buffer: &mut BatchedMeshDataBuffer<D::Mesh>,
@@ -316,9 +636,14 @@ impl<V: View, R: RenderPhase> ViewDrawCalls<V, R> {
 
         if D::BATCH {
             for (entity, _) in view_buffer.views() {
+                let Some(indicies) = visible_draws.0.get(entity) else {
+                    continue;
+                };
+
                 let mut batches = HashMap::new();
 
-                for draw in &extracted.0 {
+                for index in indicies {
+                    let draw = &draws.nodes[index.0];
                     let key = BatchKey {
                         material: draw.as_ref().material().into(),
                         mesh: draw.as_ref().mesh(),
@@ -349,11 +674,16 @@ impl<V: View, R: RenderPhase> ViewDrawCalls<V, R> {
                     })
                     .flatten();
 
-                draws.0.entry(*entity).or_default().extend(draw_calls);
+                view_draws.0.entry(*entity).or_default().extend(draw_calls);
             }
         } else {
             for (entity, view) in view_buffer.views() {
-                let draw_calls = extracted.0.iter().map(|draw| {
+                let Some(indicies) = visible_draws.0.get(entity) else {
+                    continue;
+                };
+
+                let draw_calls = indicies.iter().map(|index| {
+                    let draw = &draws.nodes[index.0];
                     let key = BatchKey {
                         material: draw.as_ref().material().into(),
                         mesh: draw.as_ref().mesh(),
@@ -374,11 +704,11 @@ impl<V: View, R: RenderPhase> ViewDrawCalls<V, R> {
                     }
                 });
 
-                draws.0.entry(*entity).or_default().extend(draw_calls);
+                view_draws.0.entry(*entity).or_default().extend(draw_calls);
             }
         }
 
-        extracted.0.clear();
+        draws.clear();
     }
 
     pub(crate) fn sort(draws: &mut Self) {

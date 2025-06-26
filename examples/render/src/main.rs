@@ -3,10 +3,11 @@ use asset::{
     importer::ImportError, io::EmbeddedFs, plugin::AssetAppExt,
 };
 use ecs::{App, Component, EventReader, Init, Spawner, Start};
+use math::Vec3A;
 use render::{
     AsBinding, BlendMode, Camera, Color, Draw, Material, Mesh, MeshAttribute, MeshAttributeType,
     MeshAttributeValues, MeshTopology, ObjImportSettings, Projection, RenderPhase, Renderer,
-    Shader, ShaderSource, ShaderType, Texture, Texture2dSettings, View,
+    Shader, ShaderSource, ShaderType, Texture, Texture2dSettings, View, ViewData,
     plugin::{RenderAppExt, RenderPlugin},
 };
 use transform::{GlobalTransform, Transform};
@@ -199,6 +200,12 @@ pub struct View3dData {
     projection: math::Mat4,
 }
 
+impl ViewData for View3dData {
+    fn projection(&self) -> math::Mat4 {
+        self.projection
+    }
+}
+
 #[derive(Clone, Component)]
 pub struct View3d {
     projection: Projection,
@@ -238,15 +245,13 @@ impl View for View3d {
 
     type Item = ZDistance;
 
-    fn data(&self, width: u32, height: u32, _: &Camera, transform: &GlobalTransform) -> Self::Data {
+    fn data(&self, aspect_ratio: f32, _: &Camera, transform: &GlobalTransform) -> Self::Data {
         let projection = match self.projection {
             Projection::Orthographic { near, far, size } => {
-                let aspect_ratio = width as f32 / height as f32;
                 let width = size * aspect_ratio;
                 math::Mat4::orthographic_rh(-width, width, -size, size, near, far)
             }
             Projection::Perspective { fov, near, .. } => {
-                let aspect_ratio = width as f32 / height as f32;
                 math::Mat4::perspective_infinite_reverse_rh(fov, aspect_ratio, near)
             }
         };
@@ -259,6 +264,10 @@ impl View for View3d {
             view,
             projection,
         }
+    }
+
+    fn projection(&self) -> Projection {
+        self.projection
     }
 
     fn item(

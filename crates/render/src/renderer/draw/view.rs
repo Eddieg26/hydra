@@ -1,6 +1,6 @@
 use crate::{
     BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, BlendMode, Camera,
-    RenderDevice, RenderResource, RenderSurface, uniform::UniformBufferArray,
+    Frustum, Projection, RenderDevice, RenderResource, RenderSurface, uniform::UniformBufferArray,
 };
 use ecs::{
     Component, Entity, Resource,
@@ -8,24 +8,23 @@ use ecs::{
     system::unlifetime::{Read, SQuery},
 };
 use encase::{ShaderType, internal::WriteInto};
+use math::Mat4;
 use std::collections::HashMap;
 use transform::{GlobalTransform, LocalTransform};
 use wgpu::{BufferUsages, ShaderStages};
 
+pub trait ViewData: ShaderType + WriteInto + Send + Sync + 'static {
+    fn projection(&self) -> Mat4;
+}
+
 pub trait View: Component + Clone {
-    type Data: ShaderType + WriteInto + Send + Sync + 'static;
+    type Data: ViewData;
 
     type Transform: LocalTransform;
 
     type Item: Default + Copy + PartialOrd + Send + Sync + 'static;
 
-    fn data(
-        &self,
-        screen_width: u32,
-        screen_height: u32,
-        camera: &Camera,
-        transform: &GlobalTransform,
-    ) -> Self::Data;
+    fn data(&self, aspect_ratio: f32, camera: &Camera, transform: &GlobalTransform) -> Self::Data;
 
     fn item(
         &self,
@@ -34,12 +33,15 @@ pub trait View: Component + Clone {
         local_transform: &Self::Transform,
         global_transform: &GlobalTransform,
     ) -> Self::Item;
+
+    fn projection(&self) -> Projection;
 }
 
 pub struct RenderView<V: View> {
     pub view: V,
     pub data: V::Data,
     pub transform: GlobalTransform,
+    pub frustum: Frustum,
     pub dynamic_offset: u32,
 }
 
@@ -108,14 +110,24 @@ impl<V: View> ViewDataBuffer<V> {
     ) {
         buffer.as_mut().clear();
 
+        let aspect_ratio = surface.width() as f32 / surface.height() as f32;
+
         buffer.views = query
             .iter()
             .map(|(entity, view, transform, camera)| {
-                let data = view.data(surface.width(), surface.height(), camera, transform);
+                let data = view.data(aspect_ratio, camera, transform);
                 let dynamic_offset = buffer.as_mut().push(&data);
+                let frustum = Frustum::from_world_projection(
+                    &data.projection(),
+                    &transform.translation(),
+                    &transform.back(),
+                    view.projection().far(),
+                );
+
                 let view = RenderView {
                     view: view.clone(),
                     data,
+                    frustum,
                     transform: *transform,
                     dynamic_offset,
                 };

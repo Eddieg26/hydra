@@ -243,10 +243,6 @@ impl<T: NoUninit> ArrayBuffer<T> {
         &self.values
     }
 
-    pub fn buffer(&self) -> &Buffer {
-        &self.buffer
-    }
-
     pub fn push(&mut self, value: T) -> DynamicOffset {
         let offset = self.values.len() as DynamicOffset;
         self.values.push(value);
@@ -302,5 +298,11 @@ impl<T: NoUninit> ArrayBuffer<T> {
         }
 
         None
+    }
+}
+
+impl<T: NoUninit> AsRef<Buffer> for ArrayBuffer<T> {
+    fn as_ref(&self) -> &Buffer {
+        &self.buffer
     }
 }
