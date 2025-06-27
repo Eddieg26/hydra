@@ -300,7 +300,7 @@ pub struct DrawMesh<M: Material> {
 impl<M: Material> Draw for DrawMesh<M> {
     type View = View3d;
 
-    type Mesh = Mesh3d;
+    type Model = Mesh3d;
 
     type Material = M;
 
@@ -314,7 +314,7 @@ impl<M: Material> Draw for DrawMesh<M> {
         self.mesh
     }
 
-    fn data(&self, transform: &GlobalTransform) -> Self::Mesh {
+    fn model(&self, transform: &GlobalTransform) -> Self::Model {
         Mesh3d {
             world: transform.matrix(),
         }

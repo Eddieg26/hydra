@@ -7,8 +7,8 @@ use encase::{ShaderType, internal::WriteInto};
 use std::{num::NonZero, ops::Range};
 use wgpu::{BufferUsages, ShaderStages};
 
-pub trait ShaderData: ShaderType + WriteInto + Send + Sync + 'static {}
-impl<S: ShaderType + WriteInto + Send + Sync + 'static> ShaderData for S {}
+pub trait ModelData: ShaderType + WriteInto + Send + Sync + 'static {}
+impl<S: ShaderType + WriteInto + Send + Sync + 'static> ModelData for S {}
 
 pub enum GpuBufferArray<S: ShaderType> {
     Uniform(UniformBufferArray<S>),
@@ -56,7 +56,7 @@ impl<S: ShaderType> AsRef<Buffer> for GpuBufferArray<S> {
     }
 }
 
-pub struct ShaderDataBuffer<S: ShaderData> {
+pub struct ShaderDataBuffer<S: ModelData> {
     buffer: GpuBufferArray<S>,
     layout: BindGroupLayout,
     bind_groups: Vec<BindGroup>,
@@ -64,7 +64,7 @@ pub struct ShaderDataBuffer<S: ShaderData> {
     batch_size: u32, // Size of a single batch in bytes
 }
 
-impl<S: ShaderData> ShaderDataBuffer<S> {
+impl<S: ModelData> ShaderDataBuffer<S> {
     fn new(device: &RenderDevice, dynamic: bool) -> Self {
         if device.limits().max_storage_buffers_per_shader_stage == 0 {
             let item_size = if dynamic {
@@ -188,9 +188,9 @@ impl<S: ShaderData> ShaderDataBuffer<S> {
 }
 
 #[derive(Resource)]
-pub struct MeshDataBuffer<S: ShaderData>(pub(crate) ShaderDataBuffer<S>);
-impl<S: ShaderData> MeshDataBuffer<S> {
-    pub fn push(&mut self, value: &S) -> (usize, u32) {
+pub struct ModelDataBuffer<M: ModelData>(pub(crate) ShaderDataBuffer<M>);
+impl<M: ModelData> ModelDataBuffer<M> {
+    pub fn push(&mut self, value: &M) -> (usize, u32) {
         let index = self.0.buffer.data().len() / self.0.batch_size as usize;
         let offset = self.0.buffer.push(value);
 
@@ -198,7 +198,7 @@ impl<S: ShaderData> MeshDataBuffer<S> {
     }
 }
 
-impl<S: ShaderData> RenderResource for MeshDataBuffer<S> {
+impl<M: ModelData> RenderResource for ModelDataBuffer<M> {
     type Arg = Read<RenderDevice>;
 
     fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
@@ -213,9 +213,9 @@ pub struct BatchIndex {
 }
 
 #[derive(Resource)]
-pub struct BatchedMeshDataBuffer<S: ShaderData>(pub(crate) ShaderDataBuffer<S>);
-impl<S: ShaderData> BatchedMeshDataBuffer<S> {
-    pub fn push<'a>(&mut self, values: &[S]) -> Vec<BatchIndex> {
+pub struct BatchedModelDataBuffer<M: ModelData>(pub(crate) ShaderDataBuffer<M>);
+impl<M: ModelData> BatchedModelDataBuffer<M> {
+    pub fn push<'a>(&mut self, values: &[M]) -> Vec<BatchIndex> {
         if values.is_empty() {
             return Vec::new();
         }
@@ -237,7 +237,7 @@ impl<S: ShaderData> BatchedMeshDataBuffer<S> {
     }
 
     #[inline]
-    fn create_batch(&mut self, offset: u32, batch_count: u32, batch: &[S]) -> BatchIndex {
+    fn create_batch(&mut self, offset: u32, batch_count: u32, batch: &[M]) -> BatchIndex {
         let bind_group = self.0.buffer.data().len() / self.0.batch_size as usize;
         let instances = offset..batch_count;
         for value in batch {
@@ -251,7 +251,7 @@ impl<S: ShaderData> BatchedMeshDataBuffer<S> {
     }
 }
 
-impl<S: ShaderData> RenderResource for BatchedMeshDataBuffer<S> {
+impl<M: ModelData> RenderResource for BatchedModelDataBuffer<M> {
     type Arg = Read<RenderDevice>;
 
     fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
@@ -260,19 +260,19 @@ impl<S: ShaderData> RenderResource for BatchedMeshDataBuffer<S> {
     }
 }
 
-pub(crate) fn update_mesh_data_buffers<S: ShaderData>(
+pub(crate) fn update_model_data_buffers<M: ModelData>(
     device: &RenderDevice,
-    mesh_data: &mut MeshDataBuffer<S>,
-    batched_mesh_data: &mut BatchedMeshDataBuffer<S>,
+    model_data: &mut ModelDataBuffer<M>,
+    batched_model_data: &mut BatchedModelDataBuffer<M>,
 ) {
-    mesh_data.0.update(device);
-    batched_mesh_data.0.update(device);
+    model_data.0.update(device);
+    batched_model_data.0.update(device);
 }
 
-pub(crate) fn clear_mesh_data_buffers<S: ShaderData>(
-    mesh_data: &mut MeshDataBuffer<S>,
-    batched_mesh_data: &mut BatchedMeshDataBuffer<S>,
+pub(crate) fn clear_model_data_buffers<M: ModelData>(
+    model_data: &mut ModelDataBuffer<M>,
+    batched_model_data: &mut BatchedModelDataBuffer<M>,
 ) {
-    mesh_data.0.clear();
-    batched_mesh_data.0.clear();
+    model_data.0.clear();
+    batched_model_data.0.clear();
 }

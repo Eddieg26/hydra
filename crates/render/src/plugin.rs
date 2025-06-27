@@ -6,9 +6,9 @@ use crate::{
     draw::{
         Renderer, RendererPass,
         material::{Material, MaterialLayout, RenderPhase},
-        surface::{
-            BatchedMeshDataBuffer, MeshDataBuffer, ShaderData, clear_mesh_data_buffers,
-            update_mesh_data_buffers,
+        model::{
+            BatchedModelDataBuffer, ModelData, ModelDataBuffer, clear_model_data_buffers,
+            update_model_data_buffers,
         },
         view::{View, ViewDataBuffer},
     },
@@ -200,22 +200,22 @@ impl<V: View> Plugin for ViewPlugin<V> {
     }
 }
 
-struct MeshDataPlugin<S: ShaderData>(std::marker::PhantomData<S>);
-impl<S: ShaderData> MeshDataPlugin<S> {
+struct ModelDataPlugin<M: ModelData>(std::marker::PhantomData<M>);
+impl<M: ModelData> ModelDataPlugin<M> {
     pub fn new() -> Self {
         Self(Default::default())
     }
 }
 
-impl<S: ShaderData> Plugin for MeshDataPlugin<S> {
+impl<M: ModelData> Plugin for ModelDataPlugin<M> {
     fn setup(&mut self, app: &mut AppBuilder) {
         app.scoped_sub_app(RenderApp, |render_app| {
             render_app
-                .add_systems(PreRender, update_mesh_data_buffers::<S>)
-                .add_systems(PostRender, clear_mesh_data_buffers::<S>);
+                .add_systems(PreRender, update_model_data_buffers::<M>)
+                .add_systems(PostRender, clear_model_data_buffers::<M>);
         })
-        .add_render_resource::<MeshDataBuffer<S>>()
-        .add_render_resource::<BatchedMeshDataBuffer<S>>();
+        .add_render_resource::<ModelDataBuffer<M>>()
+        .add_render_resource::<BatchedModelDataBuffer<M>>();
     }
 }
 
@@ -244,7 +244,7 @@ impl<D: Draw> Plugin for DrawPlugin<D> {
             RenderPlugin,
             MaterialPlugin::<D::Material>::new(),
             ViewPlugin::<D::View>::new(),
-            MeshDataPlugin::<D::Mesh>::new(),
+            ModelDataPlugin::<D::Model>::new(),
         ))
         .scoped_sub_app(RenderApp, |sub_app| {
             sub_app

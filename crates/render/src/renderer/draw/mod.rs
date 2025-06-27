@@ -21,17 +21,17 @@ use transform::GlobalTransform;
 use wgpu::{ColorTargetState, VertexFormat, VertexStepMode};
 
 pub mod material;
-pub mod surface;
+pub mod model;
 pub mod view;
 
 pub use material::*;
-pub use surface::*;
+pub use model::*;
 pub use view::*;
 
 pub trait Draw: Component + Clone {
     type View: View;
 
-    type Mesh: ShaderData;
+    type Model: ModelData;
 
     type Material: Material;
 
@@ -47,7 +47,7 @@ pub trait Draw: Component + Clone {
         None
     }
 
-    fn data(&self, transform: &GlobalTransform) -> Self::Mesh;
+    fn model(&self, transform: &GlobalTransform) -> Self::Model;
 
     fn primitive_state() -> wgpu::PrimitiveState {
         wgpu::PrimitiveState::default()
@@ -356,8 +356,8 @@ pub struct DrawNode<D: Draw> {
 }
 
 impl<D: Draw> DrawNode<D> {
-    pub fn data(&self) -> D::Mesh {
-        self.draw.data(&self.global_transform)
+    pub fn data(&self) -> D::Model {
+        self.draw.model(&self.global_transform)
     }
 }
 
@@ -441,28 +441,28 @@ impl<D: Draw> RenderResource for DrawPipeline<D> {
         Write<PipelineCache>,
         Read<RenderSurface>,
         Option<Read<ViewDataBuffer<D::View>>>,
-        Option<Read<MeshDataBuffer<D::Mesh>>>,
-        Option<Read<BatchedMeshDataBuffer<D::Mesh>>>,
+        Option<Read<ModelDataBuffer<D::Model>>>,
+        Option<Read<BatchedModelDataBuffer<D::Model>>>,
         Option<Write<MaterialLayout<D::Material>>>,
         SCommands,
     );
 
     fn extract(arg: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
-        let (cache, surface, views, mesh_data, batched_mesh_data, layout, mut commands) = arg;
+        let (cache, surface, views, model_data, batched_model_data, layout, mut commands) = arg;
 
         let view_layout = match views {
             Some(views) => views.layout(),
             None => return Err(crate::resources::ExtractError::Retry(())),
         };
 
-        let mesh_layout = if D::BATCH {
-            let Some(batched_mesh_data) = batched_mesh_data else {
+        let model_layout = if D::BATCH {
+            let Some(batched_model_data) = batched_model_data else {
                 return Err(crate::resources::ExtractError::Retry(()));
             };
 
-            batched_mesh_data.0.layout()
-        } else if let Some(mesh_data) = mesh_data {
-            mesh_data.0.layout()
+            batched_model_data.0.layout()
+        } else if let Some(model_data) = model_data {
+            model_data.0.layout()
         } else {
             return Err(crate::resources::ExtractError::Retry(()));
         };
@@ -493,7 +493,7 @@ impl<D: Draw> RenderResource for DrawPipeline<D> {
             label: None,
             layout: vec![
                 view_layout.clone(),
-                mesh_layout.clone(),
+                model_layout.clone(),
                 material_layout.as_ref().clone(),
             ],
             vertex: VertexState {
@@ -636,8 +636,8 @@ impl<V: View, R: RenderPhase> ViewDrawCalls<V, R> {
         draws: &mut DrawTree<D>,
         visible_draws: &VisibleDraws<D>,
         view_buffer: &ViewDataBuffer<D::View>,
-        mesh_buffer: &mut MeshDataBuffer<D::Mesh>,
-        batched_mesh_buffer: &mut BatchedMeshDataBuffer<D::Mesh>,
+        model_data: &mut ModelDataBuffer<D::Model>,
+        batched_model_data: &mut BatchedModelDataBuffer<D::Model>,
         pipeline: &DrawPipeline<D>,
         system: DrawId<D>,
     ) where
@@ -669,7 +669,7 @@ impl<V: View, R: RenderPhase> ViewDrawCalls<V, R> {
                     .map(|(key, data)| {
                         let item = V::Item::default();
 
-                        batched_mesh_buffer
+                        batched_model_data
                             .push(&data)
                             .drain(..)
                             .map(|batch| DrawCall::<V> {
@@ -701,7 +701,7 @@ impl<V: View, R: RenderPhase> ViewDrawCalls<V, R> {
                         sub_mesh: draw.as_ref().sub_mesh(),
                     };
 
-                    let (bind_group, dynamic_offset) = mesh_buffer.push(&draw.data());
+                    let (bind_group, dynamic_offset) = model_data.push(&draw.data());
                     let item = view.item(R::mode(), &draw.local_transform, &draw.global_transform);
 
                     DrawCall::<V> {
@@ -785,33 +785,33 @@ impl<V: View, const GROUP: u32> DrawCommand<V> for SetView<V, GROUP> {
     }
 }
 
-pub struct SetMesh<V: View, M: ShaderData, const GROUP: u32, const BATCH: bool>(
+pub struct SetMesh<V: View, M: ModelData, const GROUP: u32, const BATCH: bool>(
     std::marker::PhantomData<(V, M)>,
 );
-impl<V: View, M: ShaderData, const GROUP: u32> DrawCommand<V> for SetMesh<V, M, GROUP, true> {
-    type Arg = Read<BatchedMeshDataBuffer<M>>;
+impl<V: View, M: ModelData, const GROUP: u32> DrawCommand<V> for SetMesh<V, M, GROUP, true> {
+    type Arg = Read<BatchedModelDataBuffer<M>>;
 
     fn execute<'w>(
         state: &mut RenderState<'w>,
         _: &RenderView<V>,
         draw: &DrawCall<V>,
-        batched_mesh_data: ArgItem<'w, 'w, Self::Arg>,
+        batched_model_data: ArgItem<'w, 'w, Self::Arg>,
     ) -> Result<(), DrawError> {
-        let bind_group = &batched_mesh_data.0.bind_groups()[draw.bind_group];
+        let bind_group = &batched_model_data.0.bind_groups()[draw.bind_group];
         Ok(state.set_bind_group(GROUP, bind_group, &[]))
     }
 }
 
-impl<V: View, M: ShaderData, const GROUP: u32> DrawCommand<V> for SetMesh<V, M, GROUP, false> {
-    type Arg = Read<MeshDataBuffer<M>>;
+impl<V: View, M: ModelData, const GROUP: u32> DrawCommand<V> for SetMesh<V, M, GROUP, false> {
+    type Arg = Read<ModelDataBuffer<M>>;
 
     fn execute<'w>(
         state: &mut RenderState<'w>,
         _: &RenderView<V>,
         draw: &DrawCall<V>,
-        mesh_data: ArgItem<'w, 'w, Self::Arg>,
+        model_data: ArgItem<'w, 'w, Self::Arg>,
     ) -> Result<(), DrawError> {
-        let bind_group = &mesh_data.0.bind_groups()[draw.bind_group];
+        let bind_group = &model_data.0.bind_groups()[draw.bind_group];
         Ok(state.set_bind_group(GROUP, bind_group, &[draw.dynamic_offset]))
     }
 }
@@ -834,8 +834,8 @@ impl<V: View, M: Material, const GROUP: u32> DrawCommand<V> for SetMaterial<V, M
     }
 }
 
-pub struct DrawMesh<V: View, M: ShaderData>(std::marker::PhantomData<(V, M)>);
-impl<V: View, M: ShaderData> DrawCommand<V> for DrawMesh<V, M> {
+pub struct DrawMesh<V: View, M: ModelData>(std::marker::PhantomData<(V, M)>);
+impl<V: View, M: ModelData> DrawCommand<V> for DrawMesh<V, M> {
     type Arg = (Read<RenderAssets<RenderMesh>>, Read<RenderAssets<SubMesh>>);
 
     fn execute<'w>(
@@ -899,9 +899,9 @@ impl<V: View> DrawSystems<V> {
 type DrawFunction<D, const BATCH: bool> = (
     SetPipeline<<D as Draw>::View>,
     SetView<<D as Draw>::View, 0>,
-    SetMesh<<D as Draw>::View, <D as Draw>::Mesh, 1, BATCH>,
+    SetMesh<<D as Draw>::View, <D as Draw>::Model, 1, BATCH>,
     SetMaterial<<D as Draw>::View, <D as Draw>::Material, 2>,
-    DrawMesh<<D as Draw>::View, <D as Draw>::Mesh>,
+    DrawMesh<<D as Draw>::View, <D as Draw>::Model>,
 );
 
 pub struct DrawSystem<V: View> {
