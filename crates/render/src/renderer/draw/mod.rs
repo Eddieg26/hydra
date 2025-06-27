@@ -103,26 +103,30 @@ impl<D: Draw> DrawTreeNode<D> {
         self.children.as_deref()
     }
 
-    pub fn get(&self, f: impl Fn(&Aabb, &DrawIndex<D>) -> bool + Copy) -> Vec<&DrawIndex<D>> {
+    pub fn filter(
+        &self,
+        nodes: &[DrawNode<D>],
+        f: impl Fn(&Aabb) -> bool + Copy,
+    ) -> Vec<&DrawIndex<D>> {
         let mut results = Vec::new();
 
-        if !self.bounds.intersects(self.bounds) {
-            return results;
+        if !f(&self.bounds) {
+            return Vec::new();
         }
 
         for item in &self.items {
-            if f(&self.bounds, item) {
+            if f(&nodes[item.0].bounds) {
                 results.push(item);
             }
         }
 
         if let Some(children) = &self.children {
             for child in children.iter() {
-                results.extend(child.get(f));
+                results.extend(child.filter(nodes, f));
             }
         }
 
-        results
+        return results;
     }
 
     pub fn insert(&mut self, item: DrawIndex<D>, bounds: Aabb) -> Option<DrawIndex<D>> {
@@ -263,10 +267,11 @@ impl<D: Draw> DrawTree<D> {
         }
     }
 
-    pub fn insert(&mut self, draw: DrawNode<D>, bounds: Aabb) {
+    pub fn insert(&mut self, draw: DrawNode<D>) {
         let index = DrawIndex::new(self.nodes.len());
         self.nodes.push(draw);
         if D::CULL {
+            let bounds = self.nodes[index.0].bounds;
             if let Some(index) = self.root.insert(index, bounds) {
                 self.root.items.push(index);
             }
@@ -283,14 +288,13 @@ impl<D: Draw> DrawTree<D> {
         &self.nodes[index.0]
     }
 
-    pub fn filter(&self, f: impl Fn(&Aabb, &DrawNode<D>) -> bool) -> Vec<&DrawIndex<D>> {
-        self.root
-            .get(|bounds, index| f(bounds, &self.nodes[index.0]))
+    pub fn filter(&self, f: impl Fn(&Aabb) -> bool + Copy) -> Vec<&DrawIndex<D>> {
+        self.root.filter(self.nodes(), |bounds| f(bounds))
     }
 
     pub fn cull(&self, frustum: &Frustum) -> Vec<&DrawIndex<D>> {
         if D::CULL {
-            self.filter(|bounds, _| frustum.intersects_aabb(bounds))
+            self.filter(|bounds| frustum.intersects_aabb(bounds))
         } else {
             self.root.items().iter().collect()
         }
@@ -319,16 +323,22 @@ impl<D: Draw> DrawTree<D> {
                 continue;
             };
 
+            let bounds = if D::CULL && disable_culling.is_none() {
+                mesh.bounds().transform_affine(global_transform.get())
+            } else {
+                Aabb::ZERO
+            };
+
             let draw = DrawNode {
                 entity,
                 local_transform: *transform,
                 global_transform: *global_transform,
                 draw: draw.clone(),
+                bounds,
             };
 
             if D::CULL && disable_culling.is_none() {
-                let bounds = mesh.bounds().transform_affine(global_transform.get());
-                tree.insert(draw, bounds);
+                tree.insert(draw);
             } else {
                 tree.root.items.push(DrawIndex::new(tree.nodes.len()));
                 tree.nodes.push(draw);
@@ -341,6 +351,7 @@ pub struct DrawNode<D: Draw> {
     pub entity: Entity,
     pub local_transform: <D::View as View>::Transform,
     pub global_transform: GlobalTransform,
+    pub bounds: Aabb,
     draw: D,
 }
 

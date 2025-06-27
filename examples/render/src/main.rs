@@ -77,13 +77,14 @@ fn main() {
         .add_systems(Init, |mut spawner: Spawner| {
             spawner
                 .spawn()
-                .with_component(GlobalTransform::with_translation(math::Vec3::Z * 5.0))
+                .with_component(GlobalTransform::with_translation(math::Vec3::Z * 5.0 + math::Vec3::X * 10.0))
                 .with_component(Camera::default())
                 .with_component(View3d::default())
                 .finish();
+
             spawner
                 .spawn()
-                .with_component(GlobalTransform::IDENTITY)
+                .with_component(GlobalTransform::with_translation(math::Vec3::X * 10.0))
                 .with_component(Transform::default())
                 .with_component(DrawMesh::<UnlitColor> {
                     material: RED_MAT,
@@ -302,6 +303,8 @@ impl<M: Material> Draw for DrawMesh<M> {
     type Mesh = Mesh3d;
 
     type Material = M;
+
+    const CULL: bool = true;
 
     fn material(&self) -> AssetId<Self::Material> {
         self.material

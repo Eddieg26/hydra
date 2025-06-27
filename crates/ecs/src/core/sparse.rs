@@ -184,7 +184,7 @@ impl<V, I: SparseIndex> ImmutableSparseArray<V, I> {
 
     pub fn contains(&self, index: I) -> bool {
         let index = index.to_usize();
-        self.values.get(index).is_some()
+        self.values.get(index).is_some_and(|v| v.is_some())
     }
 }
 

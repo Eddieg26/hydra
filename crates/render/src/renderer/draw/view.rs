@@ -117,8 +117,10 @@ impl<V: View> ViewDataBuffer<V> {
             .map(|(entity, view, transform, camera)| {
                 let data = view.data(aspect_ratio, camera, transform);
                 let dynamic_offset = buffer.as_mut().push(&data);
+                let clip_from_world = data.projection() * transform.matrix().inverse();
+
                 let frustum = Frustum::from_world_projection(
-                    &data.projection(),
+                    &clip_from_world,
                     &transform.translation(),
                     &transform.back(),
                     view.projection().far(),
