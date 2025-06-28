@@ -18,7 +18,7 @@ pub use hierarchy::{Children, HierarchyExt, Parent};
 pub use system::{
     ArgItem, BaseFilter, BaseQuery, Condition, IntoSystemConfig, IntoSystemConfigs, Phase, Query,
     QueryIter, QueryState, ReadOnly, ReadQuery, RunMode, Schedule, System, SystemArg, SystemConfig,
-    SystemConfigs, SystemId, SystemMeta, Systems, query, schedule,
+    SystemConfigs, SystemId, SystemMeta, Systems, query, schedule, unlifetime,
 };
 pub use world::{
     Access, AccessError, Archetype, ArchetypeAccess, ArchetypeId, ArchetypeQuery, Component,

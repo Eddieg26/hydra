@@ -138,9 +138,8 @@ impl RenderPhase for Opaque3d {
 }
 
 #[derive(Clone, Asset, AsBinding)]
-#[uniform(0)]
 pub struct UnlitColor {
-    #[uniform]
+    #[uniform(0)]
     color: Color,
 }
 
@@ -156,6 +155,13 @@ impl Material for UnlitColor {
     fn shader() -> impl Into<asset::AssetId<render::Shader>> {
         FRAG_ID
     }
+}
+
+#[derive(Clone, Asset, AsBinding)]
+pub struct UnlitTexture {
+    #[texture(0)]
+    #[sampler(1)]
+    texture: AssetId<Texture>,
 }
 
 // pub struct Transparent2d;

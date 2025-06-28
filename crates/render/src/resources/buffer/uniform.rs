@@ -7,14 +7,14 @@ use encase::{
 };
 use wgpu::{BindingResource, BufferSize, BufferUsages, DynamicOffset};
 
-pub struct UniformBuffer<T: ShaderType + WriteInto> {
+pub struct UniformBuffer<T: ShaderType + WriteInto + Copy> {
     value: T,
     data: EncaseUniformBuffer<Vec<u8>>,
     buffer: Buffer,
     is_dirty: bool,
 }
 
-impl<T: ShaderType + WriteInto> UniformBuffer<T> {
+impl<T: ShaderType + WriteInto + Copy> UniformBuffer<T> {
     pub fn new(
         device: &RenderDevice,
         value: T,
@@ -76,7 +76,7 @@ impl<T: ShaderType + WriteInto> UniformBuffer<T> {
     }
 }
 
-impl<T: ShaderType + WriteInto> AsRef<Buffer> for UniformBuffer<T> {
+impl<T: ShaderType + WriteInto + Copy> AsRef<Buffer> for UniformBuffer<T> {
     fn as_ref(&self) -> &Buffer {
         &self.buffer
     }

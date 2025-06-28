@@ -1,11 +1,13 @@
 pub mod ctx;
 pub mod derive;
+pub mod parse;
 pub mod symbol;
 pub mod workspace;
 
 pub use ctx::*;
-pub use symbol::*;
 pub use derive::*;
+pub use parse::*;
+pub use symbol::*;
 
 pub mod syn {
     pub use syn::*;

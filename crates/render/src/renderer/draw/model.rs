@@ -124,9 +124,9 @@ impl<S: ModelData> ShaderDataBuffer<S> {
                     0,
                     ShaderStages::VERTEX | ShaderStages::COMPUTE,
                     dynamic,
-                    None,
-                    None,
                     true,
+                    None,
+                    None,
                 )
                 .build(device);
 

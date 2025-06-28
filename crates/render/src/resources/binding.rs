@@ -113,9 +113,9 @@ impl BindGroupLayoutBuilder {
         binding: u32,
         visibility: wgpu::ShaderStages,
         dynamic: bool,
+        read_only: bool,
         size: Option<wgpu::BufferSize>,
         count: Option<NonZero<u32>>,
-        read_only: bool,
     ) -> &mut Self {
         self.with_buffer(
             binding,
