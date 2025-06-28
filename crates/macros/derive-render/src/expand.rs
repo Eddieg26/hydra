@@ -55,6 +55,10 @@ pub fn expand_create_bind_group(input: &mut DeriveInput) -> Result<TokenStream> 
         };
 
         for attr in &field.attrs {
+            if !BindingType::validate(attr.path()) {
+                continue;
+            }
+
             let binding_meta = attr.parse_args_with(BindingMeta::parse)?;
             let binding = binding_meta.binding;
 
@@ -238,7 +242,7 @@ impl BindingType {
                     Meta::NameValue(meta) if meta.path == READ_ONLY => {
                         read_only = meta.value.parse_bool()?;
                     }
-                    _ => return Err(Error::new_spanned(meta, "")),
+                    _ => continue,
                 }
             }
 
@@ -262,7 +266,7 @@ impl BindingType {
                     Meta::NameValue(meta) if meta.path == TextureSampleType::PATH => {
                         sample_ty = TextureSampleType::parse(meta)?
                     }
-                    _ => return Err(Error::new_spanned(meta, "")),
+                    _ => continue,
                 }
             }
 
@@ -283,7 +287,7 @@ impl BindingType {
                     Meta::NameValue(meta) if meta.path == SamplerType::PATH => {
                         ty = SamplerType::parse(meta)?
                     }
-                    _ => return Err(Error::new_spanned(meta, "")),
+                    _ => continue,
                 }
             }
 
@@ -294,6 +298,15 @@ impl BindingType {
                 format!("Unknow attribute: {:?}", path),
             ))
         }
+    }
+
+    fn validate(path: &syn::Path) -> bool {
+        let v = path == Self::UNIFORM
+            || path == Self::STORAGE
+            || path == Self::TEXTURE
+            || path == Self::SAMPLER;
+
+        return v;
     }
 }
 

@@ -3,7 +3,6 @@ use asset::{
     importer::ImportError, io::EmbeddedFs, plugin::AssetAppExt,
 };
 use ecs::{App, Component, EventReader, Init, Spawner, Start};
-use math::Vec3A;
 use render::{
     AsBinding, BlendMode, Camera, Color, Draw, Material, Mesh, MeshAttribute, MeshAttributeType,
     MeshAttributeValues, MeshTopology, ObjImportSettings, Projection, RenderPhase, Renderer,
@@ -77,7 +76,9 @@ fn main() {
         .add_systems(Init, |mut spawner: Spawner| {
             spawner
                 .spawn()
-                .with_component(GlobalTransform::with_translation(math::Vec3::Z * 5.0 + math::Vec3::X * 10.0))
+                .with_component(GlobalTransform::with_translation(
+                    math::Vec3::Z * 5.0 + math::Vec3::X * 10.0,
+                ))
                 .with_component(Camera::default())
                 .with_component(View3d::default())
                 .finish();
@@ -158,9 +159,11 @@ impl Material for UnlitColor {
 }
 
 #[derive(Clone, Asset, AsBinding)]
+#[reload]
 pub struct UnlitTexture {
     #[texture(0)]
     #[sampler(1)]
+    #[dependency]
     texture: AssetId<Texture>,
 }
 
@@ -219,7 +222,7 @@ pub struct View3d {
 }
 
 impl View3d {
-    fn orthographic() -> Self {
+    pub fn orthographic() -> Self {
         Self {
             projection: Projection::Orthographic {
                 near: 0.01,
