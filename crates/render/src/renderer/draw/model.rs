@@ -239,7 +239,7 @@ impl<M: ModelData> BatchedModelDataBuffer<M> {
     #[inline]
     fn create_batch(&mut self, offset: u32, batch_count: u32, batch: &[M]) -> BatchIndex {
         let bind_group = self.0.buffer.data().len() / self.0.batch_size as usize;
-        let instances = offset..batch_count;
+        let instances = offset..offset + batch_count;
         for value in batch {
             self.0.buffer.push(value);
         }

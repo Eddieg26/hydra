@@ -1,5 +1,5 @@
 use crate::{
-    AssetUsage, ExtractError, ExtractResource, RenderAsset, RenderResource,
+    AssetUsage, ExtractError, ExtractResource, RenderAsset, RenderResource, View,
     device::RenderDevice,
     resources::{
         Shader,
@@ -55,14 +55,68 @@ pub trait RenderPhase: Send + Sync + 'static {
     fn mode() -> BlendMode;
 }
 
+pub trait Lighting: Send + Sync + 'static {
+    type View: View;
+
+    fn new(device: &RenderDevice) -> Self;
+
+    fn bind_group_layout(&self) -> Option<&BindGroupLayout>;
+
+    fn bind_group(&self) -> Option<&BindGroup>;
+}
+
+#[derive(Resource)]
+pub struct LightingData<L: Lighting>(L);
+impl<L: Lighting> RenderResource for LightingData<L> {
+    type Arg = Read<RenderDevice>;
+
+    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, ExtractError<()>> {
+        Ok(Self(L::new(device)))
+    }
+}
+
+impl<L: Lighting> std::ops::Deref for LightingData<L> {
+    type Target = L;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<L: Lighting> std::ops::DerefMut for LightingData<L> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 pub trait Material: Asset + AsBinding + Clone + Sized {
     type Phase: RenderPhase;
+
+    type Lighting: Lighting;
 
     fn depth_write() -> DepthWrite {
         DepthWrite::On
     }
 
     fn shader() -> impl Into<AssetId<Shader>>;
+}
+
+#[derive(Resource)]
+pub struct Unlit<V: View>(std::marker::PhantomData<V>);
+impl<V: View> Lighting for Unlit<V> {
+    type View = V;
+
+    fn new(_: &RenderDevice) -> Self {
+        Self(Default::default())
+    }
+
+    fn bind_group_layout(&self) -> Option<&BindGroupLayout> {
+        None
+    }
+
+    fn bind_group(&self) -> Option<&BindGroup> {
+        None
+    }
 }
 
 #[derive(Resource)]

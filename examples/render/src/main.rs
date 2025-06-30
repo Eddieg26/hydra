@@ -2,24 +2,45 @@ use asset::{
     Asset, AssetEvent, AssetId, DefaultSettings, database::load::LoadError, embed_asset,
     importer::ImportError, io::EmbeddedFs, plugin::AssetAppExt,
 };
-use ecs::{App, Component, EventReader, Init, Spawner, Start};
+use bytemuck::{Pod, Zeroable};
+use ecs::{
+    App, Component, EventReader, Extract, Init, IntoSystemConfig, Plugin, Resource, Spawner, Start,
+    app::Main,
+    system::Exists,
+    unlifetime::{Read, SQuery},
+};
+use math::{Quat, Vec3};
 use render::{
-    AsBinding, BlendMode, Camera, Color, Draw, Material, Mesh, MeshAttribute, MeshAttributeType,
-    MeshAttributeValues, MeshTopology, ObjImportSettings, Projection, RenderPhase, Renderer,
-    Shader, ShaderSource, ShaderType, Texture, Texture2dSettings, View, ViewData,
+    ArrayBuffer, AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder,
+    BlendMode, Camera, Color, DisableCulling, Draw, Indices, Lighting, LightingData, Material,
+    Mesh, MeshAttribute, MeshAttributeType, MeshAttributeValues, MeshTopology, ObjImportSettings,
+    PostRender, Process, Projection, RenderApp, RenderDevice, RenderPhase, Renderer, Shader,
+    ShaderSource, ShaderType, Texture, Texture2dSettings, Unlit, View, ViewData,
     plugin::{RenderAppExt, RenderPlugin},
+    uniform::UniformBuffer,
+    wgpu::{BufferUsages, ShaderStages},
 };
 use transform::{GlobalTransform, Transform};
+use window::plugin::WindowPlugin;
 
 const VERT_ID: AssetId<Shader> = AssetId::from_u128(0xabcdef0123456789);
 const VERT_ID_2: AssetId<Shader> = AssetId::from_u128(0x7fa18a3696e84df5848822a3b417e3f3u128);
+const DRAW_LIGHT_VERT: AssetId<Shader> = AssetId::from_u128(0x9e08450b1c394c8c88de79b6aa2c2589);
+const DRAW_LIGHT_FRAG: AssetId<Shader> = AssetId::from_u128(0x7503fc9b9eda4559a7fde1459f02058b);
 const FRAG_ID: AssetId<Shader> = AssetId::from_u128(0x123456789abcdef0);
 const FRAG_ID_2: AssetId<Shader> = AssetId::from_u128(0x9876543210fedcba);
-const RED_MAT: AssetId<UnlitColor> = AssetId::from_u128(0xa0cc79971c2d4206874539cb5ac54fe2u128);
-const BLUE_MAT: AssetId<UnlitColor> = AssetId::from_u128(0x87654321fedcba98);
+const FRAG_ID_3: AssetId<Shader> = AssetId::from_u128(0x3e7c2a1b4f5e4c2e9d1a8b7e6c5d4f3a);
+const UNLIT_WHITE: AssetId<UnlitColor> = AssetId::from_u128(0xfca61c1a76b14268b25058d36dbc6389);
+const UNLIT_RED: AssetId<UnlitColor> = AssetId::from_u128(0xa0cc79971c2d4206874539cb5ac54fe2u128);
+const UNLIT_BLUE: AssetId<UnlitColor> = AssetId::from_u128(0x87654321fedcba98);
+const LIT_WHITE: AssetId<LitColor> = AssetId::from_u128(0x9a8b7c6d5e4f3a2b1c0d8e7f6a5b4c3d);
+const LIT_RED: AssetId<LitColor> = AssetId::from_u128(0x1a2b3c4d5e6f708192a0b1c2d3e4f506u128);
+const LIGHT_MAT: AssetId<LightMaterial> = AssetId::from_u128(0xcd9c7e475e84435db8316d2612b94e2d);
 const QUAD_ID: AssetId<Mesh> = AssetId::from_u128(0xe51f72d138f747c6b22e2ac8a64b7b92u128);
 const CUBE_ID: AssetId<Mesh> = AssetId::from_u128(0x9d3919f428f8429a80e195849b3b6c21u128);
+const PLANE_ID: AssetId<Mesh> = AssetId::from_u128(0x2b3c4d5e6f708192a0b1c2d3e4f50607u128);
 const SWORD_ID: AssetId<Mesh> = AssetId::from_u128(0x6d3d79f5c6764b43993ae8de7ed0219bu128);
+const WIRE_SPHERE_ID: AssetId<Mesh> = AssetId::from_u128(0x5e769e37d0b44dcbcc7029eb5b68320);
 const GENGAR_ID: AssetId<Texture> = AssetId::from_u128(0x43c5893d2b2f4a3bb2bb33eb1b362ff6u128);
 // const UNLIT_TEX_ID: AssetId<UnlitTexture> =
 //     AssetId::from_u128(0x1a2b3c4d5e6f708192a0b1c2d3e4f506u128);
@@ -43,13 +64,43 @@ const QUAD_TEX_COORDS: &[math::Vec2] = &[
 ];
 
 fn main() {
+    // App::new().add_plugins(WindowPlugin).run();
+
     let fs = EmbeddedFs::new();
     embed_asset!(fs, VERT_ID, "vert.wgsl", DefaultSettings::default());
     embed_asset!(fs, VERT_ID_2, "vert2.wgsl", DefaultSettings::default());
     embed_asset!(fs, FRAG_ID, "frag.wgsl", DefaultSettings::default());
     embed_asset!(fs, FRAG_ID_2, "frag2.wgsl", DefaultSettings::default());
+    embed_asset!(
+        fs,
+        FRAG_ID_3,
+        "forward-lighting.wgsl",
+        DefaultSettings::default()
+    );
+    embed_asset!(
+        fs,
+        DRAW_LIGHT_FRAG,
+        "draw-light.frag.wgsl",
+        DefaultSettings::default()
+    );
+    embed_asset!(
+        fs,
+        DRAW_LIGHT_VERT,
+        "draw-light.vert.wgsl",
+        DefaultSettings::default()
+    );
     embed_asset!(fs, CUBE_ID, "cube.obj", ObjImportSettings::default());
+    embed_asset!(
+        fs,
+        WIRE_SPHERE_ID,
+        "sphere.obj",
+        ObjImportSettings {
+            wireframe: true,
+            ..Default::default()
+        }
+    );
     embed_asset!(fs, SWORD_ID, "sword.obj", ObjImportSettings::default());
+    embed_asset!(fs, PLANE_ID, "plane.obj", ObjImportSettings::default());
     embed_asset!(fs, GENGAR_ID, "gengar.png", Texture2dSettings::default());
 
     let quad = Mesh::new(MeshTopology::TriangleList)
@@ -63,21 +114,29 @@ fn main() {
         ));
 
     App::new()
-        .add_plugins(RenderPlugin)
+        .add_plugins(ForwardLightingPlugin)
         .add_source("embedded", fs)
         .register_draw::<DrawMesh<UnlitColor>>()
+        .register_draw::<DrawMesh<LitColor>>()
+        .register_draw::<Light>()
         .add_renderer::<BasicRenderer>()
-        .add_asset(RED_MAT, UnlitColor::from(Color::red()))
-        .add_asset(BLUE_MAT, UnlitColor::from(Color::blue()))
+        .add_asset(UNLIT_WHITE, UnlitColor::from(Color::white()))
+        .add_asset(UNLIT_RED, UnlitColor::from(Color::red()))
+        .add_asset(UNLIT_BLUE, UnlitColor::from(Color::blue()))
+        .add_asset(LIT_WHITE, LitColor::from(Color::white()))
+        .add_asset(LIT_RED, LitColor::from(Color::red()))
+        .add_asset(LIGHT_MAT, LightMaterial::from(Color::white()))
         .add_asset(QUAD_ID, quad)
         .load_asset::<Mesh>(SWORD_ID)
         .load_asset::<Mesh>(CUBE_ID)
+        .load_asset::<Mesh>(PLANE_ID)
+        .load_asset::<Mesh>(WIRE_SPHERE_ID)
         .load_asset::<Texture>(GENGAR_ID)
         .add_systems(Init, |mut spawner: Spawner| {
             spawner
                 .spawn()
                 .with_component(GlobalTransform::with_translation(
-                    math::Vec3::Z * 5.0 + math::Vec3::X * 10.0,
+                    math::Vec3::Z * 7.0 + math::Vec3::Y * 2.0,
                 ))
                 .with_component(Camera::default())
                 .with_component(View3d::default())
@@ -85,30 +144,40 @@ fn main() {
 
             spawner
                 .spawn()
-                .with_component(GlobalTransform::with_translation(math::Vec3::X * 10.0))
+                .with_component(GlobalTransform::with_translation(math::Vec3::Y * 2.0))
                 .with_component(Transform::default())
-                .with_component(DrawMesh::<UnlitColor> {
-                    material: RED_MAT,
+                .with_component(Light::default())
+                .finish();
+
+            spawner
+                .spawn()
+                .with_component(GlobalTransform::ORIGIN)
+                .with_component(Transform::default())
+                .with_component(DrawMesh {
+                    material: LIT_RED,
                     mesh: SWORD_ID,
                 })
                 .finish();
 
-            // spawner
-            //     .spawn()
-            //     .with_component(GlobalTransform::IDENTITY)
-            //     .with_component(DrawMesh {
-            //         material: BLUE_MAT,
-            //         mesh: QUAD_ID,
-            //     })
-            //     .finish();
+            spawner
+                .spawn()
+                .with_component(GlobalTransform::new(
+                    Vec3::NEG_Y * 0.5,
+                    Quat::from_euler(math::EulerRot::XYZ, -90.0f32.to_radians(), 0.0, 0.0),
+                    Vec3::new(1.0, 1.0, 1.0),
+                ))
+                .with_component(Transform::default())
+                .with_component(DrawMesh {
+                    material: LIT_WHITE,
+                    mesh: PLANE_ID,
+                })
+                .finish();
         })
         .add_systems(
             Start,
             |import_errors: EventReader<ImportError>,
              load_errors: EventReader<LoadError>,
-             events: EventReader<AssetEvent<ShaderSource>>,
-             texture_events: EventReader<AssetEvent<Texture>>,
-             material_events: EventReader<AssetEvent<UnlitColor>>| {
+             events: EventReader<AssetEvent<Mesh>>| {
                 for error in import_errors {
                     println!("Import error: {}", error);
                 }
@@ -116,14 +185,6 @@ fn main() {
                     println!("Load error: {}", error);
                 }
                 for event in events {
-                    println!("Event: {:?}", event);
-                }
-
-                for event in texture_events {
-                    println!("Event: {:?}", event);
-                }
-
-                for event in material_events {
                     println!("Event: {:?}", event);
                 }
             },
@@ -152,6 +213,8 @@ impl From<Color> for UnlitColor {
 
 impl Material for UnlitColor {
     type Phase = Opaque3d;
+
+    type Lighting = Unlit<View3d>;
 
     fn shader() -> impl Into<asset::AssetId<render::Shader>> {
         FRAG_ID
@@ -307,8 +370,6 @@ pub struct DrawMesh<M: Material> {
 }
 
 impl<M: Material> Draw for DrawMesh<M> {
-    type View = View3d;
-
     type Model = Mesh3d;
 
     type Material = M;
@@ -333,7 +394,7 @@ impl<M: Material> Draw for DrawMesh<M> {
         VERT_ID
     }
 
-    fn formats() -> &'static [render::wgpu::VertexFormat] {
+    fn vertex() -> &'static [render::wgpu::VertexFormat] {
         &[
             render::wgpu::VertexFormat::Float32x3,
             render::wgpu::VertexFormat::Float32x3,
@@ -342,45 +403,6 @@ impl<M: Material> Draw for DrawMesh<M> {
         ]
     }
 }
-
-// #[derive(Clone, Component)]
-// pub struct DrawSprite<M: Material> {
-//     material: AssetId<M>,
-//     mesh: AssetId<Mesh>,
-// }
-
-// impl<M: Material> Draw for DrawSprite<M> {
-//     type View = View3d;
-
-//     type Mesh = Mesh3d;
-
-//     type Material = M;
-
-//     fn material(&self) -> AssetId<Self::Material> {
-//         self.material
-//     }
-
-//     fn mesh(&self) -> AssetId<Mesh> {
-//         self.mesh
-//     }
-
-//     fn data(&self, transform: &GlobalTransform) -> Self::Mesh {
-//         Mesh3d {
-//             world: transform.matrix().to_cols_array(),
-//         }
-//     }
-
-//     fn formats() -> &'static [render::wgpu::VertexFormat] {
-//         &[
-//             render::wgpu::VertexFormat::Float32x2,
-//             render::wgpu::VertexFormat::Float32x2,
-//         ]
-//     }
-
-//     fn shader() -> impl Into<AssetId<render::Shader>> {
-//         VERT_ID_2
-//     }
-// }
 
 pub struct BasicRenderer;
 
@@ -391,5 +413,230 @@ impl Renderer for BasicRenderer {
 
     fn setup(_: &mut render::PassBuilder, phases: &mut render::RenderPhases) -> Self::Data {
         phases.add_phase::<View3d, Opaque3d>();
+    }
+}
+
+#[derive(Clone, Copy, Component)]
+pub struct Light {
+    color: Color,
+    range: f32,
+    intensity: f32,
+}
+
+impl Default for Light {
+    fn default() -> Self {
+        Self {
+            color: Color::white(),
+            range: 10.0,
+            intensity: 1.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, ShaderType, Pod, Zeroable)]
+#[repr(C)]
+pub struct LightData {
+    position: Vec3,
+    range: f32,
+    color: Vec3,
+    intensity: f32,
+}
+
+pub struct ForwardLighting {
+    lights: ArrayBuffer<LightData>,
+    light_count: UniformBuffer<u32>,
+    layout: BindGroupLayout,
+    binding: BindGroup,
+}
+
+impl ForwardLighting {
+    pub fn new(device: &RenderDevice) -> Self {
+        let lights = ArrayBuffer::new(
+            device,
+            1,
+            BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            None,
+        );
+
+        let light_count = UniformBuffer::new(device, 0u32, None, Some(BufferUsages::COPY_DST));
+
+        let layout = BindGroupLayoutBuilder::new()
+            .with_storage(0, ShaderStages::FRAGMENT, false, true, None, None)
+            .with_uniform(1, ShaderStages::FRAGMENT, false, None, None)
+            .build(device);
+
+        let binding = BindGroupBuilder::new(&layout)
+            .with_storage(0, &lights, 0, None)
+            .with_uniform(1, &light_count, 0, None)
+            .build(device);
+
+        Self {
+            lights,
+            light_count,
+            layout,
+            binding,
+        }
+    }
+
+    pub fn add_light(&mut self, light: &Light, position: Vec3) {
+        self.lights.push(LightData {
+            position,
+            color: light.color.into(),
+            range: light.range,
+            intensity: light.intensity,
+        });
+    }
+
+    pub fn update(&mut self, device: &RenderDevice) {
+        self.light_count.set(self.lights.len() as u32);
+        self.light_count.update(device);
+
+        if let Some(_) = self.lights.update(device) {
+            self.binding = BindGroupBuilder::new(&self.layout)
+                .with_storage(0, &self.lights, 0, None)
+                .with_uniform(1, &self.light_count, 0, None)
+                .build(device);
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.lights.clear();
+    }
+
+    fn extract(
+        lights: Main<SQuery<(&GlobalTransform, &Light)>>,
+        lighting: &mut LightingData<Self>,
+    ) {
+        for (transform, light) in lights.iter() {
+            lighting.add_light(light, transform.translation());
+        }
+    }
+
+    fn process(lighting: &mut LightingData<Self>, device: &RenderDevice) {
+        lighting.update(device);
+    }
+
+    fn clear_buffer(lighting: &mut LightingData<Self>) {
+        lighting.clear();
+    }
+}
+
+impl Lighting for ForwardLighting {
+    type View = View3d;
+
+    fn new(device: &RenderDevice) -> Self {
+        Self::new(device)
+    }
+
+    fn bind_group_layout(&self) -> Option<&BindGroupLayout> {
+        Some(&self.layout)
+    }
+
+    fn bind_group(&self) -> Option<&BindGroup> {
+        Some(&self.binding)
+    }
+}
+
+#[derive(Clone, Copy, Asset, AsBinding)]
+pub struct LitColor {
+    #[uniform(0, visibility(fragment))]
+    color: Color,
+}
+
+impl From<Color> for LitColor {
+    fn from(color: Color) -> Self {
+        Self { color }
+    }
+}
+
+impl Material for LitColor {
+    type Phase = Opaque3d;
+
+    type Lighting = ForwardLighting;
+
+    fn shader() -> impl Into<AssetId<Shader>> {
+        FRAG_ID_3
+    }
+}
+
+pub struct ForwardLightingPlugin;
+
+impl Plugin for ForwardLightingPlugin {
+    fn setup(&mut self, app: &mut ecs::AppBuilder) {
+        let sub_app = app
+            .add_plugins(RenderPlugin)
+            .register::<Light>()
+            .add_render_resource::<LightingData<ForwardLighting>>()
+            .sub_app_mut(RenderApp)
+            .unwrap();
+        sub_app.add_systems(
+            Extract,
+            ForwardLighting::extract.when::<Exists<LightingData<ForwardLighting>>>(),
+        );
+        sub_app.add_systems(Process, ForwardLighting::process);
+        sub_app.add_systems(PostRender, ForwardLighting::clear_buffer);
+    }
+}
+
+#[derive(Clone, Asset, AsBinding)]
+pub struct LightMaterial {
+    #[uniform(0)]
+    color: Color,
+}
+
+impl From<Color> for LightMaterial {
+    fn from(color: Color) -> Self {
+        Self { color }
+    }
+}
+
+impl Material for LightMaterial {
+    type Phase = Opaque3d;
+
+    type Lighting = Unlit<View3d>;
+
+    fn shader() -> impl Into<asset::AssetId<render::Shader>> {
+        DRAW_LIGHT_FRAG
+    }
+}
+
+impl Draw for Light {
+    type Model = LightData;
+
+    const CULL: bool = false;
+
+    type Material = LightMaterial;
+
+    fn material(&self) -> AssetId<Self::Material> {
+        LIGHT_MAT
+    }
+
+    fn mesh(&self) -> AssetId<Mesh> {
+        WIRE_SPHERE_ID
+    }
+
+    fn model(&self, transform: &GlobalTransform) -> Self::Model {
+        LightData {
+            position: transform.translation(),
+            color: self.color.into(),
+            range: self.range,
+            intensity: self.intensity,
+        }
+    }
+
+    fn primitive_state() -> render::wgpu::PrimitiveState {
+        render::wgpu::PrimitiveState {
+            topology: MeshTopology::TriangleList.into(),
+            polygon_mode: render::wgpu::PolygonMode::Line,
+            ..Default::default()
+        }
+    }
+
+    fn vertex() -> &'static [render::wgpu::VertexFormat] {
+        &[render::wgpu::VertexFormat::Float32x3]
+    }
+
+    fn shader() -> impl Into<AssetId<Shader>> {
+        DRAW_LIGHT_VERT
     }
 }

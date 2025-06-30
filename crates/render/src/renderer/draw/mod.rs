@@ -1,8 +1,8 @@
 use crate::{
-    Color, DepthOutput, ExtractResource, FragmentState, Frustum, Mesh, MeshLayout, PassBuilder,
-    PipelineCache, PipelineId, RenderAssets, RenderContext, RenderGraphPass, RenderMesh,
-    RenderOutput, RenderPipelineDesc, RenderResource, RenderState, RenderSurface, Shader, SubMesh,
-    VertexState,
+    CameraDepthTargets, Color, ExtractResource, FragmentState, Frustum, Mesh, MeshKey, MeshLayout,
+    PassBuilder, PipelineCache, PipelineId, RenderAssets, RenderContext, RenderGraphPass,
+    RenderMesh, RenderOutput, RenderPipelineDesc, RenderResource, RenderState, RenderSurface,
+    Shader, SubMesh, VertexState,
 };
 use asset::{AssetId, ErasedId};
 use ecs::{
@@ -29,8 +29,6 @@ pub use model::*;
 pub use view::*;
 
 pub trait Draw: Component + Clone {
-    type View: View;
-
     type Model: ModelData;
 
     type Material: Material;
@@ -53,10 +51,12 @@ pub trait Draw: Component + Clone {
         wgpu::PrimitiveState::default()
     }
 
-    fn formats() -> &'static [VertexFormat];
+    fn vertex() -> &'static [VertexFormat];
 
     fn shader() -> impl Into<AssetId<Shader>>;
 }
+
+pub type DrawView<D> = <<<D as Draw>::Material as Material>::Lighting as Lighting>::View;
 
 pub struct DrawTreeNode<D: Draw> {
     bounds: Aabb,
@@ -310,7 +310,7 @@ impl<D: Draw> DrawTree<D> {
         query: Main<
             SQuery<(
                 Entity,
-                &<D::View as View>::Transform,
+                &<DrawView<D> as View>::Transform,
                 &GlobalTransform,
                 &D,
                 Option<&DisableCulling>,
@@ -349,7 +349,7 @@ impl<D: Draw> DrawTree<D> {
 
 pub struct DrawNode<D: Draw> {
     pub entity: Entity,
-    pub local_transform: <D::View as View>::Transform,
+    pub local_transform: <DrawView<D> as View>::Transform,
     pub global_transform: GlobalTransform,
     pub bounds: Aabb,
     draw: D,
@@ -407,7 +407,7 @@ impl<D: Draw> VisibleDraws<D> {
     pub(crate) fn queue(
         visible: &mut Self,
         tree: &mut DrawTree<D>,
-        views: &ViewDataBuffer<D::View>,
+        views: &ViewDataBuffer<DrawView<D>>,
     ) {
         if D::CULL {
             for (entity, view) in views.views() {
@@ -427,12 +427,31 @@ impl<D: Draw> VisibleDraws<D> {
 }
 
 #[derive(Resource)]
-pub struct DrawPipeline<D: Draw>(PipelineId, std::marker::PhantomData<D>);
+pub struct DrawPipeline<D: Draw> {
+    id: PipelineId,
+    key: MeshKey,
+    _marker: std::marker::PhantomData<D>,
+}
+
+impl<D: Draw> DrawPipeline<D> {
+    pub fn new(id: PipelineId) -> Self {
+        Self {
+            id,
+            key: MeshKey::from(D::vertex()),
+            _marker: Default::default(),
+        }
+    }
+
+    pub fn key(&self) -> MeshKey {
+        self.key
+    }
+}
+
 impl<D: Draw> std::ops::Deref for DrawPipeline<D> {
     type Target = PipelineId;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.id
     }
 }
 
@@ -440,15 +459,25 @@ impl<D: Draw> RenderResource for DrawPipeline<D> {
     type Arg = (
         Write<PipelineCache>,
         Read<RenderSurface>,
-        Option<Read<ViewDataBuffer<D::View>>>,
+        Option<Read<ViewDataBuffer<DrawView<D>>>>,
         Option<Read<ModelDataBuffer<D::Model>>>,
         Option<Read<BatchedModelDataBuffer<D::Model>>>,
+        Option<Read<LightingData<<D::Material as Material>::Lighting>>>,
         Option<Write<MaterialLayout<D::Material>>>,
         SCommands,
     );
 
     fn extract(arg: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
-        let (cache, surface, views, model_data, batched_model_data, layout, mut commands) = arg;
+        let (
+            cache,
+            surface,
+            views,
+            model_data,
+            batched_model_data,
+            lighting_data,
+            layout,
+            mut commands,
+        ) = arg;
 
         let view_layout = match views {
             Some(views) => views.layout(),
@@ -479,23 +508,29 @@ impl<D: Draw> RenderResource for DrawPipeline<D> {
         let fragment_shader: AssetId<Shader> = D::Material::shader().into();
 
         assert!(
-            !D::formats().is_empty(),
+            !D::vertex().is_empty(),
             "Mesh pipeline must have at least one vertex format"
         );
 
         let buffers = vec![MeshLayout::into_vertex_buffer_layout(
             0,
-            D::formats(),
+            D::vertex(),
             VertexStepMode::Vertex,
         )];
 
+        let mut layout = vec![
+            view_layout.clone(),
+            model_layout.clone(),
+            material_layout.as_ref().clone(),
+        ];
+
+        if let Some(light_layout) = lighting_data.and_then(|d| d.bind_group_layout()) {
+            layout.push(light_layout.clone())
+        }
+
         let id = cache.queue_render_pipeline(RenderPipelineDesc {
             label: None,
-            layout: vec![
-                view_layout.clone(),
-                model_layout.clone(),
-                material_layout.as_ref().clone(),
-            ],
+            layout,
             vertex: VertexState {
                 shader: vertex_shader.into(),
                 entry: "main".into(),
@@ -517,7 +552,7 @@ impl<D: Draw> RenderResource for DrawPipeline<D> {
                     <D::Material as Material>::depth_write(),
                     DepthWrite::On
                 ),
-                depth_compare: wgpu::CompareFunction::Less,
+                depth_compare: wgpu::CompareFunction::Greater,
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -525,7 +560,7 @@ impl<D: Draw> RenderResource for DrawPipeline<D> {
             push_constants: vec![],
         });
 
-        Ok(Self(id, Default::default()))
+        Ok(Self::new(id))
     }
 }
 
@@ -561,7 +596,9 @@ impl<D: Draw> Clone for DrawId<D> {
     }
 }
 
-impl<V: View, D: Draw<View = V>> From<DrawId<D>> for DrawSystemId<V> {
+impl<V: View, L: Lighting<View = V>, M: Material<Lighting = L>, D: Draw<Material = M>>
+    From<DrawId<D>> for DrawSystemId<V>
+{
     fn from(value: DrawId<D>) -> Self {
         Self(value.0, Default::default())
     }
@@ -576,14 +613,17 @@ impl<V: View> From<usize> for DrawSystemId<V> {
 unsafe impl<D: Draw> SystemArg for DrawId<D> {
     type Item<'world, 'state> = Self;
 
-    type State = DrawSystemId<D::View>;
+    type State = DrawSystemId<DrawView<D>>;
 
     fn init(world: &mut ecs::World, _: &mut ecs::WorldAccess) -> Self::State {
         let mut functions = world
-            .remove_resource::<DrawSystems<D::View>>()
+            .remove_resource::<DrawSystems<DrawView<D>>>()
             .unwrap_or_default();
 
-        let id = functions.register::<D>(world, &mut ecs::WorldAccess::new());
+        let id = functions.register::<<D::Material as Material>::Lighting, D::Material, D>(
+            world,
+            &mut ecs::WorldAccess::new(),
+        );
 
         world.add_resource(functions);
 
@@ -631,11 +671,11 @@ impl<V: View, R: RenderPhase> ViewDrawCalls<V, R> {
         self.0.get(entity).map(|v| v.as_slice())
     }
 
-    pub(crate) fn queue<D: Draw<View = V>>(
+    pub(crate) fn queue<L: Lighting<View = V>, M: Material<Lighting = L>, D: Draw<Material = M>>(
         view_draws: &mut Self,
         draws: &mut DrawTree<D>,
         visible_draws: &VisibleDraws<D>,
-        view_buffer: &ViewDataBuffer<D::View>,
+        view_buffer: &ViewDataBuffer<DrawView<D>>,
         model_data: &mut ModelDataBuffer<D::Model>,
         batched_model_data: &mut BatchedModelDataBuffer<D::Model>,
         pipeline: &DrawPipeline<D>,
@@ -737,7 +777,12 @@ impl<V: View, R: RenderPhase> ViewDrawCalls<V, R> {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum DrawError {
+    InvalidMeshKey {
+        expected: MeshKey,
+        received: MeshKey,
+    },
     Skip,
 }
 
@@ -750,6 +795,20 @@ pub trait DrawCommand<V: View> {
         draw: &DrawCall<V>,
         arg: ArgItem<'w, 'w, Self::Arg>,
     ) -> Result<(), DrawError>;
+}
+
+pub struct EmptyCommand<V: View>(std::marker::PhantomData<V>);
+impl<V: View> DrawCommand<V> for EmptyCommand<V> {
+    type Arg = ();
+
+    fn execute<'w>(
+        _state: &mut RenderState<'w>,
+        _view: &RenderView<V>,
+        _draw: &DrawCall<V>,
+        _arg: ArgItem<'w, 'w, Self::Arg>,
+    ) -> Result<(), DrawError> {
+        Ok(())
+    }
 }
 
 pub struct SetPipeline<V: View>(std::marker::PhantomData<V>);
@@ -785,10 +844,10 @@ impl<V: View, const GROUP: u32> DrawCommand<V> for SetView<V, GROUP> {
     }
 }
 
-pub struct SetMesh<V: View, M: ModelData, const GROUP: u32, const BATCH: bool>(
+pub struct SetMesh<V: View, M: ModelData, const BATCH: bool, const GROUP: u32>(
     std::marker::PhantomData<(V, M)>,
 );
-impl<V: View, M: ModelData, const GROUP: u32> DrawCommand<V> for SetMesh<V, M, GROUP, true> {
+impl<V: View, M: ModelData, const GROUP: u32> DrawCommand<V> for SetMesh<V, M, true, GROUP> {
     type Arg = Read<BatchedModelDataBuffer<M>>;
 
     fn execute<'w>(
@@ -802,7 +861,7 @@ impl<V: View, M: ModelData, const GROUP: u32> DrawCommand<V> for SetMesh<V, M, G
     }
 }
 
-impl<V: View, M: ModelData, const GROUP: u32> DrawCommand<V> for SetMesh<V, M, GROUP, false> {
+impl<V: View, M: ModelData, const GROUP: u32> DrawCommand<V> for SetMesh<V, M, false, GROUP> {
     type Arg = Read<ModelDataBuffer<M>>;
 
     fn execute<'w>(
@@ -834,8 +893,51 @@ impl<V: View, M: Material, const GROUP: u32> DrawCommand<V> for SetMaterial<V, M
     }
 }
 
-pub struct DrawMesh<V: View, M: ModelData>(std::marker::PhantomData<(V, M)>);
-impl<V: View, M: ModelData> DrawCommand<V> for DrawMesh<V, M> {
+pub struct SetLighting<L: Lighting, const GROUP: u32>(std::marker::PhantomData<L>);
+impl<L: Lighting, const GROUP: u32> DrawCommand<L::View> for SetLighting<L, GROUP> {
+    type Arg = Read<LightingData<L>>;
+
+    fn execute<'w>(
+        state: &mut RenderState<'w>,
+        _: &RenderView<L::View>,
+        _: &DrawCall<L::View>,
+        lighting: ArgItem<'w, 'w, Self::Arg>,
+    ) -> Result<(), DrawError> {
+        if let Some(bind_group) = lighting.bind_group() {
+            Ok(state.set_bind_group(GROUP, bind_group, &[]))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+pub struct ValidateMeshKey<D: Draw>(std::marker::PhantomData<D>);
+impl<D: Draw> DrawCommand<DrawView<D>> for ValidateMeshKey<D> {
+    type Arg = (Read<DrawPipeline<D>>, Read<RenderAssets<RenderMesh>>);
+
+    fn execute<'w>(
+        _: &mut RenderState<'w>,
+        _: &RenderView<DrawView<D>>,
+        draw: &DrawCall<DrawView<D>>,
+        (pipeline, meshes): ArgItem<'w, 'w, Self::Arg>,
+    ) -> Result<(), DrawError> {
+        let DrawCall { key, .. } = draw;
+
+        let mesh = meshes.get(&(key.mesh).into()).ok_or(DrawError::Skip)?;
+
+        if mesh.key() != pipeline.key() {
+            Err(DrawError::InvalidMeshKey {
+                expected: pipeline.key(),
+                received: mesh.key(),
+            })
+        } else {
+            Ok(())
+        }
+    }
+}
+
+pub struct DrawModel<V: View, M: ModelData>(std::marker::PhantomData<(V, M)>);
+impl<V: View, M: ModelData> DrawCommand<V> for DrawModel<V, M> {
     type Arg = (Read<RenderAssets<RenderMesh>>, Read<RenderAssets<SubMesh>>);
 
     fn execute<'w>(
@@ -877,7 +979,7 @@ impl<V: View> Default for DrawSystems<V> {
 }
 
 impl<V: View> DrawSystems<V> {
-    pub fn register<D: Draw<View = V>>(
+    pub fn register<L: Lighting<View = V>, M: Material<Lighting = L>, D: Draw<Material = M>>(
         &mut self,
         world: &mut World,
         access: &mut WorldAccess,
@@ -888,7 +990,7 @@ impl<V: View> DrawSystems<V> {
         };
 
         let id = DrawSystemId::from(self.0.len());
-        let system = DrawSystem::<V>::new::<D>(world, access);
+        let system = DrawSystem::<V>::new::<L, M, D>(world, access);
 
         self.0.insert(ty, system);
 
@@ -897,11 +999,13 @@ impl<V: View> DrawSystems<V> {
 }
 
 type DrawFunction<D, const BATCH: bool> = (
-    SetPipeline<<D as Draw>::View>,
-    SetView<<D as Draw>::View, 0>,
-    SetMesh<<D as Draw>::View, <D as Draw>::Model, 1, BATCH>,
-    SetMaterial<<D as Draw>::View, <D as Draw>::Material, 2>,
-    DrawMesh<<D as Draw>::View, <D as Draw>::Model>,
+    ValidateMeshKey<D>,
+    SetPipeline<DrawView<D>>,
+    SetView<DrawView<D>, 0>,
+    SetMesh<DrawView<D>, <D as Draw>::Model, BATCH, 1>,
+    SetMaterial<DrawView<D>, <D as Draw>::Material, 2>,
+    SetLighting<<<D as Draw>::Material as Material>::Lighting, 3>,
+    DrawModel<DrawView<D>, <D as Draw>::Model>,
 );
 
 pub struct DrawSystem<V: View> {
@@ -918,7 +1022,10 @@ pub struct DrawSystem<V: View> {
 }
 
 impl<V: View> DrawSystem<V> {
-    fn new<D: Draw<View = V>>(world: &mut World, access: &mut WorldAccess) -> Self {
+    fn new<L: Lighting<View = V>, M: Material<Lighting = L>, D: Draw<Material = M>>(
+        world: &mut World,
+        access: &mut WorldAccess,
+    ) -> Self {
         let state = if D::BATCH {
             Box::new(<DrawFunction<D, true> as DrawCommand<V>>::Arg::init(
                 world, access,
@@ -1045,7 +1152,7 @@ impl<R: Renderer> RenderGraphPass for RendererPass<R> {
         let mut phases = RenderPhases(Vec::new());
         let data = R::setup(builder, &mut phases);
         let color = builder.write::<RenderOutput>();
-        let depth = builder.create::<DepthOutput>(());
+        let depth_targets = builder.write::<CameraDepthTargets>();
 
         phases.0.sort_by_key(|p| p.1);
 
@@ -1054,8 +1161,12 @@ impl<R: Renderer> RenderGraphPass for RendererPass<R> {
                 return;
             };
 
+            let depth_targets = ctx.get::<CameraDepthTargets>(depth_targets);
             let color = ctx.get::<RenderOutput>(color);
-            let depth = ctx.get::<DepthOutput>(depth);
+            let depth = match depth_targets.get(&camera.entity) {
+                Some(target) => target,
+                None => return,
+            };
 
             let mut encoder = ctx.encoder();
             let mut color_attachments = vec![Some(wgpu::RenderPassColorAttachment {
@@ -1071,7 +1182,7 @@ impl<R: Renderer> RenderGraphPass for RendererPass<R> {
             let depth_stencil_attachment = wgpu::RenderPassDepthStencilAttachment {
                 view: depth,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0f32),
+                    load: wgpu::LoadOp::Clear(0.0f32),
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,

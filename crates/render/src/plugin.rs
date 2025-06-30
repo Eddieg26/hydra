@@ -1,7 +1,7 @@
 use crate::{
-    CameraSubGraph, DisableCulling, Draw, DrawPipeline, DrawTree, ExtractError, GpuTexture,
-    MaterialBinding, ObjImporter, PostProcess, PreProcess, PreQueue, RenderMesh, RenderTarget,
-    Shader, SubMesh, Texture2dImporter, ViewDrawCalls, VisibleDraws,
+    CameraSubGraph, DisableCulling, Draw, DrawPipeline, DrawTree, DrawView, ExtractError,
+    GpuTexture, LightingData, MaterialBinding, ObjImporter, PostProcess, PreProcess, PreQueue,
+    RenderMesh, RenderTarget, Shader, SubMesh, Texture2dImporter, ViewDrawCalls, VisibleDraws,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     draw::{
         Renderer, RendererPass,
@@ -243,35 +243,40 @@ impl<D: Draw> Plugin for DrawPlugin<D> {
         app.add_plugins((
             RenderPlugin,
             MaterialPlugin::<D::Material>::new(),
-            ViewPlugin::<D::View>::new(),
+            ViewPlugin::<DrawView<D>>::new(),
             ModelDataPlugin::<D::Model>::new(),
         ))
         .scoped_sub_app(RenderApp, |sub_app| {
             sub_app
                 .add_resource(DrawTree::<D>::new())
                 .add_resource(VisibleDraws::<D>::new())
-                .add_resource(ViewDrawCalls::<D::View, <D::Material as Material>::Phase>::new())
+                .add_resource(ViewDrawCalls::<DrawView<D>, <D::Material as Material>::Phase>::new())
                 .add_systems(Extract, DrawTree::<D>::extract)
                 .add_systems(PreQueue, VisibleDraws::<D>::queue)
                 .add_systems(
                     Queue,
-                    ViewDrawCalls::<D::View, <D::Material as Material>::Phase>::queue::<D>
+                    ViewDrawCalls::<DrawView<D>, <D::Material as Material>::Phase>::queue::<
+                        <D::Material as Material>::Lighting,
+                        D::Material,
+                        D,
+                    >
                         .when::<Exists<DrawPipeline<D>>>(),
                 )
                 .add_systems(
                     PostRender,
-                    ViewDrawCalls::<D::View, <D::Material as Material>::Phase>::clear,
+                    ViewDrawCalls::<DrawView<D>, <D::Material as Material>::Phase>::clear,
                 );
         })
         .register::<D>()
         .register::<GlobalTransform>()
         .load_asset::<Shader>(D::shader().into())
         .load_asset::<Shader>(D::Material::shader().into())
+        .add_render_resource::<LightingData<<D::Material as Material>::Lighting>>()
         .add_render_resource::<DrawPipeline<D>>();
 
         if <D::Material as Material>::Phase::SORT {
             app.add_plugins(SortViewPhasePlugin::<
-                D::View,
+                DrawView<D>,
                 <D::Material as Material>::Phase,
             >::new());
         }

@@ -1,10 +1,11 @@
 use crate::{
+    GraphResource,
     renderer::graph::SubGraph,
     resources::RenderTexture,
     types::{Color, Viewport},
 };
 use asset::AssetId;
-use ecs::{Component, Entity, Resource, app::Main, system::unlifetime::SQuery};
+use ecs::{Component, Entity, IndexMap, Resource, app::Main, system::unlifetime::SQuery};
 use math::{Mat4, Vec3, Vec3A, Vec4, bounds::Aabb, sphere::Sphere};
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -156,13 +157,66 @@ impl<'a> IntoIterator for &'a EntityCameras {
     }
 }
 
+#[derive(Default, Resource)]
+pub struct CameraDepthTargets(IndexMap<Entity, wgpu::TextureView>);
+impl CameraDepthTargets {
+    pub fn get(&self, entity: &Entity) -> Option<&wgpu::TextureView> {
+        self.0.get(entity)
+    }
+}
+
+impl GraphResource for CameraDepthTargets {
+    type Desc = ();
+
+    const NAME: super::Name = "CameraDepthTargets";
+
+    fn create(
+        name: super::Name,
+        world: &ecs::World,
+        device: &crate::RenderDevice,
+        surface: &crate::RenderSurface,
+        _: &Self::Desc,
+    ) -> Self {
+        let mut targets = CameraDepthTargets::default();
+        let cameras = world.resource::<EntityCameras>();
+        for camera in cameras {
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(name),
+                size: wgpu::Extent3d {
+                    width: surface.width(),
+                    height: surface.height(),
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: surface.depth_format(),
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+
+            let view = texture.create_view(&Default::default());
+            targets.0.insert(camera.entity, view);
+        }
+
+        targets
+    }
+}
+
 pub struct CameraSubGraph;
 
 impl SubGraph for CameraSubGraph {
     const NAME: super::graph::Name = "CameraSubGraph";
 
+    fn setup(builder: &mut super::PassBuilder) {
+        builder.create::<CameraDepthTargets>(());
+    }
+
     fn run(ctx: &mut super::graph::RenderContext) {
-        for camera in ctx.world().resource::<EntityCameras>().into_iter().cloned() {
+        let cameras = ctx.world().resource::<EntityCameras>();
+        for camera in cameras.into_iter().cloned() {
             ctx.set_camera(camera);
             ctx.run_sub_graph(Self::NAME);
         }

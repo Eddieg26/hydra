@@ -11,7 +11,11 @@ use ecs::{
 };
 use math::bounds::Aabb;
 use smol::io::AsyncAsSync;
-use std::{borrow::Cow, hash::Hash, ops::Range};
+use std::{
+    borrow::Cow,
+    hash::{DefaultHasher, Hash, Hasher},
+    ops::Range,
+};
 use thiserror::Error;
 use waker_fn::waker_fn;
 use wgpu::{BufferUsages, VertexStepMode};
@@ -268,6 +272,11 @@ impl Mesh {
         self
     }
 
+    pub fn with_indices(mut self, indices: Indices) -> Self {
+        self.set_indices(indices);
+        self
+    }
+
     pub fn with_read_write(mut self, read_write: ReadWrite) -> Self {
         self.read_write = read_write;
         self
@@ -325,7 +334,7 @@ impl Mesh {
         self.read_write
     }
 
-    pub fn add_attribute(&mut self, attribute: MeshAttribute) {
+    pub fn add_attribute(&mut self, attribute: MeshAttribute) -> &mut Self {
         let ty = attribute.ty;
         match self.attribute_index(ty) {
             Some(i) => self.attributes[i] = attribute,
@@ -333,6 +342,8 @@ impl Mesh {
         }
 
         self.attribute_dirty(ty);
+
+        self
     }
 
     pub fn remove_attribute(&mut self, ty: MeshAttributeType) -> Option<MeshAttribute> {
@@ -502,7 +513,13 @@ impl Mesh {
             buffer
         });
 
+        let layout = MeshLayout::from(layout);
+        let key = MeshKey::from(&layout);
+
+        self.calculate_bounds();
+
         RenderMesh {
+            key,
             layout: layout.into(),
             vertex_buffer,
             index_buffer,
@@ -581,7 +598,15 @@ impl Mesh {
             let b = positions[chunk[1] as usize];
             let c = positions[chunk[2] as usize];
 
-            let normal = (b - a).cross(c - a).normalize();
+            let edge1 = b - a;
+            let edge2 = c - a;
+            let cross = edge1.cross(edge2);
+
+            if cross.length_squared() < 1e-6 {
+                continue; // Skip degenerate
+            }
+
+            let normal = cross.normalize();
 
             normals[chunk[0] as usize] += normal;
             normals[chunk[1] as usize] += normal;
@@ -697,6 +722,30 @@ impl MeshAttributeLayout {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeshLayout(Box<[MeshAttributeLayout]>);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MeshKey(u64);
+impl From<&MeshLayout> for MeshKey {
+    fn from(value: &MeshLayout) -> Self {
+        let mut hasher = DefaultHasher::new();
+        for attribute in &value.0 {
+            attribute.format.hash(&mut hasher);
+        }
+
+        Self(hasher.finish())
+    }
+}
+
+impl<'a, I: IntoIterator<Item = &'a wgpu::VertexFormat>> From<I> for MeshKey {
+    fn from(value: I) -> Self {
+        let mut hasher = DefaultHasher::new();
+        for format in value {
+            format.hash(&mut hasher);
+        }
+
+        Self(hasher.finish())
+    }
+}
+
 impl MeshLayout {
     pub fn into_vertex_buffer_layout<'a>(
         start_location: u32,
@@ -769,6 +818,7 @@ impl<'a> IntoIterator for &'a MeshLayout {
 }
 
 pub struct RenderMesh {
+    key: MeshKey,
     layout: MeshLayout,
     vertex_buffer: VertexBuffer,
     index_buffer: Option<IndexBuffer>,
@@ -776,6 +826,10 @@ pub struct RenderMesh {
 }
 
 impl RenderMesh {
+    pub fn key(&self) -> MeshKey {
+        self.key
+    }
+
     pub fn layout(&self) -> &MeshLayout {
         &self.layout
     }
@@ -821,9 +875,21 @@ impl RenderAsset for RenderMesh {
     }
 }
 
-#[derive(Default, Settings, serde::Serialize, serde::Deserialize)]
+#[derive(Settings, serde::Serialize, serde::Deserialize)]
 pub struct ObjImportSettings {
-    read_write: ReadWrite,
+    pub read_write: ReadWrite,
+    pub import_normals: bool,
+    pub wireframe: bool,
+}
+
+impl Default for ObjImportSettings {
+    fn default() -> Self {
+        Self {
+            read_write: ReadWrite::Disabled,
+            import_normals: true,
+            wireframe: false,
+        }
+    }
 }
 
 pub struct ObjImporter;
@@ -897,7 +963,17 @@ impl AssetImporter for ObjImporter {
             }
         }
 
-        let mut mesh = Mesh::new(MeshTopology::TriangleList);
+        if metadata.import_normals && normals.is_empty() && !positions.is_empty() {
+            normals = Mesh::calculate_normals(&positions, &indices);
+        }
+
+        let topology = if metadata.wireframe {
+            MeshTopology::LineList
+        } else {
+            MeshTopology::TriangleList
+        };
+
+        let mut mesh = Mesh::new(topology);
         if !positions.is_empty() {
             mesh.add_attribute(MeshAttribute {
                 ty: MeshAttributeType::Position,
@@ -905,18 +981,20 @@ impl AssetImporter for ObjImporter {
             });
         }
 
-        if !tex_coords.is_empty() {
-            mesh.add_attribute(MeshAttribute {
-                ty: MeshAttributeType::TexCoord0,
-                values: MeshAttributeValues::Vec2(tex_coords),
-            });
-        }
+        if !metadata.wireframe {
+            if !tex_coords.is_empty() {
+                mesh.add_attribute(MeshAttribute {
+                    ty: MeshAttributeType::TexCoord0,
+                    values: MeshAttributeValues::Vec2(tex_coords),
+                });
+            }
 
-        if !normals.is_empty() {
-            mesh.add_attribute(MeshAttribute {
-                ty: MeshAttributeType::Normal,
-                values: MeshAttributeValues::Vec3(normals),
-            });
+            if !normals.is_empty() {
+                mesh.add_attribute(MeshAttribute {
+                    ty: MeshAttributeType::Normal,
+                    values: MeshAttributeValues::Vec3(normals),
+                });
+            }
         }
 
         if !indices.is_empty() {
@@ -951,11 +1029,11 @@ impl AssetProcessor for Mesh {
     async fn process(
         _: &mut asset::processor::ProcessContext<'_>,
         mut asset: <Self::Input as AssetImporter>::Asset,
-        _: &asset::AssetMetadata<<Self::Input as AssetImporter>::Settings>,
+        metadata: &asset::AssetMetadata<<Self::Input as AssetImporter>::Settings>,
     ) -> Result<Self::Output, Self::Error> {
         let Some(mut positions) = asset
-            .attribute_mut(MeshAttributeType::Position)
-            .and_then(|a| match a.values.clone() {
+            .remove_attribute(MeshAttributeType::Position)
+            .and_then(|a| match a.values {
                 MeshAttributeValues::Vec3(v) => Some(v),
                 _ => None,
             })
@@ -977,55 +1055,59 @@ impl AssetProcessor for Mesh {
             }
         };
 
-        let mut attributes = Vec::new();
+        if !metadata.wireframe {
+            let mut attributes = Vec::new();
 
-        if !asset.has_attribute(MeshAttributeType::Normal) {
-            let indices = bytemuck::cast_slice(indices.data());
-            let normals = MeshAttribute {
-                ty: MeshAttributeType::Normal,
-                values: MeshAttributeValues::Vec3(Mesh::calculate_normals(&positions, indices)),
-            };
+            if !asset.has_attribute(MeshAttributeType::Normal) {
+                let indices = bytemuck::cast_slice(indices.data());
+                let normals = MeshAttribute {
+                    ty: MeshAttributeType::Normal,
+                    values: MeshAttributeValues::Vec3(Mesh::calculate_normals(&positions, indices)),
+                };
 
-            attributes.push(normals);
-        }
+                attributes.push(normals);
+            }
 
-        if !asset.has_attribute(MeshAttributeType::TexCoord0)
-            && !asset.has_attribute(MeshAttributeType::TexCoord1)
-        {
-            let indices = bytemuck::cast_slice(indices.data());
-            let tex_coords = MeshAttribute {
-                ty: MeshAttributeType::TexCoord0,
-                values: MeshAttributeValues::Vec2(Mesh::calculate_tex_coords(&positions, indices)),
-            };
+            if !asset.has_attribute(MeshAttributeType::TexCoord0)
+                && !asset.has_attribute(MeshAttributeType::TexCoord1)
+            {
+                let indices = bytemuck::cast_slice(indices.data());
+                let tex_coords = MeshAttribute {
+                    ty: MeshAttributeType::TexCoord0,
+                    values: MeshAttributeValues::Vec2(Mesh::calculate_tex_coords(
+                        &positions, indices,
+                    )),
+                };
 
-            attributes.push(tex_coords);
-        }
+                attributes.push(tex_coords);
+            }
 
-        if !asset.has_attribute(MeshAttributeType::Tangent) {
-            let tex_coords = asset
-                .attribute(MeshAttributeType::TexCoord0)
-                .or(asset.attribute(MeshAttributeType::TexCoord1))
-                .and_then(|a| match &a.values {
-                    MeshAttributeValues::Vec2(v) => Some(Cow::Borrowed(v)),
-                    _ => None,
-                })
-                .expect("Mesh must have texture coordinates to calculate tangents");
+            if !asset.has_attribute(MeshAttributeType::Tangent) {
+                let tex_coords = asset
+                    .attribute(MeshAttributeType::TexCoord0)
+                    .or(asset.attribute(MeshAttributeType::TexCoord1))
+                    .and_then(|a| match &a.values {
+                        MeshAttributeValues::Vec2(v) => Some(Cow::Borrowed(v)),
+                        _ => None,
+                    })
+                    .expect("Mesh must have texture coordinates to calculate tangents");
 
-            let indices = bytemuck::cast_slice(indices.data());
-            let tangents = MeshAttribute {
-                ty: MeshAttributeType::Tangent,
-                values: MeshAttributeValues::Vec4(Mesh::calculate_tangents(
-                    &positions,
-                    &tex_coords,
-                    indices,
-                )),
-            };
+                let indices = bytemuck::cast_slice(indices.data());
+                let tangents = MeshAttribute {
+                    ty: MeshAttributeType::Tangent,
+                    values: MeshAttributeValues::Vec4(Mesh::calculate_tangents(
+                        &positions,
+                        &tex_coords,
+                        indices,
+                    )),
+                };
 
-            attributes.push(tangents);
-        }
+                attributes.push(tangents);
+            }
 
-        for attribute in attributes {
-            asset.add_attribute(attribute);
+            for attribute in attributes {
+                asset.add_attribute(attribute);
+            }
         }
 
         asset.add_attribute(MeshAttribute {

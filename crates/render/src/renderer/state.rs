@@ -75,7 +75,6 @@ impl<'a> RenderState<'a> {
 
     pub fn set_pipeline(&mut self, pipeline: &RenderPipeline) {
         if self.pipeline.as_ref() != Some(&pipeline.id()) {
-            self.clear();
             self.pass.set_pipeline(pipeline);
             self.pipeline = Some(pipeline.id());
         }

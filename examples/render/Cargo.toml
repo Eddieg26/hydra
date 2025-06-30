@@ -10,4 +10,5 @@ math = { path = "../../crates/math" }
 transform = { path = "../../crates/transform" }
 render = { path = "../../crates/render" }
 window = { path = "../../crates/window" }
-uuid = { workspace = true, features = ["v4"]}
+uuid = { workspace = true, features = ["v4"] }
+bytemuck = { workspace = true }

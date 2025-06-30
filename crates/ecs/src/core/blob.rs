@@ -63,7 +63,7 @@ impl Blob {
         assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
 
         let offset = index * self.meta.layout.size();
-        if self.data.is_empty() || offset > self.data.len() - self.meta.layout.size() {
+        if offset > self.data.len() - self.meta.layout.size() {
             return None;
         }
 
@@ -74,7 +74,7 @@ impl Blob {
         assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
 
         let offset = index * self.meta.layout.size();
-        if self.data.is_empty() || offset > self.data.len() - self.meta.layout.size() {
+        if offset > self.data.len() - self.meta.layout.size() {
             return None;
         }
 
@@ -156,7 +156,7 @@ impl Blob {
         assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
 
         let offset = index * self.meta.layout.size();
-        if self.data.is_empty() || offset > self.data.len() - self.meta.layout.size() {
+        if offset > self.data.len() - self.meta.layout.size() {
             panic!("Index out of bounds: {}", index);
         }
 
@@ -196,14 +196,14 @@ impl Blob {
     }
 
     pub unsafe fn append_raw(&mut self, value: Vec<u8>) {
-        assert!(value.len() % self.meta.layout.size() == 0);
+        assert!(self.meta.layout.size() == 0 || value.len() % self.meta.layout.size() == 0);
 
         self.data.extend(value);
     }
 
     pub unsafe fn insert_raw(&mut self, index: usize, value: Vec<u8>) {
         let offset = index * self.meta.layout.size();
-        if self.data.is_empty() || offset > self.data.len() - self.meta.layout.size() {
+        if offset > self.data.len() - self.meta.layout.size() {
             panic!("Index out of bounds: {}", index);
         }
         self.data.resize(self.data.len() + value.len(), 0);
@@ -219,7 +219,7 @@ impl Blob {
 
     pub unsafe fn remove_raw(&mut self, index: usize) -> Vec<u8> {
         let offset = index * self.meta.layout.size();
-        if self.data.is_empty() || offset > self.data.len() - self.meta.layout.size() {
+        if offset > self.data.len() - self.meta.layout.size() {
             panic!("Index out of bounds: {}", index);
         }
 
@@ -230,7 +230,7 @@ impl Blob {
 
     pub unsafe fn swap_remove_raw(&mut self, index: usize) -> Vec<u8> {
         let offset = index * self.meta.layout.size();
-        if self.data.is_empty() || offset > self.data.len() - self.meta.layout.size() {
+        if offset > self.data.len() - self.meta.layout.size() {
             panic!("Index out of bounds: {}", index);
         }
 
@@ -255,7 +255,7 @@ impl Blob {
 
     pub unsafe fn replace_raw(&mut self, index: usize, data: Vec<u8>) -> Vec<u8> {
         let offset = index * self.meta.layout.size();
-        if self.data.is_empty() || offset > self.data.len() - self.meta.layout.size() {
+        if offset > self.data.len() - self.meta.layout.size() {
             panic!("Index out of bounds: {}", index);
         }
 

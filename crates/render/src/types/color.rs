@@ -1,6 +1,10 @@
+use bytemuck::{Pod, Zeroable};
 use encase::ShaderType;
+use math::{Vec3, Vec4};
 
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, ShaderType)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Pod, Zeroable, serde::Serialize, serde::Deserialize, ShaderType,
+)]
 #[repr(C)]
 pub struct Color {
     pub r: f32,
@@ -88,5 +92,29 @@ impl From<(f32, f32, f32, f32)> for Color {
 impl From<Color> for (f32, f32, f32, f32) {
     fn from(color: Color) -> (f32, f32, f32, f32) {
         (color.r, color.g, color.b, color.a)
+    }
+}
+
+impl Into<Vec3> for Color {
+    fn into(self) -> Vec3 {
+        Vec3::new(self.r, self.g, self.b)
+    }
+}
+
+impl From<Vec3> for Color {
+    fn from(vec: Vec3) -> Self {
+        Self::new(vec.x, vec.y, vec.z, 1.0)
+    }
+}
+
+impl Into<Vec4> for Color {
+    fn into(self) -> Vec4 {
+        Vec4::new(self.r, self.g, self.b, self.a)
+    }
+}
+
+impl From<Vec4> for Color {
+    fn from(vec: Vec4) -> Self {
+        Self::new(vec.x, vec.y, vec.z, vec.w)
     }
 }
