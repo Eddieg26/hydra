@@ -154,6 +154,7 @@ impl<N> IndexDag<N> {
         }
     }
 
+
     pub fn into_values(self) -> DagValues<N> {
         DagValues {
             nodes: self.nodes,
@@ -161,6 +162,16 @@ impl<N> IndexDag<N> {
             dependencies: self.dependencies,
             topology: self.topology,
         }
+    }
+}
+
+impl<N: Eq> IndexDag<N> {
+    pub fn contains(&self, value: &N) -> bool {
+        self.nodes.contains(value)
+    }
+
+    pub fn get_index_of(&self, value: &N) -> Option<usize> {
+        self.nodes.iter().position(|v| value == v)
     }
 }
 
