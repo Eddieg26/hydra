@@ -1,12 +1,13 @@
 use crate::{
-    GraphResource,
+    RenderDevice, RenderSurface,
     renderer::graph::SubGraph,
     resources::RenderTexture,
     types::{Color, Viewport},
 };
 use asset::AssetId;
-use ecs::{Component, Entity, IndexMap, Resource, app::Main, system::unlifetime::SQuery};
-use math::{Mat4, Vec3, Vec3A, Vec4, bounds::Aabb, sphere::Sphere};
+use ecs::{Component, Entity, Resource, app::Main, system::unlifetime::SQuery};
+use math::{Mat4, Size, Vec3, Vec3A, Vec4, bounds::Aabb, sphere::Sphere};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Projection {
@@ -130,6 +131,12 @@ pub struct EntityCameras {
     cameras: Vec<EntityCamera>,
 }
 
+impl AsRef<Vec<EntityCamera>> for EntityCameras {
+    fn as_ref(&self) -> &Vec<EntityCamera> {
+        &self.cameras
+    }
+}
+
 impl EntityCameras {
     pub(crate) fn extract(
         cameras: Main<SQuery<(Entity, &Camera)>>,
@@ -158,50 +165,55 @@ impl<'a> IntoIterator for &'a EntityCameras {
 }
 
 #[derive(Default, Resource)]
-pub struct CameraDepthTargets(IndexMap<Entity, wgpu::TextureView>);
-impl CameraDepthTargets {
-    pub fn get(&self, entity: &Entity) -> Option<&wgpu::TextureView> {
-        self.0.get(entity)
-    }
+pub struct CameraDepthTargets {
+    targets: HashMap<Entity, wgpu::TextureView>,
+    size: Size<u32>,
 }
 
-impl GraphResource for CameraDepthTargets {
-    type Desc = ();
+impl CameraDepthTargets {
+    pub fn get(&self, entity: &Entity) -> Option<&wgpu::TextureView> {
+        self.targets.get(entity)
+    }
 
-    const NAME: super::Name = "CameraDepthTargets";
+    pub fn contains(&self, entity: &Entity) -> bool {
+        self.targets.contains_key(entity)
+    }
 
-    fn create(
-        name: super::Name,
-        world: &ecs::World,
-        device: &crate::RenderDevice,
-        surface: &crate::RenderSurface,
-        _: &Self::Desc,
-    ) -> Self {
-        let mut targets = CameraDepthTargets::default();
-        let cameras = world.resource::<EntityCameras>();
+    pub(crate) fn queue(
+        targets: &mut Self,
+        cameras: &EntityCameras,
+        device: &RenderDevice,
+        surface: &RenderSurface,
+    ) {
+        targets
+            .targets
+            .retain(|e, _| cameras.into_iter().all(|c| &c.entity != e));
+
         for camera in cameras {
-            let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some(name),
-                size: wgpu::Extent3d {
-                    width: surface.width(),
-                    height: surface.height(),
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: surface.depth_format(),
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::COPY_SRC
-                    | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
+            if !targets.contains(&camera.entity) || targets.size != surface.size() {
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    size: wgpu::Extent3d {
+                        width: surface.width(),
+                        height: surface.height(),
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: surface.depth_format(),
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::COPY_SRC
+                        | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
 
-            let view = texture.create_view(&Default::default());
-            targets.0.insert(camera.entity, view);
+                let view = texture.create_view(&Default::default());
+                targets.targets.insert(camera.entity, view);
+            }
         }
 
-        targets
+        targets.size = surface.size();
     }
 }
 
@@ -209,10 +221,6 @@ pub struct CameraSubGraph;
 
 impl SubGraph for CameraSubGraph {
     const NAME: super::graph::Name = "CameraSubGraph";
-
-    fn setup(builder: &mut super::PassBuilder) {
-        builder.create::<CameraDepthTargets>(());
-    }
 
     fn run(ctx: &mut super::graph::RenderContext) {
         let cameras = ctx.world().resource::<EntityCameras>();

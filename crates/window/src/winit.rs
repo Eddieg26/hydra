@@ -3,5 +3,5 @@ pub use winit::{
     event::{AxisId, DeviceId, ElementState, Force, Modifiers, MouseButton, TouchPhase},
     keyboard::{KeyLocation, SmolStr},
     keyboard::{ModifiersKeyState, ModifiersState},
-    window::WindowId,
+    window::{WindowId, Window},
 };

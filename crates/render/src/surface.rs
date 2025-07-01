@@ -1,6 +1,6 @@
 use crate::device::RenderDevice;
 use ecs::{Commands, Resource, app::Main, commands::AddResource};
-use std::sync::Arc;
+use math::Size;
 use wgpu::{PresentMode, SurfaceConfiguration, SurfaceTargetUnsafe, rwh::HandleError};
 use window::{Window, app::WindowCommandsExt};
 
@@ -8,6 +8,7 @@ use window::{Window, app::WindowCommandsExt};
 pub enum RenderSurfaceError {
     Create(wgpu::CreateSurfaceError),
     Adapter(wgpu::RequestAdapterError),
+    Device(wgpu::RequestDeviceError),
     Handle(HandleError),
 }
 
@@ -22,6 +23,7 @@ impl std::fmt::Display for RenderSurfaceError {
         match self {
             Self::Create(e) => write!(f, "Failed to create surface: {}", e),
             Self::Adapter(e) => write!(f, "Failed to request adapter: {}", e),
+            Self::Device(e) => write!(f, "Failed to request device: {}", e),
             Self::Handle(e) => write!(f, "{}", e),
         }
     }
@@ -38,7 +40,7 @@ impl std::error::Error for RenderSurfaceError {}
 #[derive(Resource)]
 pub struct RenderSurface {
     window: Window,
-    surface: Arc<wgpu::Surface<'static>>,
+    surface: wgpu::Surface<'static>,
     config: SurfaceConfiguration,
     depth_format: wgpu::TextureFormat,
 }
@@ -47,8 +49,14 @@ impl RenderSurface {
     pub const DEFAULT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-    pub async fn new(window: Window) -> Result<(Self, wgpu::Adapter), RenderSurfaceError> {
+    pub async fn new(window: &Window) -> Result<(Self, wgpu::Adapter), RenderSurfaceError> {
         let instance = wgpu::Instance::default();
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions::default())
+            .await
+            .unwrap();
+
+        let size = window.size();
 
         let surface = unsafe {
             let target = SurfaceTargetUnsafe::from_window(window.inner())
@@ -58,35 +66,14 @@ impl RenderSurface {
                 .create_surface_unsafe(target)
                 .map_err(|e| RenderSurfaceError::from(e))?
         };
-
-        let size = window.size();
-
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: Some(&surface),
-                ..Default::default()
-            })
-            .await
-            .map_err(RenderSurfaceError::Adapter)?;
-
         let capabilities = surface.get_capabilities(&adapter);
-
-        let format = *capabilities
-            .formats
-            .iter()
-            .find(|format| **format == Self::DEFAULT_FORMAT)
-            .unwrap_or(capabilities.formats.get(0).expect("No supported formats"));
-
-        let depth_format = Self::DEPTH_FORMAT;
-
+        let format = capabilities.formats[0];
         let present_mode = match capabilities.present_modes.contains(&PresentMode::Mailbox) {
             true => PresentMode::Mailbox,
             false => PresentMode::Fifo,
         };
-
         let config = wgpu::SurfaceConfiguration {
-            usage: capabilities.usages - wgpu::TextureUsages::STORAGE_BINDING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width: size.width,
             height: size.height,
@@ -97,13 +84,69 @@ impl RenderSurface {
         };
 
         let surface = Self {
-            window,
-            surface: Arc::new(surface),
+            window: window.clone(),
+            surface,
             config,
-            depth_format,
+            depth_format: Self::DEPTH_FORMAT,
         };
 
         Ok((surface, adapter))
+        // let instance = wgpu::Instance::default();
+
+        // let surface = unsafe {
+        //     let target = SurfaceTargetUnsafe::from_window(window.inner())
+        //         .map_err(|e| RenderSurfaceError::from(e))?;
+
+        //     instance
+        //         .create_surface_unsafe(target)
+        //         .map_err(|e| RenderSurfaceError::from(e))?
+        // };
+
+        // let size = window.size();
+
+        // let adapter = instance
+        //     .request_adapter(&wgpu::RequestAdapterOptions {
+        //         power_preference: wgpu::PowerPreference::HighPerformance,
+        //         compatible_surface: Some(&surface),
+        //         ..Default::default()
+        //     })
+        //     .await
+        //     .map_err(RenderSurfaceError::Adapter)?;
+
+        // let capabilities = surface.get_capabilities(&adapter);
+
+        // let format = *capabilities
+        //     .formats
+        //     .iter()
+        //     .find(|format| **format == Self::DEFAULT_FORMAT)
+        //     .unwrap_or(capabilities.formats.get(0).expect("No supported formats"));
+
+        // let depth_format = Self::DEPTH_FORMAT;
+
+        // let present_mode = match capabilities.present_modes.contains(&PresentMode::Mailbox) {
+        //     true => PresentMode::Mailbox,
+        //     false => PresentMode::Fifo,
+        // };
+
+        // let config = wgpu::SurfaceConfiguration {
+        //     usage: capabilities.usages - wgpu::TextureUsages::STORAGE_BINDING,
+        //     format,
+        //     width: size.width,
+        //     height: size.height,
+        //     present_mode,
+        //     alpha_mode: wgpu::CompositeAlphaMode::Auto,
+        //     view_formats: vec![format.add_srgb_suffix()],
+        //     desired_maximum_frame_latency: 2,
+        // };
+
+        // let surface = Self {
+        //     window,
+        //     surface: Arc::new(surface),
+        //     config,
+        //     depth_format,
+        // };
+
+        // Ok((surface, adapter))
     }
 
     pub fn surface(&self) -> &wgpu::Surface<'static> {
@@ -112,6 +155,13 @@ impl RenderSurface {
 
     pub fn window(&self) -> &Window {
         &self.window
+    }
+
+    pub fn size(&self) -> Size<u32> {
+        Size {
+            width: self.config.width,
+            height: self.config.height,
+        }
     }
 
     pub fn width(&self) -> u32 {
@@ -153,20 +203,29 @@ impl RenderSurface {
         mut commands: Commands,
         mut main_commands: Main<Commands>,
     ) {
-        let (surface, adapter) = match smol::block_on(RenderSurface::new(window.clone())) {
-            Ok(result) => result,
-            Err(error) => return main_commands.exit_error(error),
+        let f = async {
+            let (surface, adapter) = match RenderSurface::new(&window).await {
+                Ok(value) => value,
+                Err(error) => return Err(error),
+            };
+
+            let device = match RenderDevice::new(&adapter).await {
+                Ok(device) => device,
+                Err(error) => return Err(RenderSurfaceError::Device(error)),
+            };
+
+            surface.configure(&device);
+
+            Ok((surface, device))
         };
 
-        let device = match smol::block_on(RenderDevice::new(&adapter)) {
-            Ok(device) => device,
-            Err(error) => return main_commands.exit_error(error),
+        match smol::block_on(f) {
+            Ok((surface, device)) => {
+                commands.add(AddResource::from(surface));
+                commands.add(AddResource::from(device));
+            }
+            Err(error) => main_commands.exit_error(error),
         };
-
-        surface.configure(&device);
-
-        commands.add(AddResource::from(surface));
-        commands.add(AddResource::from(device));
     }
 
     pub(crate) fn resize_surface(
@@ -199,11 +258,8 @@ impl RenderSurface {
         };
     }
 
-    pub(crate) fn present_surface(
-        surface: &RenderSurface,
-        surface_texture: &mut RenderSurfaceTexture,
-    ) {
-        surface_texture.present(&surface.window);
+    pub(crate) fn present_surface(surface_texture: &mut RenderSurfaceTexture) {
+        surface_texture.present();
     }
 }
 
@@ -223,9 +279,8 @@ impl RenderSurfaceTexture {
         self.0.as_ref()
     }
 
-    fn present(&mut self, window: &Window) {
+    fn present(&mut self) {
         if let Some(surface) = self.0.take() {
-            window.inner().pre_present_notify();
             surface.present();
         }
     }

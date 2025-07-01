@@ -1152,7 +1152,6 @@ impl<R: Renderer> RenderGraphPass for RendererPass<R> {
         let mut phases = RenderPhases(Vec::new());
         let data = R::setup(builder, &mut phases);
         let color = builder.write::<RenderOutput>();
-        let depth_targets = builder.write::<CameraDepthTargets>();
 
         phases.0.sort_by_key(|p| p.1);
 
@@ -1161,7 +1160,7 @@ impl<R: Renderer> RenderGraphPass for RendererPass<R> {
                 return;
             };
 
-            let depth_targets = ctx.get::<CameraDepthTargets>(depth_targets);
+            let depth_targets = ctx.world().resource::<CameraDepthTargets>();
             let color = ctx.get::<RenderOutput>(color);
             let depth = match depth_targets.get(&camera.entity) {
                 Some(target) => target,

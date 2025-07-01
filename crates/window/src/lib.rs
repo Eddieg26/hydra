@@ -6,4 +6,3 @@ pub mod window;
 pub mod winit;
 
 pub use window::*;
-pub use winit::*;

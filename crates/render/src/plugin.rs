@@ -1,7 +1,8 @@
 use crate::{
-    CameraSubGraph, DisableCulling, Draw, DrawPipeline, DrawTree, DrawView, ExtractError,
-    GpuTexture, LightingData, MaterialBinding, ObjImporter, PostProcess, PreProcess, PreQueue,
-    RenderMesh, RenderTarget, Shader, SubMesh, Texture2dImporter, ViewDrawCalls, VisibleDraws,
+    CameraDepthTargets, CameraSubGraph, DisableCulling, Draw, DrawPipeline, DrawTree, DrawView,
+    ExtractError, GpuTexture, LightingData, MaterialBinding, ObjImporter, PostProcess, PreProcess,
+    PreQueue, RenderMesh, RenderTarget, Shader, SubMesh, Texture2dImporter, ViewDrawCalls,
+    VisibleDraws,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     draw::{
         Renderer, RendererPass,
@@ -44,17 +45,14 @@ impl Plugin for RenderPlugin {
             .add_systems(Queue, RenderSurface::queue_surface)
             .add_systems(Render, RenderGraph::run_graph)
             .add_systems(Present, RenderSurface::present_surface)
-            .add_systems(Extract, EntityCameras::extract)
             .add_resource(RenderGraph::new())
             .add_resource(RenderSurfaceTexture::new())
-            .add_resource(EntityCameras::default())
             .add_resource(AssetExtractors::default())
             .add_resource(ResourceExtractors::default())
             .add_resource(PipelineCache::default())
             .register_event::<ExtractError>();
 
-        app.register::<Camera>()
-            .add_render_resource::<Fallbacks>()
+        app.add_render_resource::<Fallbacks>()
             .add_render_asset::<RenderMesh>()
             .add_render_asset::<GpuTexture>()
             .add_render_asset::<RenderTarget>()
@@ -135,7 +133,7 @@ impl RenderAppExt for AppBuilder {
                 .add_sub_graph_pass::<CameraSubGraph, RendererPass<R>>(RendererPass::default());
         });
 
-        self
+        self.add_plugins(CameraPlugin)
     }
 
     fn add_render_asset<R: RenderAsset>(&mut self) -> &mut Self {
@@ -159,6 +157,20 @@ impl RenderAppExt for AppBuilder {
             .add::<R>();
         self.register_event::<ExtractError<R>>();
         self
+    }
+}
+
+pub struct CameraPlugin;
+impl Plugin for CameraPlugin {
+    fn setup(&mut self, app: &mut AppBuilder) {
+        app.add_plugins(RenderPlugin)
+            .register::<Camera>()
+            .sub_app_mut(RenderApp)
+            .unwrap()
+            .add_resource(EntityCameras::default())
+            .add_resource(CameraDepthTargets::default())
+            .add_systems(Extract, EntityCameras::extract)
+            .add_systems(Queue, CameraDepthTargets::queue);
     }
 }
 
@@ -187,6 +199,7 @@ impl<V: View> ViewPlugin<V> {
 
 impl<V: View> Plugin for ViewPlugin<V> {
     fn setup(&mut self, app: &mut AppBuilder) {
+        app.add_plugins(CameraPlugin);
         app.scoped_sub_app(RenderApp, |render_app| {
             render_app
                 .add_systems(
@@ -234,7 +247,8 @@ impl<V: View, R: RenderPhase> SortViewPhasePlugin<V, R> {
 }
 impl<V: View, R: RenderPhase> Plugin for SortViewPhasePlugin<V, R> {
     fn setup(&mut self, app: &mut AppBuilder) {
-        app.add_systems(PreRender, ViewDrawCalls::<V, R>::sort);
+        app.add_plugins(ViewPlugin::<V>::new())
+            .add_systems(PreRender, ViewDrawCalls::<V, R>::sort);
     }
 }
 
@@ -242,6 +256,7 @@ impl<D: Draw> Plugin for DrawPlugin<D> {
     fn setup(&mut self, app: &mut AppBuilder) {
         app.add_plugins((
             RenderPlugin,
+            CameraPlugin,
             MaterialPlugin::<D::Material>::new(),
             ViewPlugin::<DrawView<D>>::new(),
             ModelDataPlugin::<D::Model>::new(),

@@ -64,132 +64,132 @@ const QUAD_TEX_COORDS: &[math::Vec2] = &[
 ];
 
 fn main() {
-    // App::new().add_plugins(WindowPlugin).run();
+    App::new().add_plugins(RenderPlugin).run();
 
-    let fs = EmbeddedFs::new();
-    embed_asset!(fs, VERT_ID, "vert.wgsl", DefaultSettings::default());
-    embed_asset!(fs, VERT_ID_2, "vert2.wgsl", DefaultSettings::default());
-    embed_asset!(fs, FRAG_ID, "frag.wgsl", DefaultSettings::default());
-    embed_asset!(fs, FRAG_ID_2, "frag2.wgsl", DefaultSettings::default());
-    embed_asset!(
-        fs,
-        FRAG_ID_3,
-        "forward-lighting.wgsl",
-        DefaultSettings::default()
-    );
-    embed_asset!(
-        fs,
-        DRAW_LIGHT_FRAG,
-        "draw-light.frag.wgsl",
-        DefaultSettings::default()
-    );
-    embed_asset!(
-        fs,
-        DRAW_LIGHT_VERT,
-        "draw-light.vert.wgsl",
-        DefaultSettings::default()
-    );
-    embed_asset!(fs, CUBE_ID, "cube.obj", ObjImportSettings::default());
-    embed_asset!(
-        fs,
-        WIRE_SPHERE_ID,
-        "sphere.obj",
-        ObjImportSettings {
-            wireframe: true,
-            ..Default::default()
-        }
-    );
-    embed_asset!(fs, SWORD_ID, "sword.obj", ObjImportSettings::default());
-    embed_asset!(fs, PLANE_ID, "plane.obj", ObjImportSettings::default());
-    embed_asset!(fs, GENGAR_ID, "gengar.png", Texture2dSettings::default());
+    // let fs = EmbeddedFs::new();
+    // embed_asset!(fs, VERT_ID, "vert.wgsl", DefaultSettings::default());
+    // embed_asset!(fs, VERT_ID_2, "vert2.wgsl", DefaultSettings::default());
+    // embed_asset!(fs, FRAG_ID, "frag.wgsl", DefaultSettings::default());
+    // embed_asset!(fs, FRAG_ID_2, "frag2.wgsl", DefaultSettings::default());
+    // embed_asset!(
+    //     fs,
+    //     FRAG_ID_3,
+    //     "forward-lighting.wgsl",
+    //     DefaultSettings::default()
+    // );
+    // embed_asset!(
+    //     fs,
+    //     DRAW_LIGHT_FRAG,
+    //     "draw-light.frag.wgsl",
+    //     DefaultSettings::default()
+    // );
+    // embed_asset!(
+    //     fs,
+    //     DRAW_LIGHT_VERT,
+    //     "draw-light.vert.wgsl",
+    //     DefaultSettings::default()
+    // );
+    // embed_asset!(fs, CUBE_ID, "cube.obj", ObjImportSettings::default());
+    // embed_asset!(
+    //     fs,
+    //     WIRE_SPHERE_ID,
+    //     "sphere.obj",
+    //     ObjImportSettings {
+    //         wireframe: true,
+    //         ..Default::default()
+    //     }
+    // );
+    // embed_asset!(fs, SWORD_ID, "sword.obj", ObjImportSettings::default());
+    // embed_asset!(fs, PLANE_ID, "plane.obj", ObjImportSettings::default());
+    // embed_asset!(fs, GENGAR_ID, "gengar.png", Texture2dSettings::default());
 
-    let quad = Mesh::new(MeshTopology::TriangleList)
-        .with_attribute(MeshAttribute::new(
-            MeshAttributeType::Position,
-            MeshAttributeValues::Vec2(QUAD.to_vec()),
-        ))
-        .with_attribute(MeshAttribute::new(
-            MeshAttributeType::TexCoord0,
-            MeshAttributeValues::Vec2(QUAD_TEX_COORDS.to_vec()),
-        ));
+    // let quad = Mesh::new(MeshTopology::TriangleList)
+    //     .with_attribute(MeshAttribute::new(
+    //         MeshAttributeType::Position,
+    //         MeshAttributeValues::Vec2(QUAD.to_vec()),
+    //     ))
+    //     .with_attribute(MeshAttribute::new(
+    //         MeshAttributeType::TexCoord0,
+    //         MeshAttributeValues::Vec2(QUAD_TEX_COORDS.to_vec()),
+    //     ));
 
-    App::new()
-        .add_plugins(ForwardLightingPlugin)
-        .add_source("embedded", fs)
-        .register_draw::<DrawMesh<UnlitColor>>()
-        .register_draw::<DrawMesh<LitColor>>()
-        .register_draw::<Light>()
-        .add_renderer::<BasicRenderer>()
-        .add_asset(UNLIT_WHITE, UnlitColor::from(Color::white()))
-        .add_asset(UNLIT_RED, UnlitColor::from(Color::red()))
-        .add_asset(UNLIT_BLUE, UnlitColor::from(Color::blue()))
-        .add_asset(LIT_WHITE, LitColor::from(Color::white()))
-        .add_asset(LIT_RED, LitColor::from(Color::red()))
-        .add_asset(LIGHT_MAT, LightMaterial::from(Color::white()))
-        .add_asset(QUAD_ID, quad)
-        .load_asset::<Mesh>(SWORD_ID)
-        .load_asset::<Mesh>(CUBE_ID)
-        .load_asset::<Mesh>(PLANE_ID)
-        .load_asset::<Mesh>(WIRE_SPHERE_ID)
-        .load_asset::<Texture>(GENGAR_ID)
-        .add_systems(Init, |mut spawner: Spawner| {
-            spawner
-                .spawn()
-                .with_component(GlobalTransform::with_translation(
-                    math::Vec3::Z * 7.0 + math::Vec3::Y * 2.0,
-                ))
-                .with_component(Camera::default())
-                .with_component(View3d::default())
-                .finish();
+    // App::new()
+    //     .add_plugins(ForwardLightingPlugin)
+    //     .add_source("embedded", fs)
+    //     .register_draw::<DrawMesh<UnlitColor>>()
+    //     .register_draw::<DrawMesh<LitColor>>()
+    //     .register_draw::<Light>()
+    //     .add_renderer::<BasicRenderer>()
+    //     .add_asset(UNLIT_WHITE, UnlitColor::from(Color::white()))
+    //     .add_asset(UNLIT_RED, UnlitColor::from(Color::red()))
+    //     .add_asset(UNLIT_BLUE, UnlitColor::from(Color::blue()))
+    //     .add_asset(LIT_WHITE, LitColor::from(Color::white()))
+    //     .add_asset(LIT_RED, LitColor::from(Color::red()))
+    //     .add_asset(LIGHT_MAT, LightMaterial::from(Color::white()))
+    //     .add_asset(QUAD_ID, quad)
+    //     .load_asset::<Mesh>(SWORD_ID)
+    //     .load_asset::<Mesh>(CUBE_ID)
+    //     .load_asset::<Mesh>(PLANE_ID)
+    //     .load_asset::<Mesh>(WIRE_SPHERE_ID)
+    //     .load_asset::<Texture>(GENGAR_ID)
+    //     .add_systems(Init, |mut spawner: Spawner| {
+    //         spawner
+    //             .spawn()
+    //             .with_component(GlobalTransform::with_translation(
+    //                 math::Vec3::Z * 7.0 + math::Vec3::Y * 2.0,
+    //             ))
+    //             .with_component(Camera::default())
+    //             .with_component(View3d::default())
+    //             .finish();
 
-            spawner
-                .spawn()
-                .with_component(GlobalTransform::with_translation(math::Vec3::Y * 2.0))
-                .with_component(Transform::default())
-                .with_component(Light::default())
-                .finish();
+    //         spawner
+    //             .spawn()
+    //             .with_component(GlobalTransform::with_translation(math::Vec3::Y * 2.0))
+    //             .with_component(Transform::default())
+    //             .with_component(Light::default())
+    //             .finish();
 
-            spawner
-                .spawn()
-                .with_component(GlobalTransform::ORIGIN)
-                .with_component(Transform::default())
-                .with_component(DrawMesh {
-                    material: LIT_RED,
-                    mesh: SWORD_ID,
-                })
-                .finish();
+    //         spawner
+    //             .spawn()
+    //             .with_component(GlobalTransform::ORIGIN)
+    //             .with_component(Transform::default())
+    //             .with_component(DrawMesh {
+    //                 material: LIT_RED,
+    //                 mesh: SWORD_ID,
+    //             })
+    //             .finish();
 
-            spawner
-                .spawn()
-                .with_component(GlobalTransform::new(
-                    Vec3::NEG_Y * 0.5,
-                    Quat::from_euler(math::EulerRot::XYZ, -90.0f32.to_radians(), 0.0, 0.0),
-                    Vec3::new(1.0, 1.0, 1.0),
-                ))
-                .with_component(Transform::default())
-                .with_component(DrawMesh {
-                    material: LIT_WHITE,
-                    mesh: PLANE_ID,
-                })
-                .finish();
-        })
-        .add_systems(
-            Start,
-            |import_errors: EventReader<ImportError>,
-             load_errors: EventReader<LoadError>,
-             events: EventReader<AssetEvent<Mesh>>| {
-                for error in import_errors {
-                    println!("Import error: {}", error);
-                }
-                for error in load_errors {
-                    println!("Load error: {}", error);
-                }
-                for event in events {
-                    println!("Event: {:?}", event);
-                }
-            },
-        )
-        .run();
+    //         spawner
+    //             .spawn()
+    //             .with_component(GlobalTransform::new(
+    //                 Vec3::NEG_Y * 0.5,
+    //                 Quat::from_euler(math::EulerRot::XYZ, -90.0f32.to_radians(), 0.0, 0.0),
+    //                 Vec3::new(1.0, 1.0, 1.0),
+    //             ))
+    //             .with_component(Transform::default())
+    //             .with_component(DrawMesh {
+    //                 material: LIT_WHITE,
+    //                 mesh: PLANE_ID,
+    //             })
+    //             .finish();
+    //     })
+    //     .add_systems(
+    //         Start,
+    //         |import_errors: EventReader<ImportError>,
+    //          load_errors: EventReader<LoadError>,
+    //          events: EventReader<AssetEvent<Mesh>>| {
+    //             for error in import_errors {
+    //                 println!("Import error: {}", error);
+    //             }
+    //             for error in load_errors {
+    //                 println!("Load error: {}", error);
+    //             }
+    //             for event in events {
+    //                 println!("Event: {:?}", event);
+    //             }
+    //         },
+    //     )
+    //     .run();
 }
 
 pub struct Opaque3d;
