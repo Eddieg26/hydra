@@ -53,11 +53,11 @@ impl Plugin for RenderPlugin {
             .register_event::<ExtractError>();
 
         app.add_render_resource::<Fallbacks>()
+            .add_render_asset::<Shader>()
             .add_render_asset::<RenderMesh>()
             .add_render_asset::<GpuTexture>()
             .add_render_asset::<RenderTarget>()
             .add_render_asset::<SubMesh>()
-            .add_render_asset::<Shader>()
             .add_importer::<ShaderSource>()
             .add_importer::<ObjImporter>()
             .add_importer::<Texture2dImporter>()

@@ -245,12 +245,11 @@ impl RenderSurface {
         surface_texture: &mut RenderSurfaceTexture,
     ) {
         match surface.texture() {
-            Ok(texture) => {
-                if texture.suboptimal {
-                    surface.configure(device);
-                }
-                surface_texture.set(texture);
+            Ok(texture) if texture.suboptimal => {
+                drop(texture);
+                surface.configure(device);
             }
+            Ok(texture) => surface_texture.set(texture),
             Err(wgpu::SurfaceError::Lost) | Err(wgpu::SurfaceError::Outdated) => {
                 surface.configure(device);
             }
