@@ -1,7 +1,8 @@
 use crate::{
     CameraRenderTargets, Color, ExtractResource, FragmentState, Frustum, GraphPass, Mesh, MeshKey,
-    MeshLayout, PassBuilder, PipelineCache, PipelineId, RenderAssets, RenderContext, RenderMesh,
-    RenderPipelineDesc, RenderResource, RenderState, RenderSurface, Shader, SubMesh, VertexState,
+    MeshLayout, PassBuilder, PipelineCache, PipelineId, RenderAssets, RenderContext,
+    RenderGraphError, RenderMesh, RenderPipelineDesc, RenderResource, RenderState, RenderSurface,
+    Shader, SubMesh, VertexState,
 };
 use asset::{AssetId, ErasedId};
 use ecs::{
@@ -1147,16 +1148,18 @@ impl<R: Renderer> GraphPass for RendererPass<R> {
     fn setup(
         self,
         builder: &mut PassBuilder,
-    ) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+    ) -> impl Fn(&mut RenderContext) -> Result<(), RenderGraphError> + Send + Sync + 'static {
         let mut phases = RenderPhases(Vec::new());
         let data = R::setup(builder, &mut phases);
 
         phases.0.sort_by_key(|p| p.1);
 
         move |ctx| {
-            let view = ctx.view().unwrap();
+            let view = ctx.view().ok_or(RenderGraphError::MissingView)?;
             let targets = ctx.world().resource::<CameraRenderTargets>();
-            let target = targets.get(&view).unwrap();
+            let target = targets
+                .get(&view)
+                .ok_or(RenderGraphError::MissingRenderTarget { entity: view })?;
 
             let mut encoder = ctx.encoder();
             let mut color_attachments = vec![Some(wgpu::RenderPassColorAttachment {
@@ -1188,7 +1191,7 @@ impl<R: Renderer> GraphPass for RendererPass<R> {
 
             let state = RenderState::new(encoder.begin_render_pass(&desc));
             phases.render(view, ctx, state, ctx.meta());
-            ctx.submit(encoder.finish());
+            Ok(ctx.submit(encoder.finish()))
         }
     }
 }

@@ -6,19 +6,23 @@ use smol::lock::RwLock;
 use std::{
     any::Any,
     collections::{HashMap, HashSet},
+    error::Error,
     sync::Arc,
 };
 
 pub type Name = &'static str;
 pub type NodeId = usize;
 pub type Bobject = Box<dyn Any + Send + Sync + 'static>;
-pub type Executor = Box<dyn Fn(&mut RenderContext) + Send + Sync + 'static>;
-pub type Creator = fn(&World, &RenderDevice, &RenderSurface, &Bobject) -> Bobject;
+pub type Executor =
+    Box<dyn Fn(&mut RenderContext) -> Result<(), RenderGraphError> + Send + Sync + 'static>;
+pub type Creator =
+    fn(&World, &RenderDevice, &RenderSurface, &Bobject) -> Result<Bobject, RenderGraphError>;
 type Passes = IndexMap<Name, PassNode>;
 
 pub enum RenderGraphError {
-    MissingResource { name: Name, id: NodeId },
     MissingView,
+    MissingResource { pass: Name, resource: NodeId },
+    MissingRenderTarget { entity: Entity },
     Custom(String),
 }
 
@@ -33,12 +37,14 @@ pub trait GraphResource: Sized + Send + Sync + 'static {
 
     type Desc: Default + Send + Sync + 'static;
 
+    type Error: Error + Send + Sync + 'static;
+
     fn create(
         world: &World,
         device: &RenderDevice,
         surface: &RenderSurface,
         desc: &Self::Desc,
-    ) -> Self;
+    ) -> Result<Self, Self::Error>;
 }
 
 pub struct GraphResourceId<R: GraphResource>(usize, std::marker::PhantomData<R>);
@@ -75,20 +81,20 @@ pub trait GraphPass {
     fn setup(
         self,
         builder: &mut PassBuilder,
-    ) -> impl Fn(&mut RenderContext) + Send + Sync + 'static;
+    ) -> impl Fn(&mut RenderContext) -> Result<(), RenderGraphError> + Send + Sync + 'static;
 }
 
 pub trait SubGraph: Send + Sync + 'static {
     const NAME: Name;
 
-    fn run(ctx: &mut RenderContext) {
+    fn run(ctx: &mut RenderContext) -> Result<(), RenderGraphError> {
         ctx.run_sub_graph(Self::NAME)
     }
 }
 
 pub struct SubGraphPass {
     name: Name,
-    run: fn(&mut RenderContext),
+    run: fn(&mut RenderContext) -> Result<(), RenderGraphError>,
 }
 
 impl SubGraphPass {
@@ -103,7 +109,10 @@ impl SubGraphPass {
 impl GraphPass for SubGraphPass {
     const NAME: Name = "SubgraphPass";
 
-    fn setup(self, builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + 'static {
+    fn setup(
+        self,
+        builder: &mut PassBuilder,
+    ) -> impl Fn(&mut RenderContext) -> Result<(), RenderGraphError> + 'static {
         builder.name = self.name;
 
         move |ctx| (self.run)(ctx)
@@ -126,7 +135,7 @@ pub struct PassNode {
 }
 
 impl PassNode {
-    fn execute(&self, ctx: &mut RenderContext) {
+    fn execute(&self, ctx: &mut RenderContext) -> Result<(), RenderGraphError> {
         (self.executor)(ctx)
     }
 }
@@ -148,17 +157,25 @@ impl ResourceNode {
             name: R::NAME,
             desc: Box::new(desc),
             creator: |world, device, surface, desc| {
-                let desc = desc.downcast_ref::<R::Desc>().unwrap();
+                let desc = desc
+                    .downcast_ref::<R::Desc>()
+                    .ok_or(RenderGraphError::Custom("".to_string()))?;
                 let resource = R::create(world, device, surface, desc);
-                Box::new(resource)
+                Ok(Box::new(resource))
             },
             object: None,
         }
     }
 
-    fn create(&mut self, world: &World, device: &RenderDevice, surface: &RenderSurface) {
-        let object = (self.creator)(world, device, surface, &self.desc);
+    fn create(
+        &mut self,
+        world: &World,
+        device: &RenderDevice,
+        surface: &RenderSurface,
+    ) -> Result<(), RenderGraphError> {
+        let object = (self.creator)(world, device, surface, &self.desc)?;
         self.object = Some(object);
+        Ok(())
     }
 }
 
@@ -191,7 +208,10 @@ impl RenderGraphBuilder {
     }
 
     pub fn add_sub_graph<S: SubGraph>(&mut self) {
-        self.sub_graphs.entry(S::NAME).or_default();
+        if !self.sub_graphs.contains_key(S::NAME) {
+            self.add_pass(SubGraphPass::new::<S>());
+            self.sub_graphs.insert(S::NAME, IndexMap::new());
+        }
     }
 
     pub fn add_sub_graph_pass<S: SubGraph, P: GraphPass>(&mut self, pass: P) -> NodeId {
@@ -257,22 +277,6 @@ impl RenderGraphBuilder {
             }
         }
 
-        struct PassInfo {
-            id: NodeId,
-            graph: GraphId,
-            ref_count: u32,
-        }
-
-        impl PassInfo {
-            fn new(id: NodeId, graph: GraphId) -> Self {
-                Self {
-                    id,
-                    graph,
-                    ref_count: 0,
-                }
-            }
-        }
-
         let RenderGraphBuilder {
             passes,
             resources,
@@ -290,13 +294,7 @@ impl RenderGraphBuilder {
             .collect::<Vec<_>>();
         let mut pass_refs = graphs
             .iter()
-            .map(|(id, passes)| {
-                let refs = (0..passes.len())
-                    .map(|i| PassInfo::new(i, *id))
-                    .collect::<Vec<_>>();
-
-                (*id, refs)
-            })
+            .map(|(id, passes)| (*id, (0..passes.len()).map(|_| 0).collect::<Vec<_>>()))
             .collect::<HashMap<_, _>>();
 
         for (graph, passes) in &graphs {
@@ -305,7 +303,7 @@ impl RenderGraphBuilder {
             for pass in passes.values() {
                 for id in &pass.reads {
                     resource_refs[*id].ref_count += 1;
-                    pass_refs[pass.id].ref_count = pass.writes.len() as u32;
+                    pass_refs[pass.id] = pass.writes.len() as u32;
                 }
 
                 for id in &pass.writes {
@@ -338,9 +336,9 @@ impl RenderGraphBuilder {
 
             let pass_refs = pass_refs.get_mut(&pass.graph).unwrap();
 
-            assert!(pass_refs[pass.id].ref_count >= 1);
-            pass_refs[pass.id].ref_count -= 1;
-            if pass_refs[pass.id].ref_count == 0 {
+            assert!(pass_refs[pass.id] >= 1);
+            pass_refs[pass.id] -= 1;
+            if pass_refs[pass.id] == 0 {
                 for id in passes[pass.id].reads.iter().copied() {
                     resource_refs[id].ref_count -= 1;
                     if resource_refs[id].ref_count == 0 {
@@ -354,9 +352,9 @@ impl RenderGraphBuilder {
             .drain()
             .map(|(graph, passes)| {
                 let pass_refs = pass_refs.get(&graph).unwrap();
-                let passes = passes.into_values().filter_map(|p| {
-                    (p.has_side_effect || pass_refs[p.id].ref_count > 0).then_some(p)
-                });
+                let passes = passes
+                    .into_values()
+                    .filter_map(|p| (p.has_side_effect || pass_refs[p.id] > 0).then_some(p));
 
                 (graph, passes.collect::<Vec<_>>())
             })
@@ -463,7 +461,7 @@ impl<R: GraphResource> GraphPass for CreateResourcePass<R> {
     fn setup(
         self,
         builder: &mut PassBuilder,
-    ) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+    ) -> impl Fn(&mut RenderContext) -> Result<(), RenderGraphError> + Send + Sync + 'static {
         // Resource is inserted after the pass is created,
         // so we can safely use the builder to get the resource ID.
         let id = builder.builder.resources.len();
@@ -548,19 +546,21 @@ impl<'a> RenderContext<'a> {
         self.view = Some(view);
     }
 
-    pub(crate) fn run_sub_graph(&mut self, name: Name) {
+    pub(crate) fn run_sub_graph(&mut self, name: Name) -> Result<(), RenderGraphError> {
         let sub_graphs = self.graph.sub_graphs.read_arc_blocking();
         if let Some(passes) = sub_graphs.get(&GraphId::Sub(name)) {
             for pass in passes {
-                pass.execute(self);
+                pass.execute(self)?;
             }
         }
+
+        Ok(())
     }
 
     fn run(mut self) -> Result<Vec<wgpu::CommandBuffer>, RenderGraphError> {
         let passes = self.graph.passes.read_arc_blocking();
         for pass in passes.iter() {
-            pass.execute(&mut self);
+            let _ = pass.execute(&mut self);
         }
 
         Ok(self.buffers)
