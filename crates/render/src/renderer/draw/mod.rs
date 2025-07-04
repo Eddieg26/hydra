@@ -1,5 +1,5 @@
 use crate::{
-    CameraDepthTargets, Color, ExtractResource, FragmentState, Frustum, Mesh, MeshKey, MeshLayout,
+    CameraDepthTextures, Color, ExtractResource, FragmentState, Frustum, Mesh, MeshKey, MeshLayout,
     PassBuilder, PipelineCache, PipelineId, RenderAssets, RenderContext, RenderGraphPass,
     RenderMesh, RenderOutput, RenderPipelineDesc, RenderResource, RenderState, RenderSurface,
     Shader, SubMesh, VertexState,
@@ -1160,7 +1160,7 @@ impl<R: Renderer> RenderGraphPass for RendererPass<R> {
                 return;
             };
 
-            let depth_targets = ctx.world().resource::<CameraDepthTargets>();
+            let depth_targets = ctx.world().resource::<CameraDepthTextures>();
             let color = ctx.get::<RenderOutput>(color);
             let depth = match depth_targets.get(&camera.entity) {
                 Some(target) => target,

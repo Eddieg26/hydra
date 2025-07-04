@@ -165,12 +165,12 @@ impl<'a> IntoIterator for &'a EntityCameras {
 }
 
 #[derive(Default, Resource)]
-pub struct CameraDepthTargets {
+pub struct CameraDepthTextures {
     targets: HashMap<Entity, wgpu::TextureView>,
     size: Size<u32>,
 }
 
-impl CameraDepthTargets {
+impl CameraDepthTextures {
     pub fn get(&self, entity: &Entity) -> Option<&wgpu::TextureView> {
         self.targets.get(entity)
     }
@@ -185,31 +185,44 @@ impl CameraDepthTargets {
         device: &RenderDevice,
         surface: &RenderSurface,
     ) {
-        targets
-            .targets
-            .retain(|e, _| cameras.into_iter().all(|c| &c.entity != e));
+        if targets.size != surface.size() {
+            targets.targets.clear();
+            targets.size = surface.size();
+        }
+
+        let mut free = Vec::new();
+        let entities = targets.targets.keys().copied().collect::<Vec<_>>();
+        for entity in entities {
+            if !cameras.into_iter().any(|c| c.entity == entity) {
+                free.push(targets.targets.remove(&entity).unwrap());
+            }
+        }
 
         for camera in cameras {
-            if !targets.contains(&camera.entity) || targets.size != surface.size() {
-                let texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: None,
-                    size: wgpu::Extent3d {
-                        width: surface.width(),
-                        height: surface.height(),
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: surface.depth_format(),
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::COPY_SRC
-                        | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[],
-                });
+            if !targets.contains(&camera.entity) {
+                let texture = match free.pop() {
+                    Some(texture) => texture,
+                    None => device
+                        .create_texture(&wgpu::TextureDescriptor {
+                            label: None,
+                            size: wgpu::Extent3d {
+                                width: surface.width(),
+                                height: surface.height(),
+                                depth_or_array_layers: 1,
+                            },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format: surface.depth_format(),
+                            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                                | wgpu::TextureUsages::COPY_SRC
+                                | wgpu::TextureUsages::COPY_DST,
+                            view_formats: &[],
+                        })
+                        .create_view(&Default::default()),
+                };
 
-                let view = texture.create_view(&Default::default());
-                targets.targets.insert(camera.entity, view);
+                targets.targets.insert(camera.entity, texture);
             }
         }
 

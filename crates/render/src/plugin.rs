@@ -1,5 +1,5 @@
 use crate::{
-    CameraDepthTargets, CameraSubGraph, DisableCulling, Draw, DrawPipeline, DrawTree, DrawView,
+    CameraDepthTextures, CameraSubGraph, DisableCulling, Draw, DrawPipeline, DrawTree, DrawView,
     ExtractError, GpuTexture, LightingData, MaterialBinding, ObjImporter, PostProcess, PreProcess,
     PreQueue, RenderMesh, RenderTarget, Shader, SubMesh, Texture2dImporter, ViewDrawCalls,
     VisibleDraws,
@@ -83,7 +83,7 @@ impl Plugin for RenderPlugin {
 
         app.add_systems(Extract, ResourceExtractors::extract);
         app.add_systems(PreProcess, ResourceExtractors::process);
-        app.add_systems(Process, PipelineCache::process);
+        app.add_systems(PostProcess, PipelineCache::process);
     }
 }
 
@@ -168,9 +168,9 @@ impl Plugin for CameraPlugin {
             .sub_app_mut(RenderApp)
             .unwrap()
             .add_resource(EntityCameras::default())
-            .add_resource(CameraDepthTargets::default())
+            .add_resource(CameraDepthTextures::default())
             .add_systems(Extract, EntityCameras::extract)
-            .add_systems(Queue, CameraDepthTargets::queue);
+            .add_systems(Queue, CameraDepthTextures::queue);
     }
 }
 
