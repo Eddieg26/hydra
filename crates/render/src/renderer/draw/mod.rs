@@ -1,8 +1,7 @@
 use crate::{
-    CameraDepthTextures, Color, ExtractResource, FragmentState, Frustum, Mesh, MeshKey, MeshLayout,
-    PassBuilder, PipelineCache, PipelineId, RenderAssets, RenderContext, RenderGraphPass,
-    RenderMesh, RenderOutput, RenderPipelineDesc, RenderResource, RenderState, RenderSurface,
-    Shader, SubMesh, VertexState,
+    CameraRenderTargets, Color, ExtractResource, FragmentState, Frustum, GraphPass, Mesh, MeshKey,
+    MeshLayout, PassBuilder, PipelineCache, PipelineId, RenderAssets, RenderContext, RenderMesh,
+    RenderPipelineDesc, RenderResource, RenderState, RenderSurface, Shader, SubMesh, VertexState,
 };
 use asset::{AssetId, ErasedId};
 use ecs::{
@@ -1110,7 +1109,7 @@ impl RenderPhases {
     fn render<'a>(
         &self,
         entity: Entity,
-        ctx: &RenderContext<'a>,
+        ctx: &'a RenderContext<'a>,
         mut state: RenderState<'a>,
         meta: &'a SystemMeta,
     ) {
@@ -1128,7 +1127,7 @@ pub trait Renderer: Send + Sync + 'static {
     fn setup(builder: &mut PassBuilder, phases: &mut RenderPhases) -> Self::Data;
 
     fn attachments<'a>(
-        _ctx: &'a RenderContext<'a>,
+        _ctx: &RenderContext<'a>,
         _data: &Self::Data,
     ) -> Vec<Option<wgpu::RenderPassColorAttachment<'a>>> {
         vec![]
@@ -1142,7 +1141,7 @@ impl<R: Renderer> Default for RendererPass<R> {
     }
 }
 
-impl<R: Renderer> RenderGraphPass for RendererPass<R> {
+impl<R: Renderer> GraphPass for RendererPass<R> {
     const NAME: super::Name = R::NAME;
 
     fn setup(
@@ -1151,37 +1150,29 @@ impl<R: Renderer> RenderGraphPass for RendererPass<R> {
     ) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
         let mut phases = RenderPhases(Vec::new());
         let data = R::setup(builder, &mut phases);
-        let color = builder.write::<RenderOutput>();
 
         phases.0.sort_by_key(|p| p.1);
 
         move |ctx| {
-            let Some(camera) = ctx.camera() else {
-                return;
-            };
-
-            let depth_targets = ctx.world().resource::<CameraDepthTextures>();
-            let color = ctx.get::<RenderOutput>(color);
-            let depth = match depth_targets.get(&camera.entity) {
-                Some(target) => target,
-                None => return,
-            };
+            let view = ctx.view().unwrap();
+            let targets = ctx.world().resource::<CameraRenderTargets>();
+            let target = targets.get(&view).unwrap();
 
             let mut encoder = ctx.encoder();
             let mut color_attachments = vec![Some(wgpu::RenderPassColorAttachment {
-                view: color,
+                view: &target.color,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(camera.clear_color.unwrap_or(Color::black()).into()),
+                    load: wgpu::LoadOp::Clear(target.clear.unwrap_or(Color::black()).into()),
                     store: wgpu::StoreOp::Store,
                 },
             })];
 
             color_attachments.extend(R::attachments(ctx, &data));
             let depth_stencil_attachment = wgpu::RenderPassDepthStencilAttachment {
-                view: depth,
+                view: &target.depth,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(0.0f32),
+                    load: wgpu::LoadOp::Clear(0f32),
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -1196,8 +1187,7 @@ impl<R: Renderer> RenderGraphPass for RendererPass<R> {
             };
 
             let state = RenderState::new(encoder.begin_render_pass(&desc));
-            phases.render(camera.entity, ctx, state, ctx.meta());
-
+            phases.render(view, ctx, state, ctx.meta());
             ctx.submit(encoder.finish());
         }
     }

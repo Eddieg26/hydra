@@ -1,23 +1,17 @@
-use super::{FilterMode, WrapMode};
 use crate::{RenderAsset, device::RenderDevice, surface::RenderSurface};
 use asset::Asset;
+use ecs::unlifetime::Read;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Asset, serde::Serialize, serde::Deserialize)]
 pub struct RenderTexture {
     pub width: u32,
     pub height: u32,
-    pub wrap: WrapMode,
-    pub filter: FilterMode,
 }
 
 impl RenderTexture {
-    pub fn new(width: u32, height: u32, wrap: WrapMode, filter: FilterMode) -> Self {
-        Self {
-            width,
-            height,
-            wrap,
-            filter,
-        }
+    pub fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
     }
 }
 
@@ -43,56 +37,65 @@ impl RenderTexture {
     }
 }
 
-pub struct RenderTarget {}
-impl RenderAsset for RenderTarget {
-    type Source = RenderTexture;
+pub struct RenderTarget {
+    width: u32,
+    height: u32,
+    texture: Arc<wgpu::Texture>,
+    view: wgpu::TextureView,
+}
 
-    type Arg = ();
+impl RenderTarget {
+    pub fn width(&self) -> u32 {
+        self.width
+    }
 
-    fn extract(
-        _asset: Self::Source,
-        _arg: &mut ecs::ArgItem<Self::Arg>,
-    ) -> Result<Self, crate::ExtractError<Self::Source>> {
-        Ok(Self {})
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn texture(&self) -> &wgpu::Texture {
+        &self.texture
+    }
+
+    pub fn view(&self) -> &wgpu::TextureView {
+        &self.view
     }
 }
 
-// TODO: Extract RenderTexture into RenderTargets
-// impl RenderAssetExtractor for RenderTexture {
-//     type RenderAsset = GpuTexture;
+impl RenderAsset for RenderTarget {
+    type Source = RenderTexture;
 
-//     type Arg = (Read<RenderDevice>, Read<RenderSurface>);
+    type Arg = (Read<RenderDevice>, Read<RenderSurface>);
 
-//     fn extract(
-//         asset: Self,
-//         arg: &mut ecs::ArgItem<Self::Arg>,
-//     ) -> Result<Self::RenderAsset, ExtractError<Self>> {
-//         let (device, surface) = arg;
+    fn extract(
+        texture: Self::Source,
+        (device, surface): &mut ecs::ArgItem<Self::Arg>,
+    ) -> Result<Self, crate::ExtractError<Self::Source>> {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: texture.width,
+                height: texture.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: surface.format(),
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
 
-//         let texture = asset.create_texture(device, surface);
-//         let sampler = Sampler::new(
-//             &device,
-//             &SamplerDesc {
-//                 label: None,
-//                 wrap_mode: asset.wrap,
-//                 filter_mode: asset.filter,
-//                 border_color: match asset.wrap {
-//                     WrapMode::ClampToBorder => Some(wgpu::SamplerBorderColor::TransparentBlack),
-//                     _ => None,
-//                 },
-//                 ..Default::default()
-//             },
-//         );
+        let view = texture.create_view(&Default::default());
 
-//         let texture = GpuTexture::new(
-//             Arc::new(texture),
-//             sampler,
-//             surface.format(),
-//             asset.width,
-//             asset.height,
-//             1,
-//         );
-
-//         Ok(texture)
-//     }
-// }
+        Ok(Self {
+            width: texture.width(),
+            height: texture.height(),
+            texture: Arc::new(texture),
+            view,
+        })
+    }
+}

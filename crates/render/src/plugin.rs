@@ -1,8 +1,8 @@
 use crate::{
     CameraDepthTextures, CameraSubGraph, DisableCulling, Draw, DrawPipeline, DrawTree, DrawView,
     ExtractError, GpuTexture, LightingData, MaterialBinding, ObjImporter, PostProcess, PreProcess,
-    PreQueue, RenderMesh, RenderTarget, Shader, SubMesh, Texture2dImporter, ViewDrawCalls,
-    VisibleDraws,
+    PreQueue, RenderGraphBuilder, RenderMesh, RenderTarget, Shader, SubMesh, Texture2dImporter,
+    ViewDrawCalls, VisibleDraws,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     draw::{
         Renderer, RendererPass,
@@ -13,7 +13,7 @@ use crate::{
         },
         view::{View, ViewDataBuffer},
     },
-    renderer::{Camera, EntityCameras, RenderGraph, RenderGraphPass, SubGraph},
+    renderer::{Camera, EntityCameras, GraphPass, RenderGraph, SubGraph},
     resources::{
         AssetExtractors, ExtractInfo, Fallbacks, Mesh, PipelineCache, RenderAsset, RenderAssets,
         RenderResource, ResourceExtractors, ShaderSource,
@@ -45,7 +45,7 @@ impl Plugin for RenderPlugin {
             .add_systems(Queue, RenderSurface::queue_surface)
             .add_systems(Render, RenderGraph::run_graph)
             .add_systems(Present, RenderSurface::present_surface)
-            .add_resource(RenderGraph::new())
+            .add_resource(RenderGraphBuilder::new())
             .add_resource(RenderSurfaceTexture::new())
             .add_resource(AssetExtractors::default())
             .add_resource(ResourceExtractors::default())
@@ -89,9 +89,9 @@ impl Plugin for RenderPlugin {
 
 pub trait RenderAppExt {
     fn register_draw<D: Draw>(&mut self) -> &mut Self;
-    fn add_pass<P: RenderGraphPass>(&mut self, pass: P) -> &mut Self;
+    fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self;
     fn add_sub_graph<S: SubGraph>(&mut self) -> &mut Self;
-    fn add_sub_graph_pass<S: SubGraph, P: RenderGraphPass>(&mut self, pass: P) -> &mut Self;
+    fn add_sub_graph_pass<S: SubGraph, P: GraphPass>(&mut self, pass: P) -> &mut Self;
     fn add_renderer<R: Renderer>(&mut self) -> &mut Self;
     fn add_render_asset<R: RenderAsset>(&mut self) -> &mut Self;
     fn add_render_resource<R: RenderResource>(&mut self) -> &mut Self;
@@ -102,10 +102,10 @@ impl RenderAppExt for AppBuilder {
         self.add_plugins(DrawPlugin::<D>::new())
     }
 
-    fn add_pass<P: RenderGraphPass>(&mut self, pass: P) -> &mut Self {
+    fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self {
         self.scoped_sub_app(RenderApp, |render_app| {
             render_app
-                .get_or_insert_resource(RenderGraph::new)
+                .get_or_insert_resource(RenderGraphBuilder::new)
                 .add_pass(pass);
         })
     }
@@ -113,15 +113,15 @@ impl RenderAppExt for AppBuilder {
     fn add_sub_graph<S: SubGraph>(&mut self) -> &mut Self {
         self.scoped_sub_app(RenderApp, |render_app| {
             render_app
-                .get_or_insert_resource(RenderGraph::new)
+                .get_or_insert_resource(RenderGraphBuilder::new)
                 .add_sub_graph::<S>();
         })
     }
 
-    fn add_sub_graph_pass<S: SubGraph, P: RenderGraphPass>(&mut self, pass: P) -> &mut Self {
+    fn add_sub_graph_pass<S: SubGraph, P: GraphPass>(&mut self, pass: P) -> &mut Self {
         self.scoped_sub_app(RenderApp, |render_app| {
             render_app
-                .get_or_insert_resource(RenderGraph::new)
+                .get_or_insert_resource(RenderGraphBuilder::new)
                 .add_sub_graph_pass::<S, P>(pass);
         })
     }
@@ -129,7 +129,7 @@ impl RenderAppExt for AppBuilder {
     fn add_renderer<R: Renderer>(&mut self) -> &mut Self {
         self.scoped_sub_app(RenderApp, |render_app| {
             render_app
-                .get_or_insert_resource(RenderGraph::new)
+                .get_or_insert_resource(RenderGraphBuilder::new)
                 .add_sub_graph_pass::<CameraSubGraph, RendererPass<R>>(RendererPass::default());
         });
 

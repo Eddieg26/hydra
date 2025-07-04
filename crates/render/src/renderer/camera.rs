@@ -1,5 +1,5 @@
 use crate::{
-    RenderDevice, RenderSurface,
+    RenderAssets, RenderDevice, RenderSurface, RenderSurfaceTexture, RenderTarget,
     renderer::graph::SubGraph,
     resources::RenderTexture,
     types::{Color, Viewport},
@@ -164,6 +164,94 @@ impl<'a> IntoIterator for &'a EntityCameras {
     }
 }
 
+pub struct CameraRenderTarget {
+    pub size: Size<u32>,
+    pub color: wgpu::TextureView,
+    pub depth: wgpu::TextureView,
+    pub clear: Option<Color>,
+    pub target: Option<AssetId<RenderTexture>>,
+}
+
+#[derive(Default, Resource)]
+pub struct CameraRenderTargets {
+    targets: HashMap<Entity, CameraRenderTarget>,
+}
+
+impl CameraRenderTargets {
+    pub fn get(&self, entity: &Entity) -> Option<&CameraRenderTarget> {
+        self.targets.get(entity)
+    }
+
+    pub fn contains(&self, entity: &Entity) -> bool {
+        self.targets.contains_key(entity)
+    }
+
+    pub(crate) fn queue(
+        targets: &mut Self,
+        cameras: &EntityCameras,
+        device: &RenderDevice,
+        surface: &RenderSurface,
+        surface_texture: &RenderSurfaceTexture,
+        render_targets: &RenderAssets<RenderTarget>,
+    ) {
+        targets
+            .targets
+            .retain(|t, _| cameras.into_iter().any(|c| &c.entity == t));
+
+        for camera in cameras {
+            if let Some(target) = targets.get(&camera.entity) {
+                if match target.target {
+                    Some(target) => Some(target) == camera.target,
+                    None => target.size == surface.size(),
+                } {
+                    continue;
+                }
+            }
+
+            let (color, size) = match camera.target.and_then(|id| render_targets.get(&id.into())) {
+                Some(target) => {
+                    let color = target.texture().create_view(&Default::default());
+                    (color, Size::new(target.width(), target.height()))
+                }
+                None => match surface_texture.get() {
+                    Some(texture) => {
+                        let color = texture.texture.create_view(&Default::default());
+                        (color, Size::new(surface.width(), surface.height()))
+                    }
+                    None => continue,
+                },
+            };
+
+            let depth = device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d {
+                    width: size.width,
+                    height: size.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: surface.depth_format(),
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+
+            let target = CameraRenderTarget {
+                size,
+                color,
+                depth: depth.create_view(&Default::default()),
+                clear: camera.clear_color,
+                target: camera.target,
+            };
+
+            targets.targets.insert(camera.entity, target);
+        }
+    }
+}
+
 #[derive(Default, Resource)]
 pub struct CameraDepthTextures {
     targets: HashMap<Entity, wgpu::TextureView>,
@@ -237,8 +325,8 @@ impl SubGraph for CameraSubGraph {
 
     fn run(ctx: &mut super::graph::RenderContext) {
         let cameras = ctx.world().resource::<EntityCameras>();
-        for camera in cameras.into_iter().cloned() {
-            ctx.set_camera(camera);
+        for camera in cameras.into_iter() {
+            ctx.set_view(camera.entity);
             ctx.run_sub_graph(Self::NAME);
         }
     }
