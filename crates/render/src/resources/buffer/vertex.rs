@@ -5,7 +5,7 @@ use std::ops::RangeBounds;
 use wgpu::{BufferAddress, BufferUsages};
 
 pub struct VertexBuffer {
-    inner: Buffer,
+    buffer: Buffer,
     len: usize,
 }
 
@@ -21,7 +21,7 @@ impl VertexBuffer {
         };
 
         Self {
-            inner: Buffer::with_data(device, bytemuck::cast_slice(vertices), usage, None),
+            buffer: Buffer::with_data(device, bytemuck::cast_slice(vertices), usage, None),
             len: vertices.len(),
         }
     }
@@ -38,17 +38,17 @@ impl VertexBuffer {
         };
 
         Self {
-            inner: Buffer::with_data(device, data, usage, None),
+            buffer: Buffer::with_data(device, data, usage, None),
             len: data.len() / stride,
         }
     }
 
     pub fn buffer(&self) -> &Buffer {
-        &self.inner
+        &self.buffer
     }
 
     pub fn slice<S: RangeBounds<BufferAddress>>(&self, bounds: S) -> BufferSlice {
-        self.inner.slice(bounds)
+        self.buffer.slice(bounds)
     }
 
     pub fn len(&self) -> usize {
@@ -57,13 +57,13 @@ impl VertexBuffer {
 
     pub fn update<T: Pod + Zeroable>(&mut self, device: &RenderDevice, vertices: &[T]) {
         let size = vertices.len() * std::mem::size_of::<T>();
-        if size > self.inner.size() as usize {
-            let usage = self.inner.as_ref().usage();
-            self.inner = Buffer::with_data(device, bytemuck::cast_slice(vertices), usage, None);
+        if size > self.buffer.size() as usize {
+            let usage = self.buffer.as_ref().usage();
+            self.buffer = Buffer::with_data(device, bytemuck::cast_slice(vertices), usage, None);
             self.len = vertices.len();
         } else {
             let data = bytemuck::cast_slice(vertices);
-            device.queue.write_buffer(self.inner.as_ref(), 0, data);
+            device.queue.write_buffer(self.buffer.as_ref(), 0, data);
         }
     }
 }

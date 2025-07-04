@@ -2,53 +2,56 @@ use super::Buffer;
 use crate::{device::RenderDevice, resources::Label};
 use encase::{
     DynamicUniformBuffer as EncaseDynamicUniformBuffer, ShaderType,
-    UniformBuffer as EncaseUniformBuffer,
-    internal::{AlignmentValue, WriteInto},
+    UniformBuffer as EncaseUniformBuffer, internal::WriteInto,
 };
-use wgpu::{BindingResource, BufferSize, BufferUsages, DynamicOffset};
+use wgpu::{BindingResource, BufferUsages, DynamicOffset};
 
-pub struct UniformBuffer<T: ShaderType + WriteInto + Copy> {
+pub struct UniformBuffer<T: ShaderType + WriteInto> {
     value: T,
     data: EncaseUniformBuffer<Vec<u8>>,
-    buffer: Buffer,
+    buffer: Option<Buffer>,
+    label: Label,
+    usages: BufferUsages,
     is_dirty: bool,
 }
 
-impl<T: ShaderType + WriteInto + Copy> UniformBuffer<T> {
-    pub fn new(
-        device: &RenderDevice,
-        value: T,
-        label: Label,
-        usage: Option<wgpu::BufferUsages>,
-    ) -> Self {
-        let mut data = EncaseUniformBuffer::new(Vec::with_capacity(T::min_size().get() as usize));
-        data.write(&value).unwrap();
-
-        let usage = match usage {
-            Some(usage) => usage | BufferUsages::UNIFORM,
-            None => BufferUsages::UNIFORM,
-        };
-
-        let buffer = Buffer::with_data(device, data.as_ref(), usage, label);
-
+impl<T: ShaderType + WriteInto> UniformBuffer<T> {
+    pub fn new(value: T) -> Self {
         Self {
             value,
-            data,
-            buffer,
-            is_dirty: false,
+            data: EncaseUniformBuffer::new(Vec::with_capacity(T::min_size().get() as usize)),
+            buffer: None,
+            label: None,
+            usages: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            is_dirty: true,
         }
     }
 
-    pub fn value(&self) -> &T {
+    pub fn with_label(mut self, label: Label) -> Self {
+        self.label = label;
+        self
+    }
+
+    pub fn with_usages(mut self, usages: BufferUsages) -> Self {
+        self.usages = BufferUsages::UNIFORM | BufferUsages::COPY_DST | usages;
+        self
+    }
+
+    pub fn get(&self) -> &T {
         &self.value
     }
 
-    pub fn buffer(&self) -> &Buffer {
-        &self.buffer
+    pub fn get_mut(&mut self) -> &mut T {
+        self.is_dirty = true;
+        &mut self.value
     }
 
-    pub fn binding(&self) -> BindingResource {
-        self.buffer.as_entire_binding()
+    pub fn buffer(&self) -> Option<&Buffer> {
+        self.buffer.as_ref()
+    }
+
+    pub fn binding(&self) -> Option<BindingResource> {
+        self.buffer.as_ref().map(|b| b.as_entire_binding())
     }
 
     pub fn data(&self) -> &[u8] {
@@ -61,74 +64,88 @@ impl<T: ShaderType + WriteInto + Copy> UniformBuffer<T> {
 
     pub fn set(&mut self, value: T) {
         self.value = value;
-        self.data.as_mut().clear();
         self.data.write(&self.value).unwrap();
         self.is_dirty = true;
     }
 
-    pub fn update(&mut self, device: &RenderDevice) {
-        if self.is_dirty {
-            device
-                .queue
-                .write_buffer(self.buffer.as_ref(), 0, self.data.as_ref());
-            self.is_dirty = false;
+    /// Updates the buffer if it is dirty or creates a new buffer if it doesn't exist.
+    /// Returns `true` only if a new buffer was created.
+    pub fn update(&mut self, device: &RenderDevice) -> bool {
+        if !self.is_dirty {
+            return false;
         }
-    }
-}
 
-impl<T: ShaderType + WriteInto + Copy> AsRef<Buffer> for UniformBuffer<T> {
-    fn as_ref(&self) -> &Buffer {
-        &self.buffer
+        match self.buffer.as_ref() {
+            Some(buffer) => {
+                let data = self.data.as_ref();
+                device.queue.write_buffer(buffer.as_ref(), 0, &data);
+                self.is_dirty = false;
+                false
+            }
+            None => {
+                let data = self.data.as_ref();
+                let buffer = Buffer::with_data(device, &data, self.usages, self.label.clone());
+                self.buffer = Some(buffer);
+                self.is_dirty = false;
+                true
+            }
+        }
     }
 }
 
 pub struct UniformBufferArray<T: ShaderType> {
     data: EncaseDynamicUniformBuffer<Vec<u8>>,
-    inner: Buffer,
+    buffer: Option<Buffer>,
     alignment: u64,
+    label: Label,
+    usages: BufferUsages,
     is_dirty: bool,
     _marker: std::marker::PhantomData<T>,
 }
 
 impl<T: ShaderType> UniformBufferArray<T> {
-    pub fn new(device: &RenderDevice, label: Label, usage: Option<BufferUsages>) -> Self {
-        let alignment = AlignmentValue::new(T::min_size().get().next_power_of_two())
-            .get()
-            .max(device.limits().min_uniform_buffer_offset_alignment as u64);
-
-        Self::with_alignment(device, alignment, label, usage)
-    }
-
-    pub fn with_alignment(
-        device: &RenderDevice,
-        alignment: u64,
-        label: Label,
-        usage: Option<BufferUsages>,
-    ) -> Self {
-        let data = EncaseDynamicUniformBuffer::new_with_alignment(Vec::new(), alignment);
-
-        let usage = match usage {
-            Some(usage) => usage | BufferUsages::UNIFORM,
-            None => BufferUsages::UNIFORM,
-        };
-
-        let buffer = Buffer::new(device, 1, usage, label);
-
+    pub fn new() -> Self {
         Self {
-            data,
-            inner: buffer,
+            data: EncaseDynamicUniformBuffer::new_with_alignment(Vec::new(), T::min_size().get()),
+            buffer: None,
+            alignment: T::min_size().get(),
+            label: None,
+            usages: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             is_dirty: false,
-            alignment,
             _marker: std::marker::PhantomData,
         }
     }
 
-    pub fn inner(&self) -> &Buffer {
-        &self.inner
+    pub fn with_alignment(alignment: u64) -> Self {
+        let data = EncaseDynamicUniformBuffer::new_with_alignment(Vec::new(), alignment);
+
+        Self {
+            data,
+            buffer: None,
+            alignment: T::min_size().get(),
+            label: None,
+            usages: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            is_dirty: false,
+            _marker: std::marker::PhantomData,
+        }
     }
 
-    pub fn binding(&self) -> BindingResource {
-        self.inner.as_entire_binding()
+    pub fn with_label(mut self, label: Label) -> Self {
+        self.label = label;
+        self
+    }
+
+    pub fn with_usages(mut self, usages: BufferUsages) -> Self {
+        self.usages = BufferUsages::UNIFORM | BufferUsages::COPY_DST | usages;
+        self
+    }
+
+    pub fn inner(&self) -> Option<&Buffer> {
+        self.buffer.as_ref()
+    }
+
+    pub fn binding(&self) -> Option<BindingResource> {
+        self.buffer.as_ref().map(|b| b.as_entire_binding())
     }
 
     pub fn data(&self) -> &[u8] {
@@ -147,28 +164,34 @@ impl<T: ShaderType> UniformBufferArray<T> {
         self.data.as_ref().len() / self.alignment as usize
     }
 
-    /// Commits the buffer to the GPU. If the buffer is resized, the data is copied to the new buffer.
-    /// If the buffer is not resized, the data is written to the buffer.
-    /// Returns the new buffer size if the buffer was resized.
-    pub fn update(&mut self, device: &RenderDevice) -> Option<BufferSize> {
-        let size = self.data.as_ref().len() as u64;
-        if size > 0 && size > self.inner.size() {
-            let data = self.data.as_ref().as_slice();
-            self.inner.resize_with_data(device, data);
-            self.is_dirty = false;
-            return BufferSize::new(self.inner.size());
-        } else if size > 0 && size < self.inner.size() / 2 {
-            let data = self.data.as_ref().as_slice();
-            self.inner.resize_with_data(device, data);
-            self.is_dirty = false;
-            return BufferSize::new(self.inner.size());
-        } else if self.is_dirty {
-            let data = self.data.as_ref().as_slice();
-            device.queue.write_buffer(self.inner.as_ref(), 0, data);
-            self.is_dirty = false;
+    /// Updates the buffer if it is dirty or if the size exceeds the current buffer size.
+    /// Returns the size of the buffer if it was updated, or `None` if no update was needed.
+    /// If the buffer is empty, it will set the buffer to `None`.
+    pub fn update(&mut self, device: &RenderDevice) -> Option<u64> {
+        if !self.is_dirty {
+            return None;
         }
 
-        None
+        let size = self.data.as_ref().len() as u64;
+        match self.buffer.as_ref() {
+            Some(buffer) if size > buffer.size() => {
+                let buffer = Buffer::new(device, size, self.usages, self.label.clone());
+                self.buffer = Some(buffer);
+            }
+            Some(buffer) => {
+                let data = bytemuck::cast_slice(self.data());
+                device.queue.write_buffer(buffer.as_ref(), 0, data);
+                self.is_dirty = false;
+                return None;
+            }
+            None if size == 0 => self.buffer = None,
+            None => {
+                let buffer = Buffer::new(device, size, self.usages, self.label.clone());
+                self.buffer = Some(buffer);
+            }
+        }
+
+        Some(size)
     }
 }
 
@@ -197,11 +220,5 @@ impl<T: ShaderType + WriteInto> UniformBufferArray<T> {
         self.data.as_mut().clear();
         self.data.set_offset(0);
         self.is_dirty = true;
-    }
-}
-
-impl<T: ShaderType> AsRef<Buffer> for UniformBufferArray<T> {
-    fn as_ref(&self) -> &Buffer {
-        &self.inner
     }
 }

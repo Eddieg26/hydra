@@ -88,7 +88,7 @@ impl Indices {
 }
 
 pub struct IndexBuffer {
-    inner: Buffer,
+    buffer: Buffer,
     format: IndexFormat,
     len: usize,
 }
@@ -101,14 +101,14 @@ impl IndexBuffer {
         };
 
         Self {
-            inner: Buffer::with_data(device, data.data(), usage, None),
+            buffer: Buffer::with_data(device, data.data(), usage, None),
             format: data.format(),
             len: data.len(),
         }
     }
 
     pub fn buffer(&self) -> &Buffer {
-        &self.inner
+        &self.buffer
     }
 
     pub fn format(&self) -> IndexFormat {
@@ -120,26 +120,26 @@ impl IndexBuffer {
     }
 
     pub fn size(&self) -> u64 {
-        self.inner.size()
+        self.buffer.size()
     }
 
     pub fn slice<S: RangeBounds<u64>>(&self, range: S) -> IndexSlice {
         IndexSlice {
             format: self.format,
-            slice: self.inner.slice(range),
+            slice: self.buffer.slice(range),
         }
     }
 
     pub fn update(&mut self, device: &RenderDevice, indices: &Indices) {
         let size = indices.size() as usize;
-        if size > self.inner.size() as usize {
-            let usage = self.inner.as_ref().usage();
-            self.inner = Buffer::with_data(device, indices.data(), usage, None);
+        if size > self.buffer.size() as usize {
+            let usage = self.buffer.as_ref().usage();
+            self.buffer = Buffer::with_data(device, indices.data(), usage, None);
             self.len = indices.len();
             self.format = indices.format();
         } else {
             let data = indices.data();
-            device.queue.write_buffer(self.inner.as_ref(), 0, data);
+            device.queue.write_buffer(self.buffer.as_ref(), 0, data);
         }
     }
 }
