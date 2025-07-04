@@ -28,8 +28,8 @@ impl_sparse_index!(u8, u16, u32, u64, usize);
 
 #[macro_export]
 macro_rules! impl_sparse_index_wrapper {
-    ($($ty:ty),+) => {
-        $(impl crate::SparseIndex for $ty {
+    ($($ident:ident, $ty:ty),+) => {
+        $(impl $ident::SparseIndex for $ty {
             #[inline]
             fn to_usize(self) -> usize {
                 self.0 as usize

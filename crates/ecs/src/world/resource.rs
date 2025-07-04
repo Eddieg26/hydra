@@ -8,7 +8,7 @@ pub trait Resource: Sized + 'static {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ResourceId(pub(crate) u32);
-impl_sparse_index_wrapper!(ResourceId);
+impl_sparse_index_wrapper!(crate, ResourceId);
 
 #[derive(Debug)]
 pub struct ResourceMeta {

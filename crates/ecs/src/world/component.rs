@@ -6,7 +6,7 @@ pub trait Component: Send + Sync + 'static {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ComponentId(pub(crate) u32);
-impl_sparse_index_wrapper!(ComponentId);
+impl_sparse_index_wrapper!(crate, ComponentId);
 
 #[derive(Clone, Debug)]
 pub struct ComponentMeta {

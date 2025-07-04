@@ -431,7 +431,7 @@ pub trait WorldMode: Send + Sync + 'static {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ModeId(pub u32);
-impl_sparse_index_wrapper!(ModeId);
+impl_sparse_index_wrapper!(crate, ModeId);
 
 #[derive(Clone, Copy)]
 pub struct BoxedMode {

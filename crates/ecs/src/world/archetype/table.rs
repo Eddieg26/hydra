@@ -288,7 +288,7 @@ impl std::ops::Deref for RowIndex {
     }
 }
 
-impl_sparse_index_wrapper!(RowIndex);
+impl_sparse_index_wrapper!(crate, RowIndex);
 
 pub struct TableBuilder {
     columns: SparseSet<Column, ComponentId>,

@@ -17,7 +17,7 @@ impl ArchetypeId {
     pub const EMPTY: Self = Self(0);
 }
 
-impl_sparse_index_wrapper!(ArchetypeId);
+impl_sparse_index_wrapper!(crate, ArchetypeId);
 
 pub struct Archetype {
     id: ArchetypeId,
