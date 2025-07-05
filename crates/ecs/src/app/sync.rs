@@ -28,12 +28,12 @@ impl<A: AppTag + Default + Clone> SyncAppPlugin<A> {
 
     fn sync_despawned_entities(
         despawned: Main<EventReader<Despawned>>,
-        map: &EntityWorldMap,
+        map: &mut EntityWorldMap,
         mut commands: Commands,
     ) {
         for despawned in despawned.into_inner() {
-            if map.0.contains_key(&despawned.0) {
-                commands.add(Despawn(despawned.0));
+            if let Some(entity) = map.0.remove(&despawned.0) {
+                commands.add(Despawn(entity));
             }
         }
     }
@@ -94,7 +94,6 @@ impl<C: Component + Clone, A: AppTag + Default + Clone> Plugin for SyncComponent
             .unwrap()
             .register::<C>()
             .register::<MainEntity>()
-            .add_resource(EntityWorldMap::default())
             .add_systems(Extract, Self::sync_component)
             .add_systems(Extract, Self::sync_removed_component);
     }
