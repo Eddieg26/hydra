@@ -76,7 +76,8 @@ pub fn expand_create_bind_group(input: &mut DeriveInput) -> Result<TokenStream> 
                     });
 
                     bindings.extend(quote! {
-                        let buffer = StorageBuffer::new(self.#ident);
+                        let mut buffer = StorageBuffer::new(self.#ident);
+                        buffer.update(device);
                         #BINDINGS.with_storage(#binding, buffer.buffer().unwrap(), 0, None);
                     });
                 }
@@ -133,7 +134,8 @@ pub fn expand_create_bind_group(input: &mut DeriveInput) -> Result<TokenStream> 
                 #(#fields: #types),*
             }
 
-            let buffer = UniformBuffer::new(#struct_name { #(#fields: self.#fields),* });
+            let mut buffer = UniformBuffer::new(#struct_name { #(#fields: self.#fields),* });
+            buffer.update(device);
             #BINDINGS.with_uniform(#binding, buffer.buffer().unwrap(), 0, None);
         });
     }

@@ -216,7 +216,8 @@ impl RenderGraphBuilder {
 
     pub fn add_sub_graph<S: SubGraph>(&mut self) {
         if !self.sub_graphs.contains_key(S::NAME) {
-            self.add_pass(SubGraphPass::new::<S>());
+            let id = self.add_pass(SubGraphPass::new::<S>());
+            self.passes[id].has_side_effect = true;
             self.sub_graphs.insert(S::NAME, IndexMap::new());
         }
     }
@@ -224,12 +225,13 @@ impl RenderGraphBuilder {
     pub fn add_sub_graph_pass<S: SubGraph, P: GraphPass>(&mut self, pass: P) -> NodeId {
         if let Some(id) = self
             .sub_graphs
-            .entry(S::NAME)
-            .or_default()
-            .get_index_of(P::NAME)
+            .get(S::NAME)
+            .and_then(|g| g.get_index_of(P::NAME))
         {
             return id;
         }
+
+        self.add_sub_graph::<S>();
 
         let id = self.sub_graphs.get(S::NAME).unwrap().len();
         let pass = PassBuilder::new(id, P::NAME, self).build(pass);

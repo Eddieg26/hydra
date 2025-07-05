@@ -6,7 +6,7 @@ use crate::{
     types::{Color, Viewport},
 };
 use asset::AssetId;
-use ecs::{Component, Entity, IndexMap, Query, Resource};
+use ecs::{Component, Entity, IndexMap, Query, Resource, app::sync::MainEntity};
 use math::{Mat4, Size, Vec3, Vec3A, Vec4, bounds::Aabb, sphere::Sphere};
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -108,7 +108,7 @@ impl Default for Camera {
 
 pub struct CameraRenderTarget {
     pub size: Size<u32>,
-    pub color: wgpu::TextureView,
+    pub color: Option<wgpu::TextureView>,
     pub depth: wgpu::TextureView,
     pub clear: Option<Color>,
     pub target: Option<AssetId<RenderTexture>>,
@@ -131,7 +131,7 @@ impl CameraRenderTargets {
 
     pub(crate) fn queue(
         targets: &mut Self,
-        cameras: Query<(Entity, &Camera)>,
+        cameras: Query<(&MainEntity, &Camera)>,
         device: &RenderDevice,
         surface: &RenderSurface,
         surface_texture: &RenderSurfaceTexture,
@@ -139,48 +139,106 @@ impl CameraRenderTargets {
     ) {
         targets
             .targets
-            .retain(|t, _| cameras.into_iter().any(|c| &c.0 == t));
+            .retain(|t, _| cameras.into_iter().any(|(e, _)| &e.0 == t));
 
         for (entity, camera) in cameras.iter() {
-            if let Some(target) = targets.get(&entity) {
-                if match target.target {
-                    Some(target) => Some(target) == camera.target,
-                    None => target.size == surface.size(),
-                } {
-                    continue;
-                }
-            }
-
-            let (color, size) = match camera.target.and_then(|id| render_targets.get(&id.into())) {
-                Some(target) => {
-                    let color = target.texture().create_view(&Default::default());
-                    (color, Size::new(target.width(), target.height()))
-                }
-                None => match surface_texture.get() {
-                    Some(texture) => {
-                        let color = texture.texture.create_view(&Default::default());
-                        (color, Size::new(surface.width(), surface.height()))
-                    }
-                    None => continue,
-                },
+            let remove = if let Some(id) = camera.target {
+                Self::add_render_target(
+                    targets,
+                    device,
+                    &entity.0,
+                    camera,
+                    surface,
+                    id,
+                    render_targets,
+                )
+            } else {
+                Self::add_surface_target(
+                    targets,
+                    device,
+                    &entity.0,
+                    camera,
+                    surface,
+                    surface_texture,
+                )
             };
 
-            let depth = device.create_texture(&wgpu::TextureDescriptor {
-                label: None,
-                size: wgpu::Extent3d {
-                    width: size.width,
-                    height: size.height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: surface.depth_format(),
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::COPY_SRC
-                    | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
+            remove.then_some(|| targets.targets.shift_remove(&entity.0));
+        }
+
+        targets.targets.sort_by(|_, a, _, b| a.order.cmp(&b.order));
+    }
+
+    /// Remove old surface render targets to avoid accessing destroyed textures.
+    /// This is necessary because the surface texture is recreated every frame.
+    /// If the render target uses a surface texture, we remove the target from the list.
+    pub(crate) fn cleanup(targets: &mut Self) {
+        targets.targets.values_mut().for_each(|t| {
+            if t.target.is_none() {
+                t.color = None;
+            }
+        });
+    }
+
+    #[inline]
+    fn add_surface_target(
+        targets: &mut Self,
+        device: &RenderDevice,
+        entity: &Entity,
+        camera: &Camera,
+        surface: &RenderSurface,
+        surface_texture: &RenderSurfaceTexture,
+    ) -> bool {
+        let Some(texture) = surface_texture.get() else {
+            return true;
+        };
+
+        match targets.targets.get_mut(entity) {
+            Some(target) if target.size == surface.size() && target.target.is_some() => {
+                target.color = Some(texture.texture.create_view(&Default::default()))
+            }
+            _ => {
+                let color = Some(texture.texture.create_view(&Default::default()));
+                let depth =
+                    Self::create_depth_texture(device, surface.size(), surface.depth_format());
+
+                let target = CameraRenderTarget {
+                    size: surface.size(),
+                    color,
+                    depth: depth.create_view(&Default::default()),
+                    clear: camera.clear_color,
+                    target: camera.target,
+                    order: camera.order,
+                };
+
+                targets.targets.insert(*entity, target);
+            }
+        }
+
+        false
+    }
+
+    #[inline]
+    fn add_render_target(
+        targets: &mut Self,
+        device: &RenderDevice,
+        entity: &Entity,
+        camera: &Camera,
+        surface: &RenderSurface,
+        target: AssetId<RenderTexture>,
+        render_targets: &RenderAssets<RenderTarget>,
+    ) -> bool {
+        let Some(target) = render_targets.get(&target.into()) else {
+            return true;
+        };
+
+        if !targets
+            .get(entity)
+            .is_some_and(|t| t.target == camera.target)
+        {
+            let size = Size::new(target.width(), target.height());
+            let color = Some(target.texture().create_view(&Default::default()));
+            let depth = Self::create_depth_texture(device, size, surface.depth_format());
 
             let target = CameraRenderTarget {
                 size,
@@ -191,10 +249,33 @@ impl CameraRenderTargets {
                 order: camera.order,
             };
 
-            targets.targets.insert(entity, target);
+            targets.targets.insert(*entity, target);
         }
 
-        targets.targets.sort_by(|_, a, _, b| a.order.cmp(&b.order));
+        false
+    }
+
+    fn create_depth_texture(
+        device: &RenderDevice,
+        size: Size<u32>,
+        format: wgpu::TextureFormat,
+    ) -> wgpu::Texture {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: size.width,
+                height: size.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        })
     }
 }
 

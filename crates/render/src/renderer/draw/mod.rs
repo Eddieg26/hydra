@@ -1153,6 +1153,7 @@ impl<R: Renderer> GraphPass for RendererPass<R> {
     ) -> impl Fn(&mut RenderContext) -> Result<(), RenderGraphError> + Send + Sync + 'static {
         let mut phases = RenderPhases(Vec::new());
         let data = R::setup(builder, &mut phases);
+        builder.has_side_effect();
 
         phases.0.sort_by_key(|p| p.1);
 
@@ -1162,10 +1163,14 @@ impl<R: Renderer> GraphPass for RendererPass<R> {
             let target = targets
                 .get(&view)
                 .ok_or(RenderGraphError::MissingRenderTarget { entity: view })?;
+            let color = target
+                .color
+                .as_ref()
+                .ok_or(RenderGraphError::MissingRenderTarget { entity: view })?;
 
             let mut encoder = ctx.encoder();
             let mut color_attachments = vec![Some(wgpu::RenderPassColorAttachment {
-                view: &target.color,
+                view: &color,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(target.clear.unwrap_or(Color::black()).into()),

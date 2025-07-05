@@ -1,10 +1,13 @@
 use ecs::{AppTag, Phase};
-pub struct RenderApp;
 
-impl AppTag for RenderApp {}
+#[derive(AppTag, Default, Clone, Copy)]
+pub struct RenderApp;
 
 #[derive(Phase)]
 pub struct Process;
+
+#[derive(Phase)]
+pub struct ProcessAssets;
 
 #[derive(Phase)]
 pub struct Queue;

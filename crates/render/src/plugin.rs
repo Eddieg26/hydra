@@ -1,8 +1,8 @@
 use crate::{
     CameraRenderTargets, CameraSubGraph, DisableCulling, Draw, DrawPipeline, DrawTree, DrawView,
-    ExtractError, GpuTexture, LightingData, MaterialBinding, ObjImporter, QueueDraws, QueueViews,
-    RenderGraphBuilder, RenderMesh, RenderTarget, Shader, SubMesh, Texture2dImporter,
-    ViewDrawCalls, VisibleDraws,
+    ExtractError, GpuTexture, LightingData, MaterialBinding, ObjImporter, ProcessAssets,
+    QueueDraws, QueueViews, RenderGraphBuilder, RenderMesh, RenderTarget, Shader, SubMesh,
+    Texture2dImporter, ViewDrawCalls, VisibleDraws,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     draw::{
         Renderer, RendererPass,
@@ -21,7 +21,10 @@ use crate::{
     surface::{RenderSurface, RenderSurfaceTexture},
 };
 use asset::plugin::{AssetAppExt, AssetPlugin};
-use ecs::{AppBuilder, Extract, Init, IntoSystemConfig, Plugin, Run, system::Exists};
+use ecs::{
+    AppBuilder, Extract, Init, IntoSystemConfig, Plugin, Run, app::sync::SyncComponentPlugin,
+    system::Exists,
+};
 use transform::GlobalTransform;
 use window::plugin::WindowPlugin;
 
@@ -32,6 +35,7 @@ impl Plugin for RenderPlugin {
         app.add_plugins((WindowPlugin, AssetPlugin))
             .add_sub_app(RenderApp)
             .add_sub_phase(Run, Process)
+            .add_sub_phase(Process, ProcessAssets)
             .add_sub_phase(Run, Queue)
             .add_sub_phase(Queue, QueueViews)
             .add_sub_phase(Queue, QueueDraws)
@@ -81,10 +85,10 @@ impl Plugin for RenderPlugin {
 
         for config in configs {
             app.add_systems(Extract, config.extract);
-            app.add_systems(Process, config.process);
+            app.add_systems(ProcessAssets, config.process);
         }
 
-        app.add_systems(Process, PipelineCache::process);
+        app.add_systems(Queue, PipelineCache::queue);
     }
 }
 
@@ -164,12 +168,12 @@ impl RenderAppExt for AppBuilder {
 pub struct CameraPlugin;
 impl Plugin for CameraPlugin {
     fn setup(&mut self, app: &mut AppBuilder) {
-        app.add_plugins(RenderPlugin)
-            .register::<Camera>()
+        app.add_plugins(SyncComponentPlugin::<Camera, RenderApp>::new())
             .sub_app_mut(RenderApp)
             .unwrap()
             .add_resource(CameraRenderTargets::default())
-            .add_systems(QueueViews, CameraRenderTargets::queue);
+            .add_systems(PreRender, CameraRenderTargets::queue)
+            .add_systems(PostRender, CameraRenderTargets::cleanup);
     }
 }
 

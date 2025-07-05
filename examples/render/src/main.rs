@@ -112,8 +112,11 @@ fn main() {
         ));
 
     App::new()
-        .add_plugins(RenderPlugin)
+        .add_plugins(ForwardLightingPlugin)
         .add_source("embedded", fs)
+        .register_draw::<DrawMesh<UnlitColor>>()
+        .register_draw::<DrawMesh<LitColor>>()
+        .add_renderer::<BasicRenderer>()
         .add_asset(UNLIT_WHITE, UnlitColor::from(Color::white()))
         .add_asset(UNLIT_RED, UnlitColor::from(Color::red()))
         .add_asset(UNLIT_BLUE, UnlitColor::from(Color::blue()))
@@ -126,68 +129,49 @@ fn main() {
         .load_asset::<Mesh>(PLANE_ID)
         .load_asset::<Mesh>(WIRE_SPHERE_ID)
         .load_asset::<Texture>(GENGAR_ID)
+        .add_systems(Init, |mut spawner: Spawner| {
+            spawner
+                .spawn()
+                .with_component(GlobalTransform::with_translation(
+                    math::Vec3::Z * 7.0 + math::Vec3::Y * 2.0,
+                ))
+                .with_component(Camera::default())
+                .with_component(View3d::default())
+                .finish();
+
+            spawner
+                .spawn()
+                .with_component(GlobalTransform::with_translation(math::Vec3::Y * 2.0))
+                .with_component(Transform::default())
+                .with_component(Light::default())
+                .finish();
+
+            spawner
+                .spawn()
+                .with_component(GlobalTransform::ORIGIN)
+                .with_component(Transform::default())
+                .with_component(DrawMesh {
+                    material: LIT_RED,
+                    mesh: SWORD_ID,
+                })
+                .finish();
+
+            spawner
+                .spawn()
+                .with_component(GlobalTransform::new(
+                    Vec3::NEG_Y * 0.5,
+                    Quat::from_euler(math::EulerRot::XYZ, -90.0f32.to_radians(), 0.0, 0.0),
+                    Vec3::new(1.0, 1.0, 1.0),
+                ))
+                .with_component(Transform::default())
+                .with_component(DrawMesh {
+                    material: LIT_WHITE,
+                    mesh: PLANE_ID,
+                })
+                .finish();
+        })
         .run();
 
-    // App::new()
-    //     .add_plugins(ForwardLightingPlugin)
-    //     .add_source("embedded", fs)
-    //     .register_draw::<DrawMesh<UnlitColor>>()
-    //     .register_draw::<DrawMesh<LitColor>>()
-    //     .register_draw::<Light>()
-    //     .add_renderer::<BasicRenderer>()
-    //     .add_asset(UNLIT_WHITE, UnlitColor::from(Color::white()))
-    //     .add_asset(UNLIT_RED, UnlitColor::from(Color::red()))
-    //     .add_asset(UNLIT_BLUE, UnlitColor::from(Color::blue()))
-    //     .add_asset(LIT_WHITE, LitColor::from(Color::white()))
-    //     .add_asset(LIT_RED, LitColor::from(Color::red()))
-    //     .add_asset(LIGHT_MAT, LightMaterial::from(Color::white()))
-    //     .add_asset(QUAD_ID, quad)
-    //     .load_asset::<Mesh>(SWORD_ID)
-    //     .load_asset::<Mesh>(CUBE_ID)
-    //     .load_asset::<Mesh>(PLANE_ID)
-    //     .load_asset::<Mesh>(WIRE_SPHERE_ID)
-    //     .load_asset::<Texture>(GENGAR_ID)
-    //     .add_systems(Init, |mut spawner: Spawner| {
-    //         spawner
-    //             .spawn()
-    //             .with_component(GlobalTransform::with_translation(
-    //                 math::Vec3::Z * 7.0 + math::Vec3::Y * 2.0,
-    //             ))
-    //             .with_component(Camera::default())
-    //             .with_component(View3d::default())
-    //             .finish();
-
-    //         spawner
-    //             .spawn()
-    //             .with_component(GlobalTransform::with_translation(math::Vec3::Y * 2.0))
-    //             .with_component(Transform::default())
-    //             .with_component(Light::default())
-    //             .finish();
-
-    //         spawner
-    //             .spawn()
-    //             .with_component(GlobalTransform::ORIGIN)
-    //             .with_component(Transform::default())
-    //             .with_component(DrawMesh {
-    //                 material: LIT_RED,
-    //                 mesh: SWORD_ID,
-    //             })
-    //             .finish();
-
-    //         spawner
-    //             .spawn()
-    //             .with_component(GlobalTransform::new(
-    //                 Vec3::NEG_Y * 0.5,
-    //                 Quat::from_euler(math::EulerRot::XYZ, -90.0f32.to_radians(), 0.0, 0.0),
-    //                 Vec3::new(1.0, 1.0, 1.0),
-    //             ))
-    //             .with_component(Transform::default())
-    //             .with_component(DrawMesh {
-    //                 material: LIT_WHITE,
-    //                 mesh: PLANE_ID,
-    //             })
-    //             .finish();
-    //     })
     //     .add_systems(
     //         Start,
     //         |import_errors: EventReader<ImportError>,
@@ -204,7 +188,6 @@ fn main() {
     //             }
     //         },
     //     )
-    //     .run();
 }
 
 pub struct Opaque3d;
@@ -466,18 +449,13 @@ pub struct ForwardLighting {
 
 impl ForwardLighting {
     pub fn new(device: &RenderDevice) -> Self {
-        let lights = ArrayBuffer::new(100, BufferUsages::UNIFORM | BufferUsages::COPY_DST);
+        let lights = ArrayBuffer::new(100, BufferUsages::STORAGE | BufferUsages::COPY_DST);
         let light_count = UniformBuffer::new(0);
 
         let layout = BindGroupLayoutBuilder::new()
             .with_storage(0, ShaderStages::FRAGMENT, false, true, None, None)
             .with_uniform(1, ShaderStages::FRAGMENT, false, None, None)
             .build(device);
-
-        // let binding = BindGroupBuilder::new(&layout)
-        //     .with_storage(0, &lights, 0, None)
-        //     .with_uniform(1, &light_count, 0, None)
-        //     .build(device);
 
         Self {
             lights,

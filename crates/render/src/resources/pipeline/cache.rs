@@ -132,7 +132,7 @@ impl PipelineCache {
             .insert(id);
     }
 
-    pub(crate) fn process(
+    pub(crate) fn queue(
         pipelines: &mut PipelineCache,
         info: &ExtractInfo<Shader>,
         device: &RenderDevice,

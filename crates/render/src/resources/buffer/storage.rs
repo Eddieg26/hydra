@@ -17,11 +17,14 @@ pub struct StorageBuffer<T: ShaderType + WriteInto> {
 
 impl<T: ShaderType + WriteInto> StorageBuffer<T> {
     pub fn new(value: T) -> Self {
+        let mut data = EncaseStorageBuffer::new(Vec::with_capacity(T::min_size().get() as usize));
+        let _ = data.write(&value);
+
         Self {
             value,
-            data: EncaseStorageBuffer::new(Vec::with_capacity(T::min_size().get() as usize)),
+            data,
             buffer: None,
-            label: None,
+            label: Some(std::any::type_name::<T>().into()),
             usages: BufferUsages::STORAGE | BufferUsages::COPY_DST,
             is_dirty: true,
         }

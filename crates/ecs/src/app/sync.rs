@@ -10,10 +10,20 @@ use std::collections::HashMap;
 #[derive(Resource, Default)]
 pub struct EntityWorldMap(HashMap<Entity, Entity>);
 
-pub struct SyncAppPlugin<A: AppTag + Clone>(A);
-impl<A: AppTag + Clone> SyncAppPlugin<A> {
-    pub fn new(value: A) -> Self {
-        Self(value)
+#[derive(Component, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MainEntity(pub Entity);
+impl std::ops::Deref for MainEntity {
+    type Target = Entity;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+pub struct SyncAppPlugin<A: AppTag + Default + Clone>(A);
+impl<A: AppTag + Default + Clone> SyncAppPlugin<A> {
+    pub fn new() -> Self {
+        Self(A::default())
     }
 
     fn sync_despawned_entities(
@@ -29,15 +39,16 @@ impl<A: AppTag + Clone> SyncAppPlugin<A> {
     }
 }
 
-impl<A: AppTag + Clone> Plugin for SyncAppPlugin<A> {
+impl<A: AppTag + Default + Clone> Plugin for SyncAppPlugin<A> {
     fn setup(&mut self, app: &mut super::AppBuilder) {
         app.add_sub_app(self.0.clone())
+            .add_resource(EntityWorldMap::default())
             .add_systems(Extract, Self::sync_despawned_entities);
     }
 }
 
-pub struct SyncComponentPlugin<C: Component + Clone>(std::marker::PhantomData<C>);
-impl<C: Component + Clone> SyncComponentPlugin<C> {
+pub struct SyncComponentPlugin<C: Component + Clone, A: AppTag>(std::marker::PhantomData<(C, A)>);
+impl<C: Component + Clone, A: AppTag + Default + Clone> SyncComponentPlugin<C, A> {
     pub fn new() -> Self {
         Self(Default::default())
     }
@@ -49,9 +60,11 @@ impl<C: Component + Clone> SyncComponentPlugin<C> {
                 let sub_entity = unsafe {
                     let mut world = world.cell();
                     let map = world.get_mut().resource_mut::<EntityWorldMap>();
-                    *map.0
-                        .entry(entity)
-                        .or_insert_with(|| world.get_mut().spawn())
+                    *map.0.entry(entity).or_insert_with(|| {
+                        let entity = world.get_mut().spawn();
+                        world.get_mut().add_components(entity, MainEntity(entity));
+                        entity
+                    })
                 };
 
                 world.add_component(sub_entity, component);
@@ -74,9 +87,14 @@ impl<C: Component + Clone> SyncComponentPlugin<C> {
     }
 }
 
-impl<C: Component + Clone> Plugin for SyncComponentPlugin<C> {
+impl<C: Component + Clone, A: AppTag + Default + Clone> Plugin for SyncComponentPlugin<C, A> {
     fn setup(&mut self, app: &mut super::AppBuilder) {
-        app.register::<C>()
+        app.add_plugins(SyncAppPlugin::<A>::new())
+            .sub_app_mut(A::default())
+            .unwrap()
+            .register::<C>()
+            .register::<MainEntity>()
+            .add_resource(EntityWorldMap::default())
             .add_systems(Extract, Self::sync_component)
             .add_systems(Extract, Self::sync_removed_component);
     }

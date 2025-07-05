@@ -91,62 +91,6 @@ impl RenderSurface {
         };
 
         Ok((surface, adapter))
-        // let instance = wgpu::Instance::default();
-
-        // let surface = unsafe {
-        //     let target = SurfaceTargetUnsafe::from_window(window.inner())
-        //         .map_err(|e| RenderSurfaceError::from(e))?;
-
-        //     instance
-        //         .create_surface_unsafe(target)
-        //         .map_err(|e| RenderSurfaceError::from(e))?
-        // };
-
-        // let size = window.size();
-
-        // let adapter = instance
-        //     .request_adapter(&wgpu::RequestAdapterOptions {
-        //         power_preference: wgpu::PowerPreference::HighPerformance,
-        //         compatible_surface: Some(&surface),
-        //         ..Default::default()
-        //     })
-        //     .await
-        //     .map_err(RenderSurfaceError::Adapter)?;
-
-        // let capabilities = surface.get_capabilities(&adapter);
-
-        // let format = *capabilities
-        //     .formats
-        //     .iter()
-        //     .find(|format| **format == Self::DEFAULT_FORMAT)
-        //     .unwrap_or(capabilities.formats.get(0).expect("No supported formats"));
-
-        // let depth_format = Self::DEPTH_FORMAT;
-
-        // let present_mode = match capabilities.present_modes.contains(&PresentMode::Mailbox) {
-        //     true => PresentMode::Mailbox,
-        //     false => PresentMode::Fifo,
-        // };
-
-        // let config = wgpu::SurfaceConfiguration {
-        //     usage: capabilities.usages - wgpu::TextureUsages::STORAGE_BINDING,
-        //     format,
-        //     width: size.width,
-        //     height: size.height,
-        //     present_mode,
-        //     alpha_mode: wgpu::CompositeAlphaMode::Auto,
-        //     view_formats: vec![format.add_srgb_suffix()],
-        //     desired_maximum_frame_latency: 2,
-        // };
-
-        // let surface = Self {
-        //     window,
-        //     surface: Arc::new(surface),
-        //     config,
-        //     depth_format,
-        // };
-
-        // Ok((surface, adapter))
     }
 
     pub fn surface(&self) -> &wgpu::Surface<'static> {
