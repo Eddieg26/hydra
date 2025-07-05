@@ -407,17 +407,17 @@ impl<D: Draw> VisibleDraws<D> {
     pub(crate) fn queue(
         visible: &mut Self,
         tree: &mut DrawTree<D>,
-        views: &ViewDataBuffer<DrawView<D>>,
+        views: &RenderViews<DrawView<D>>,
     ) {
         if D::CULL {
-            for (entity, view) in views.views() {
+            for (entity, view) in views.iter() {
                 let mut draws = tree.cull(&view.frustum);
                 visible
                     .0
                     .insert(*entity, draws.drain(..).map(|d| *d).collect());
             }
         } else {
-            for (entity, _) in views.views() {
+            for (entity, _) in views.iter() {
                 visible
                     .0
                     .insert(*entity, (0..tree.nodes.len()).map(DrawIndex::new).collect());
@@ -459,7 +459,7 @@ impl<D: Draw> RenderResource for DrawPipeline<D> {
     type Arg = (
         Write<PipelineCache>,
         Read<RenderSurface>,
-        Option<Read<ViewDataBuffer<DrawView<D>>>>,
+        Option<Read<RenderViews<DrawView<D>>>>,
         Option<Read<ModelDataBuffer<D::Model>>>,
         Option<Read<BatchedModelDataBuffer<D::Model>>>,
         Option<Read<LightingData<<D::Material as Material>::Lighting>>>,
@@ -675,7 +675,7 @@ impl<V: View, R: RenderPhase> ViewDrawCalls<V, R> {
         view_draws: &mut Self,
         draws: &mut DrawTree<D>,
         visible_draws: &VisibleDraws<D>,
-        view_buffer: &ViewDataBuffer<DrawView<D>>,
+        view_buffer: &RenderViews<DrawView<D>>,
         model_data: &mut ModelDataBuffer<D::Model>,
         batched_model_data: &mut BatchedModelDataBuffer<D::Model>,
         pipeline: &DrawPipeline<D>,
@@ -686,7 +686,7 @@ impl<V: View, R: RenderPhase> ViewDrawCalls<V, R> {
         let system = system.into();
 
         if D::BATCH {
-            for (entity, _) in view_buffer.views() {
+            for (entity, _) in view_buffer.iter() {
                 let Some(indicies) = visible_draws.0.get(entity) else {
                     continue;
                 };
@@ -728,7 +728,7 @@ impl<V: View, R: RenderPhase> ViewDrawCalls<V, R> {
                 view_draws.0.entry(*entity).or_default().extend(draw_calls);
             }
         } else {
-            for (entity, view) in view_buffer.views() {
+            for (entity, view) in view_buffer.iter() {
                 let Some(indicies) = visible_draws.0.get(entity) else {
                     continue;
                 };
@@ -832,7 +832,7 @@ impl<V: View> DrawCommand<V> for SetPipeline<V> {
 
 pub struct SetView<V: View, const GROUP: u32>(std::marker::PhantomData<V>);
 impl<V: View, const GROUP: u32> DrawCommand<V> for SetView<V, GROUP> {
-    type Arg = Read<ViewDataBuffer<V>>;
+    type Arg = Read<RenderViews<V>>;
 
     fn execute<'w>(
         state: &mut RenderState<'w>,
@@ -840,7 +840,9 @@ impl<V: View, const GROUP: u32> DrawCommand<V> for SetView<V, GROUP> {
         _: &DrawCall<V>,
         views: ArgItem<'w, 'w, Self::Arg>,
     ) -> Result<(), DrawError> {
-        Ok(state.set_bind_group(GROUP, views.bind_group(), &[view.dynamic_offset]))
+        let bind_group = views.bind_group().ok_or(DrawError::Skip)?;
+
+        Ok(state.set_bind_group(GROUP, bind_group, &[view.dynamic_offset]))
     }
 }
 
@@ -1086,7 +1088,7 @@ impl RenderPhases {
             |entity, ctx, state, meta| {
                 let mut world = unsafe { ctx.world().cell() };
                 let systems = unsafe { world.get_mut().resource_mut::<DrawSystems<V>>() };
-                let views = unsafe { world.get().resource::<ViewDataBuffer<V>>() };
+                let views = unsafe { world.get().resource::<RenderViews<V>>() };
                 let draw_calls = unsafe { world.get().resource::<ViewDrawCalls<V, P>>() };
 
                 let Some(calls) = draw_calls.get(&entity) else {

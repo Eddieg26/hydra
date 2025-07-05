@@ -5,10 +5,16 @@ use crate::{
 use ecs::{Resource, system::unlifetime::Read};
 use encase::{ShaderType, internal::WriteInto};
 use std::{num::NonZero, ops::Range};
-use wgpu::{BufferUsages, ShaderStages};
+use wgpu::ShaderStages;
 
 pub trait ModelData: ShaderType + WriteInto + Send + Sync + 'static {}
 impl<S: ShaderType + WriteInto + Send + Sync + 'static> ModelData for S {}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum GpuBufferType {
+    Uniform,
+    Storage,
+}
 
 pub enum GpuBufferArray<S: ShaderType> {
     Uniform(UniformBufferArray<S>),
@@ -16,6 +22,13 @@ pub enum GpuBufferArray<S: ShaderType> {
 }
 
 impl<S: ShaderType> GpuBufferArray<S> {
+    pub fn get(&self) -> Option<&Buffer> {
+        match self {
+            GpuBufferArray::Uniform(buffer) => buffer.inner(),
+            GpuBufferArray::Storage(buffer) => buffer.inner(),
+        }
+    }
+
     pub fn data(&self) -> &[u8] {
         match self {
             GpuBufferArray::Uniform(buffer) => buffer.data(),
@@ -23,10 +36,17 @@ impl<S: ShaderType> GpuBufferArray<S> {
         }
     }
 
-    pub fn update(&mut self, device: &RenderDevice) -> Option<NonZero<u64>> {
+    pub fn update(&mut self, device: &RenderDevice) -> Option<u64> {
         match self {
             GpuBufferArray::Uniform(buffer) => buffer.update(device),
             GpuBufferArray::Storage(buffer) => buffer.update(device),
+        }
+    }
+
+    pub fn ty(&self) -> GpuBufferType {
+        match self {
+            GpuBufferArray::Uniform(_) => GpuBufferType::Uniform,
+            GpuBufferArray::Storage(_) => GpuBufferType::Storage,
         }
     }
 }
@@ -43,15 +63,6 @@ impl<S: ShaderType + WriteInto> GpuBufferArray<S> {
         match self {
             GpuBufferArray::Uniform(buffer) => buffer.clear(),
             GpuBufferArray::Storage(buffer) => buffer.clear(),
-        }
-    }
-}
-
-impl<S: ShaderType> AsRef<Buffer> for GpuBufferArray<S> {
-    fn as_ref(&self) -> &Buffer {
-        match self {
-            GpuBufferArray::Uniform(buffer) => buffer.as_ref(),
-            GpuBufferArray::Storage(buffer) => buffer.as_ref(),
         }
     }
 }
@@ -76,12 +87,7 @@ impl<S: ModelData> ShaderDataBuffer<S> {
             let batch_size =
                 (device.limits().max_uniform_buffer_binding_size / item_size) * item_size;
 
-            let buffer = UniformBufferArray::with_alignment(
-                device,
-                item_size as u64,
-                None,
-                Some(BufferUsages::COPY_DST),
-            );
+            let buffer = UniformBufferArray::new().with_alignment(item_size);
 
             let layout = BindGroupLayoutBuilder::new()
                 .with_label(ecs::ext::short_type_name::<Self>())
@@ -111,12 +117,7 @@ impl<S: ModelData> ShaderDataBuffer<S> {
             let batch_size =
                 (device.limits().max_storage_buffer_binding_size / item_size) * item_size;
 
-            let buffer = StorageBufferArray::with_alignment(
-                device,
-                item_size as u64,
-                None,
-                Some(BufferUsages::COPY_DST),
-            );
+            let buffer = StorageBufferArray::new().with_alignment(item_size);
 
             let layout = BindGroupLayoutBuilder::new()
                 .with_label(ecs::ext::short_type_name::<Self>())
@@ -145,18 +146,22 @@ impl<S: ModelData> ShaderDataBuffer<S> {
             return;
         };
 
-        let new_capacity = buffer_size.get() as usize / self.batch_size as usize
-            + (buffer_size.get() as usize % self.batch_size as usize).min(1);
+        let Some(buffer) = self.buffer.get() else {
+            return;
+        };
+
+        let new_capacity = buffer_size as usize / self.batch_size as usize
+            + (buffer_size as usize % self.batch_size as usize).min(1);
         let mut bind_groups = Vec::with_capacity(new_capacity);
 
         for index in 0..new_capacity {
             let offset = index as u64 * self.batch_size as u64;
-            let size = NonZero::new((buffer_size.get() - offset).min(self.batch_size as u64));
-            let bind_group = match &self.buffer {
-                GpuBufferArray::Uniform(buffer) => BindGroupBuilder::new(&self.layout)
+            let size = NonZero::new((buffer_size - offset).min(self.batch_size as u64));
+            let bind_group = match self.buffer.ty() {
+                GpuBufferType::Uniform => BindGroupBuilder::new(&self.layout)
                     .with_uniform(0, &buffer, offset, size)
                     .build(device),
-                GpuBufferArray::Storage(buffer) => BindGroupBuilder::new(&self.layout)
+                GpuBufferType::Storage => BindGroupBuilder::new(&self.layout)
                     .with_storage(0, &buffer, offset, size)
                     .build(device),
             };

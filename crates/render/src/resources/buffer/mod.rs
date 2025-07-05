@@ -129,6 +129,12 @@ impl From<wgpu::Buffer> for Buffer {
     }
 }
 
+impl AsRef<Buffer> for Buffer {
+    fn as_ref(&self) -> &Buffer {
+        self
+    }
+}
+
 impl AsRef<wgpu::Buffer> for Buffer {
     fn as_ref(&self) -> &wgpu::Buffer {
         &self.inner

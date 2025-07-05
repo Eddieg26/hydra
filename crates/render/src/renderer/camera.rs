@@ -6,9 +6,8 @@ use crate::{
     types::{Color, Viewport},
 };
 use asset::AssetId;
-use ecs::{Component, Entity, Resource, app::Main, system::unlifetime::SQuery};
+use ecs::{Component, Entity, IndexMap, Query, Resource};
 use math::{Mat4, Size, Vec3, Vec3A, Vec4, bounds::Aabb, sphere::Sphere};
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Projection {
@@ -91,7 +90,7 @@ impl Projection {
 #[derive(Debug, Clone, Component, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Camera {
     pub viewport: Viewport,
-    pub depth: u32,
+    pub order: u32,
     pub clear_color: Option<Color>,
     pub target: Option<AssetId<RenderTexture>>,
 }
@@ -100,68 +99,10 @@ impl Default for Camera {
     fn default() -> Self {
         Self {
             viewport: Viewport::new(0.0, 0.0, 1.0, 1.0, 0.0..1.0),
-            depth: Default::default(),
+            order: Default::default(),
             clear_color: Default::default(),
             target: Default::default(),
         }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct EntityCamera {
-    pub entity: Entity,
-    camera: Camera,
-}
-
-impl std::ops::Deref for EntityCamera {
-    type Target = Camera;
-
-    fn deref(&self) -> &Self::Target {
-        &self.camera
-    }
-}
-
-impl std::ops::DerefMut for EntityCamera {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.camera
-    }
-}
-
-#[derive(Default, Resource)]
-pub struct EntityCameras {
-    cameras: Vec<EntityCamera>,
-}
-
-impl AsRef<Vec<EntityCamera>> for EntityCameras {
-    fn as_ref(&self) -> &Vec<EntityCamera> {
-        &self.cameras
-    }
-}
-
-impl EntityCameras {
-    pub(crate) fn extract(
-        cameras: Main<SQuery<(Entity, &Camera)>>,
-        entity_cameras: &mut EntityCameras,
-    ) {
-        entity_cameras.cameras.clear();
-
-        for (entity, camera) in cameras.iter() {
-            entity_cameras.cameras.push(EntityCamera {
-                entity,
-                camera: camera.clone(),
-            });
-        }
-
-        entity_cameras.cameras.sort_by_key(|c| c.camera.depth);
-    }
-}
-
-impl<'a> IntoIterator for &'a EntityCameras {
-    type Item = &'a EntityCamera;
-    type IntoIter = std::slice::Iter<'a, EntityCamera>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.cameras.iter()
     }
 }
 
@@ -171,11 +112,12 @@ pub struct CameraRenderTarget {
     pub depth: wgpu::TextureView,
     pub clear: Option<Color>,
     pub target: Option<AssetId<RenderTexture>>,
+    pub order: u32,
 }
 
 #[derive(Default, Resource)]
 pub struct CameraRenderTargets {
-    targets: HashMap<Entity, CameraRenderTarget>,
+    targets: IndexMap<Entity, CameraRenderTarget>,
 }
 
 impl CameraRenderTargets {
@@ -189,7 +131,7 @@ impl CameraRenderTargets {
 
     pub(crate) fn queue(
         targets: &mut Self,
-        cameras: &EntityCameras,
+        cameras: Query<(Entity, &Camera)>,
         device: &RenderDevice,
         surface: &RenderSurface,
         surface_texture: &RenderSurfaceTexture,
@@ -197,10 +139,10 @@ impl CameraRenderTargets {
     ) {
         targets
             .targets
-            .retain(|t, _| cameras.into_iter().any(|c| &c.entity == t));
+            .retain(|t, _| cameras.into_iter().any(|c| &c.0 == t));
 
-        for camera in cameras {
-            if let Some(target) = targets.get(&camera.entity) {
+        for (entity, camera) in cameras.iter() {
+            if let Some(target) = targets.get(&entity) {
                 if match target.target {
                     Some(target) => Some(target) == camera.target,
                     None => target.size == surface.size(),
@@ -246,10 +188,13 @@ impl CameraRenderTargets {
                 depth: depth.create_view(&Default::default()),
                 clear: camera.clear_color,
                 target: camera.target,
+                order: camera.order,
             };
 
-            targets.targets.insert(camera.entity, target);
+            targets.targets.insert(entity, target);
         }
+
+        targets.targets.sort_by(|_, a, _, b| a.order.cmp(&b.order));
     }
 }
 
@@ -259,9 +204,9 @@ impl SubGraph for CameraSubGraph {
     const NAME: super::graph::Name = "CameraSubGraph";
 
     fn run(ctx: &mut super::graph::RenderContext) -> Result<(), RenderGraphError> {
-        let cameras = ctx.world().resource::<EntityCameras>();
-        for camera in cameras.into_iter() {
-            ctx.set_view(camera.entity);
+        let cameras = ctx.world().resource::<CameraRenderTargets>();
+        for entity in cameras.targets.keys() {
+            ctx.set_view(*entity);
             let _ = ctx.run_sub_graph(Self::NAME);
         }
 

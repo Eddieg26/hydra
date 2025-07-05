@@ -58,7 +58,7 @@ impl VertexBuffer {
     pub fn update<T: Pod + Zeroable>(&mut self, device: &RenderDevice, vertices: &[T]) {
         let size = vertices.len() * std::mem::size_of::<T>();
         if size > self.buffer.size() as usize {
-            let usage = self.buffer.as_ref().usage();
+            let usage = self.buffer.usage();
             self.buffer = Buffer::with_data(device, bytemuck::cast_slice(vertices), usage, None);
             self.len = vertices.len();
         } else {

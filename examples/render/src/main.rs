@@ -64,54 +64,69 @@ const QUAD_TEX_COORDS: &[math::Vec2] = &[
 ];
 
 fn main() {
-    App::new().add_plugins(RenderPlugin).run();
+    let fs = EmbeddedFs::new();
+    embed_asset!(fs, VERT_ID, "vert.wgsl", DefaultSettings::default());
+    embed_asset!(fs, VERT_ID_2, "vert2.wgsl", DefaultSettings::default());
+    embed_asset!(fs, FRAG_ID, "frag.wgsl", DefaultSettings::default());
+    embed_asset!(fs, FRAG_ID_2, "frag2.wgsl", DefaultSettings::default());
+    embed_asset!(
+        fs,
+        FRAG_ID_3,
+        "forward-lighting.wgsl",
+        DefaultSettings::default()
+    );
+    embed_asset!(
+        fs,
+        DRAW_LIGHT_FRAG,
+        "draw-light.frag.wgsl",
+        DefaultSettings::default()
+    );
+    embed_asset!(
+        fs,
+        DRAW_LIGHT_VERT,
+        "draw-light.vert.wgsl",
+        DefaultSettings::default()
+    );
+    embed_asset!(fs, CUBE_ID, "cube.obj", ObjImportSettings::default());
+    embed_asset!(
+        fs,
+        WIRE_SPHERE_ID,
+        "sphere.obj",
+        ObjImportSettings {
+            wireframe: true,
+            ..Default::default()
+        }
+    );
+    embed_asset!(fs, SWORD_ID, "sword.obj", ObjImportSettings::default());
+    embed_asset!(fs, PLANE_ID, "plane.obj", ObjImportSettings::default());
+    embed_asset!(fs, GENGAR_ID, "gengar.png", Texture2dSettings::default());
 
-    // let fs = EmbeddedFs::new();
-    // embed_asset!(fs, VERT_ID, "vert.wgsl", DefaultSettings::default());
-    // embed_asset!(fs, VERT_ID_2, "vert2.wgsl", DefaultSettings::default());
-    // embed_asset!(fs, FRAG_ID, "frag.wgsl", DefaultSettings::default());
-    // embed_asset!(fs, FRAG_ID_2, "frag2.wgsl", DefaultSettings::default());
-    // embed_asset!(
-    //     fs,
-    //     FRAG_ID_3,
-    //     "forward-lighting.wgsl",
-    //     DefaultSettings::default()
-    // );
-    // embed_asset!(
-    //     fs,
-    //     DRAW_LIGHT_FRAG,
-    //     "draw-light.frag.wgsl",
-    //     DefaultSettings::default()
-    // );
-    // embed_asset!(
-    //     fs,
-    //     DRAW_LIGHT_VERT,
-    //     "draw-light.vert.wgsl",
-    //     DefaultSettings::default()
-    // );
-    // embed_asset!(fs, CUBE_ID, "cube.obj", ObjImportSettings::default());
-    // embed_asset!(
-    //     fs,
-    //     WIRE_SPHERE_ID,
-    //     "sphere.obj",
-    //     ObjImportSettings {
-    //         wireframe: true,
-    //         ..Default::default()
-    //     }
-    // );
-    // embed_asset!(fs, SWORD_ID, "sword.obj", ObjImportSettings::default());
-    // embed_asset!(fs, PLANE_ID, "plane.obj", ObjImportSettings::default());
-    // embed_asset!(fs, GENGAR_ID, "gengar.png", Texture2dSettings::default());
+    let quad = Mesh::new(MeshTopology::TriangleList)
+        .with_attribute(MeshAttribute::new(
+            MeshAttributeType::Position,
+            MeshAttributeValues::Vec2(QUAD.to_vec()),
+        ))
+        .with_attribute(MeshAttribute::new(
+            MeshAttributeType::TexCoord0,
+            MeshAttributeValues::Vec2(QUAD_TEX_COORDS.to_vec()),
+        ));
 
-    // let quad = Mesh::new(MeshTopology::TriangleList)
-    //     .with_attribute(MeshAttribute::new(
-    //         MeshAttributeType::Position,
-    //         MeshAttributeValues::Vec2(QUAD.to_vec()),
-    //     ))
-    //     .with_attribute(MeshAttribute::new(
-    //         MeshAttributeType::TexCoord0,
-    //         MeshAttributeValues::Vec2(QUAD_TEX_COORDS.to_vec()),
-    //     ));
+    App::new()
+        .add_plugins(RenderPlugin)
+        .add_source("embedded", fs)
+        .add_asset(UNLIT_WHITE, UnlitColor::from(Color::white()))
+        .add_asset(UNLIT_RED, UnlitColor::from(Color::red()))
+        .add_asset(UNLIT_BLUE, UnlitColor::from(Color::blue()))
+        .add_asset(LIT_WHITE, LitColor::from(Color::white()))
+        .add_asset(LIT_RED, LitColor::from(Color::red()))
+        .add_asset(LIGHT_MAT, LightMaterial::from(Color::white()))
+        .add_asset(QUAD_ID, quad)
+        .load_asset::<Mesh>(SWORD_ID)
+        .load_asset::<Mesh>(CUBE_ID)
+        .load_asset::<Mesh>(PLANE_ID)
+        .load_asset::<Mesh>(WIRE_SPHERE_ID)
+        .load_asset::<Texture>(GENGAR_ID)
+        .run();
 
     // App::new()
     //     .add_plugins(ForwardLightingPlugin)
@@ -446,35 +461,29 @@ pub struct ForwardLighting {
     lights: ArrayBuffer<LightData>,
     light_count: UniformBuffer<u32>,
     layout: BindGroupLayout,
-    binding: BindGroup,
+    binding: Option<BindGroup>,
 }
 
 impl ForwardLighting {
     pub fn new(device: &RenderDevice) -> Self {
-        let lights = ArrayBuffer::new(
-            device,
-            1,
-            BufferUsages::STORAGE | BufferUsages::COPY_DST,
-            None,
-        );
-
-        let light_count = UniformBuffer::new(device, 0u32, None, Some(BufferUsages::COPY_DST));
+        let lights = ArrayBuffer::new(100, BufferUsages::UNIFORM | BufferUsages::COPY_DST);
+        let light_count = UniformBuffer::new(0);
 
         let layout = BindGroupLayoutBuilder::new()
             .with_storage(0, ShaderStages::FRAGMENT, false, true, None, None)
             .with_uniform(1, ShaderStages::FRAGMENT, false, None, None)
             .build(device);
 
-        let binding = BindGroupBuilder::new(&layout)
-            .with_storage(0, &lights, 0, None)
-            .with_uniform(1, &light_count, 0, None)
-            .build(device);
+        // let binding = BindGroupBuilder::new(&layout)
+        //     .with_storage(0, &lights, 0, None)
+        //     .with_uniform(1, &light_count, 0, None)
+        //     .build(device);
 
         Self {
             lights,
             light_count,
             layout,
-            binding,
+            binding: None,
         }
     }
 
@@ -491,11 +500,17 @@ impl ForwardLighting {
         self.light_count.set(self.lights.len() as u32);
         self.light_count.update(device);
 
-        if let Some(_) = self.lights.update(device) {
-            self.binding = BindGroupBuilder::new(&self.layout)
-                .with_storage(0, &self.lights, 0, None)
-                .with_uniform(1, &self.light_count, 0, None)
+        if let Some(lights) = self
+            .lights
+            .update(device)
+            .and_then(|_| self.lights.buffer())
+        {
+            let binding = BindGroupBuilder::new(&self.layout)
+                .with_storage(0, &lights, 0, None)
+                .with_uniform(1, &self.light_count.buffer().unwrap(), 0, None)
                 .build(device);
+
+            self.binding = Some(binding);
         }
     }
 
@@ -533,13 +548,13 @@ impl Lighting for ForwardLighting {
     }
 
     fn bind_group(&self) -> Option<&BindGroup> {
-        Some(&self.binding)
+        self.binding.as_ref()
     }
 }
 
 #[derive(Clone, Copy, Asset, AsBinding)]
 pub struct LitColor {
-    #[uniform(0, visibility(fragment))]
+    #[uniform(0)]
     color: Color,
 }
 

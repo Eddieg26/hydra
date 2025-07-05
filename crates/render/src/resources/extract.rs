@@ -198,6 +198,8 @@ impl AssetExtractors {
         extract_info: &mut ExtractInfo<R>,
         events: Main<EventReader<AssetEvent<R::Source>>>,
     ) {
+        extract_info.removed.clear();
+
         for event in events.into_inner() {
             match event {
                 AssetEvent::Added { id }
@@ -245,7 +247,6 @@ impl AssetExtractors {
         }
 
         assets.retain(|id, _| !extract_info.removed.contains(&id));
-        extract_info.removed.clear();
     }
 
     pub fn build(self) -> Vec<AssetExtractorConfig> {

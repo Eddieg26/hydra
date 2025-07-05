@@ -3,6 +3,7 @@ use crate::{
     Children, Command, Component, ComponentKit, Entity, EntityCommands, EntityMut, Events, Parent,
     SystemArg, World, system::Removed, world::WorldCell,
 };
+use derive_ecs::Event;
 
 pub struct Spawner<'world, 'state> {
     world: &'world mut World,
@@ -125,6 +126,9 @@ impl Command for Spawn {
     }
 }
 
+#[derive(Event)]
+pub struct Despawned(pub Entity);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Despawn(pub Entity);
 
@@ -134,10 +138,13 @@ impl Command for Despawn {
         let parent = world.get_component::<Parent>(self.0).copied();
 
         let mut stack = vec![self.0];
+        let mut despawned = Vec::new();
         while let Some(entity) = stack.pop() {
             let Some(row) = world.despawn(entity) else {
                 continue;
             };
+
+            despawned.push(Despawned(entity));
 
             let Some(children) = row.get::<Children>(id) else {
                 continue;
@@ -153,6 +160,9 @@ impl Command for Despawn {
         {
             children.retain(|child| *child != self.0);
         }
+
+        let mut events = world.resource_mut::<Events<Despawned>>().writer();
+        events.send_batch(despawned);
     }
 }
 

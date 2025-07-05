@@ -1,7 +1,7 @@
 use crate::{
     CameraRenderTargets, CameraSubGraph, DisableCulling, Draw, DrawPipeline, DrawTree, DrawView,
-    ExtractError, GpuTexture, LightingData, MaterialBinding, ObjImporter, PostProcess, PreProcess,
-    PreQueue, RenderGraphBuilder, RenderMesh, RenderTarget, Shader, SubMesh, Texture2dImporter,
+    ExtractError, GpuTexture, LightingData, MaterialBinding, ObjImporter, QueueDraws, QueueViews,
+    RenderGraphBuilder, RenderMesh, RenderTarget, Shader, SubMesh, Texture2dImporter,
     ViewDrawCalls, VisibleDraws,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     draw::{
@@ -11,9 +11,9 @@ use crate::{
             BatchedModelDataBuffer, ModelData, ModelDataBuffer, clear_model_data_buffers,
             update_model_data_buffers,
         },
-        view::{View, ViewDataBuffer},
+        view::{RenderViews, View},
     },
-    renderer::{Camera, EntityCameras, GraphPass, RenderGraph, SubGraph},
+    renderer::{Camera, GraphPass, RenderGraph, SubGraph},
     resources::{
         AssetExtractors, ExtractInfo, Fallbacks, Mesh, PipelineCache, RenderAsset, RenderAssets,
         RenderResource, ResourceExtractors, ShaderSource,
@@ -31,16 +31,16 @@ impl Plugin for RenderPlugin {
     fn setup(&mut self, app: &mut ecs::AppBuilder) {
         app.add_plugins((WindowPlugin, AssetPlugin))
             .add_sub_app(RenderApp)
-            .add_sub_phase(Run, PreProcess)
             .add_sub_phase(Run, Process)
-            .add_sub_phase(Run, PostProcess)
-            .add_sub_phase(Run, PreQueue)
             .add_sub_phase(Run, Queue)
+            .add_sub_phase(Queue, QueueViews)
+            .add_sub_phase(Queue, QueueDraws)
             .add_sub_phase(Run, PreRender)
             .add_sub_phase(Run, Render)
-            .add_sub_phase(Run, PostRender)
             .add_sub_phase(Run, Present)
+            .add_sub_phase(Run, PostRender)
             .add_systems(Init, RenderSurface::create_surface)
+            .add_systems(Init, RenderGraph::create_graph)
             .add_systems(Extract, RenderSurface::resize_surface)
             .add_systems(Queue, RenderSurface::queue_surface)
             .add_systems(Render, RenderGraph::run_graph)
@@ -71,6 +71,9 @@ impl Plugin for RenderPlugin {
         }
 
         let app = app.sub_app_mut(RenderApp).unwrap();
+        app.add_systems(Extract, ResourceExtractors::extract);
+        app.add_systems(Process, ResourceExtractors::process);
+
         let configs = app
             .remove_resource::<AssetExtractors>()
             .map(|a| a.build())
@@ -81,9 +84,7 @@ impl Plugin for RenderPlugin {
             app.add_systems(Process, config.process);
         }
 
-        app.add_systems(Extract, ResourceExtractors::extract);
-        app.add_systems(PreProcess, ResourceExtractors::process);
-        app.add_systems(PostProcess, PipelineCache::process);
+        app.add_systems(Process, PipelineCache::process);
     }
 }
 
@@ -167,10 +168,8 @@ impl Plugin for CameraPlugin {
             .register::<Camera>()
             .sub_app_mut(RenderApp)
             .unwrap()
-            .add_resource(EntityCameras::default())
             .add_resource(CameraRenderTargets::default())
-            .add_systems(Extract, EntityCameras::extract)
-            .add_systems(Queue, CameraRenderTargets::queue);
+            .add_systems(QueueViews, CameraRenderTargets::queue);
     }
 }
 
@@ -204,12 +203,12 @@ impl<V: View> Plugin for ViewPlugin<V> {
             render_app
                 .add_systems(
                     Extract,
-                    ViewDataBuffer::<V>::extract.when::<Exists<ViewDataBuffer<V>>>(),
+                    RenderViews::<V>::extract.when::<Exists<RenderViews<V>>>(),
                 )
-                .add_systems(Process, ViewDataBuffer::<V>::process);
+                .add_systems(Process, RenderViews::<V>::process);
         })
         .register::<V>()
-        .add_render_resource::<ViewDataBuffer<V>>();
+        .add_render_resource::<RenderViews<V>>();
     }
 }
 
@@ -267,9 +266,9 @@ impl<D: Draw> Plugin for DrawPlugin<D> {
                 .add_resource(VisibleDraws::<D>::new())
                 .add_resource(ViewDrawCalls::<DrawView<D>, <D::Material as Material>::Phase>::new())
                 .add_systems(Extract, DrawTree::<D>::extract)
-                .add_systems(PreQueue, VisibleDraws::<D>::queue)
+                .add_systems(QueueViews, VisibleDraws::<D>::queue)
                 .add_systems(
-                    Queue,
+                    QueueDraws,
                     ViewDrawCalls::<DrawView<D>, <D::Material as Material>::Phase>::queue::<
                         <D::Material as Material>::Lighting,
                         D::Material,

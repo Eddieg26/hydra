@@ -87,6 +87,7 @@ impl ApplicationHandler for WindowApp {
             let id = window.id();
             world.add_resource(window);
             world.send(WindowCreated::new(id));
+
             self.start();
         } else if let Some(exit) = self.update() {
             println!("Application exit: {}", exit);

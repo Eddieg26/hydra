@@ -1,6 +1,6 @@
 use crate::{
-    ArgItem, Component, Components, Entities, Event, EventRegistry, IntoSystemConfigs, Phase,
-    Resource, Resources, RunMode, Schedule, SystemArg, Systems, World, WorldMode,
+    ArgItem, Component, Components, Despawned, Entities, Event, EventRegistry, IntoSystemConfigs,
+    Phase, Resource, Resources, RunMode, Schedule, SystemArg, Systems, World, WorldMode,
     core::task::{CpuTaskPool, Task, TaskPoolSettings},
     ext,
     world::{Archetypes, WorldCell},
@@ -9,6 +9,8 @@ use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
 };
+
+pub mod sync;
 
 #[allow(unused_variables)]
 pub trait Plugin: 'static {
@@ -136,8 +138,11 @@ pub struct AppBuildInfo {
 
 impl AppBuildInfo {
     pub fn new() -> Self {
+        let mut world = World::new();
+        world.register_event::<Despawned>();
+
         Self {
-            world: World::new(),
+            world,
             schedule: Schedule::new(RunMode::Sequential),
             plugins: Vec::new(),
             registered: HashSet::new(),

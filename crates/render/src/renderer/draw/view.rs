@@ -11,7 +11,7 @@ use encase::{ShaderType, internal::WriteInto};
 use math::Mat4;
 use std::collections::HashMap;
 use transform::{GlobalTransform, LocalTransform};
-use wgpu::{BufferUsages, ShaderStages};
+use wgpu::ShaderStages;
 
 pub trait ViewData: ShaderType + WriteInto + Send + Sync + 'static {
     fn projection(&self) -> Mat4;
@@ -58,36 +58,32 @@ impl<V: View> RenderView<V> {
 }
 
 #[derive(Resource)]
-pub struct ViewDataBuffer<V: View> {
+pub struct RenderViews<V: View> {
     views: HashMap<Entity, RenderView<V>>,
     buffer: UniformBufferArray<V::Data>,
     layout: BindGroupLayout,
-    bind_group: BindGroup,
+    bind_group: Option<BindGroup>,
 }
 
-impl<V: View> ViewDataBuffer<V> {
+impl<V: View> RenderViews<V> {
     pub const BINDING: u32 = 0;
 
     pub fn new(device: &RenderDevice) -> Self {
-        let buffer = UniformBufferArray::new(device, None, Some(BufferUsages::COPY_DST));
+        let buffer = UniformBufferArray::new();
 
         let layout = BindGroupLayoutBuilder::new()
             .with_uniform(Self::BINDING, ShaderStages::all(), true, None, None)
-            .build(device);
-
-        let bind_group = BindGroupBuilder::new(&layout)
-            .with_uniform(Self::BINDING, &buffer, 0, None)
             .build(device);
 
         Self {
             views: HashMap::new(),
             buffer,
             layout,
-            bind_group,
+            bind_group: None,
         }
     }
 
-    pub fn views(&self) -> impl Iterator<Item = (&Entity, &RenderView<V>)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&Entity, &RenderView<V>)> {
         self.views.iter()
     }
 
@@ -99,8 +95,8 @@ impl<V: View> ViewDataBuffer<V> {
         &self.layout
     }
 
-    pub fn bind_group(&self) -> &BindGroup {
-        &self.bind_group
+    pub fn bind_group(&self) -> Option<&BindGroup> {
+        self.bind_group.as_ref()
     }
 
     pub(crate) fn extract(
@@ -139,16 +135,22 @@ impl<V: View> ViewDataBuffer<V> {
             .collect::<HashMap<_, _>>();
     }
 
-    pub(crate) fn process(buffer: &mut Self, device: &RenderDevice) {
-        if buffer.as_mut().update(device).is_some() {
-            buffer.bind_group = BindGroupBuilder::new(&buffer.layout)
-                .with_uniform(Self::BINDING, buffer.as_ref(), 0, None)
+    pub(crate) fn process(views: &mut Self, device: &RenderDevice) {
+        if let Some(buffer) = views
+            .as_mut()
+            .update(device)
+            .and_then(|_| views.buffer.inner())
+        {
+            let bind_group = BindGroupBuilder::new(&views.layout)
+                .with_uniform(Self::BINDING, &buffer, 0, None)
                 .build(device);
+
+            views.bind_group = Some(bind_group);
         }
     }
 }
 
-impl<V: View> RenderResource for ViewDataBuffer<V> {
+impl<V: View> RenderResource for RenderViews<V> {
     type Arg = Read<RenderDevice>;
 
     fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
@@ -156,13 +158,13 @@ impl<V: View> RenderResource for ViewDataBuffer<V> {
     }
 }
 
-impl<V: View> AsRef<UniformBufferArray<V::Data>> for ViewDataBuffer<V> {
+impl<V: View> AsRef<UniformBufferArray<V::Data>> for RenderViews<V> {
     fn as_ref(&self) -> &UniformBufferArray<V::Data> {
         &self.buffer
     }
 }
 
-impl<V: View> AsMut<UniformBufferArray<V::Data>> for ViewDataBuffer<V> {
+impl<V: View> AsMut<UniformBufferArray<V::Data>> for RenderViews<V> {
     fn as_mut(&mut self) -> &mut UniformBufferArray<V::Data> {
         &mut self.buffer
     }

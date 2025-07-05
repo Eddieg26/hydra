@@ -76,8 +76,8 @@ pub fn expand_create_bind_group(input: &mut DeriveInput) -> Result<TokenStream> 
                     });
 
                     bindings.extend(quote! {
-                        let buffer = StorageBuffer::new(device, self.#ident, None, None);
-                        #BINDINGS.with_storage(#binding, &buffer, 0, None);
+                        let buffer = StorageBuffer::new(self.#ident);
+                        #BINDINGS.with_storage(#binding, buffer.buffer().unwrap(), 0, None);
                     });
                 }
                 BindingType::Texture {
@@ -133,8 +133,8 @@ pub fn expand_create_bind_group(input: &mut DeriveInput) -> Result<TokenStream> 
                 #(#fields: #types),*
             }
 
-            let buffer = UniformBuffer::new(device, #struct_name { #(#fields: self.#fields),* }, None, None);
-            #BINDINGS.with_uniform(#binding, &buffer, 0, None);
+            let buffer = UniformBuffer::new(#struct_name { #(#fields: self.#fields),* });
+            #BINDINGS.with_uniform(#binding, buffer.buffer().unwrap(), 0, None);
         });
     }
 

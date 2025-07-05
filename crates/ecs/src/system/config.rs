@@ -2,7 +2,7 @@ use super::{
     System, SystemCell, SystemCondition, SystemId, SystemInit, SystemMeta, SystemName, SystemRun,
     SystemState, SystemUpdate,
 };
-use crate::{AccessError, Frame, Resource, World, WorldAccess, WorldMode};
+use crate::{AccessError, Frame, Resource, SystemArg, World, WorldAccess, WorldMode};
 use std::{cell::UnsafeCell, collections::HashSet};
 
 pub struct SystemConfig {
@@ -333,7 +333,7 @@ pub struct Not<T>(T);
 pub struct Or<T>(T);
 pub struct Modified<T>(std::marker::PhantomData<T>);
 pub struct Added<T>(std::marker::PhantomData<T>);
-pub struct Removed<T>(T);
+pub struct Removed<T>(pub T);
 impl<T> From<T> for Removed<T> {
     fn from(value: T) -> Self {
         Self(value)
@@ -351,6 +351,24 @@ impl<T> std::ops::Deref for Removed<T> {
 impl<T> std::ops::DerefMut for Removed<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+unsafe impl<T: Resource + Send> SystemArg for Option<Removed<T>> {
+    type Item<'world, 'state> = Self;
+
+    type State = ();
+
+    fn init(world: &mut World, access: &mut WorldAccess) -> Self::State {
+        access.resources_mut().reads(world.register_resource::<T>());
+    }
+
+    unsafe fn get<'world, 'state>(
+        _: &'state mut Self::State,
+        mut world: crate::world::WorldCell<'world>,
+        _: &'world SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        unsafe { world.get_mut().remove_resource::<T>().map(Removed) }
     }
 }
 

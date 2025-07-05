@@ -1,7 +1,7 @@
 use crate::{
     ComputePipeline, PipelineCache, PipelineId, RenderDevice, RenderPipeline, RenderSurface,
 };
-use ecs::{Entity, IndexMap, Resource, SystemMeta, World};
+use ecs::{Commands, Entity, IndexMap, Resource, SystemMeta, World};
 use smol::lock::RwLock;
 use std::{
     any::Any,
@@ -19,10 +19,17 @@ pub type Creator =
     fn(&World, &RenderDevice, &RenderSurface, &Bobject) -> Result<Bobject, RenderGraphError>;
 type Passes = IndexMap<Name, PassNode>;
 
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum RenderGraphError {
+    #[error("Failed to build render graph")]
+    Build,
+    #[error("Missing Render View")]
     MissingView,
+    #[error("Missing Resource: {resource} for pass {pass}")]
     MissingResource { pass: Name, resource: NodeId },
+    #[error("Missing Render target for camera: {entity}")]
     MissingRenderTarget { entity: Entity },
+    #[error("Render graph error: {0}")]
     Custom(String),
 }
 
@@ -609,5 +616,15 @@ impl RenderGraph {
         meta: &SystemMeta,
     ) {
         graph.run(world, device, surface, meta);
+    }
+
+    pub(crate) fn create_graph(mut commands: Commands) {
+        commands.add(|world: &mut World| {
+            let builder = world
+                .remove_resource::<RenderGraphBuilder>()
+                .unwrap_or(RenderGraphBuilder::new());
+
+            world.add_resource(builder.build());
+        });
     }
 }

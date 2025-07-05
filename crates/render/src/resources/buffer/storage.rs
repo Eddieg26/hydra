@@ -96,7 +96,7 @@ impl<T: ShaderType + WriteInto> StorageBuffer<T> {
 pub struct StorageBufferArray<T: ShaderType> {
     data: EncaseDynamicStorageBuffer<Vec<u8>>,
     buffer: Option<Buffer>,
-    alignment: u64,
+    alignment: u32,
     label: Label,
     usages: BufferUsages,
     is_dirty: bool,
@@ -106,9 +106,9 @@ pub struct StorageBufferArray<T: ShaderType> {
 impl<T: ShaderType> StorageBufferArray<T> {
     pub fn new() -> Self {
         Self {
-            data: EncaseDynamicStorageBuffer::new_with_alignment(Vec::new(), T::min_size().get()),
+            data: EncaseDynamicStorageBuffer::new(Vec::new()),
             buffer: None,
-            alignment: T::min_size().get(),
+            alignment: T::min_size().get() as u32,
             label: None,
             usages: BufferUsages::STORAGE | BufferUsages::COPY_DST,
             is_dirty: false,
@@ -116,18 +116,9 @@ impl<T: ShaderType> StorageBufferArray<T> {
         }
     }
 
-    pub fn with_alignment(alignment: u64) -> Self {
-        let data = EncaseDynamicStorageBuffer::new_with_alignment(Vec::new(), alignment);
-
-        Self {
-            data,
-            buffer: None,
-            alignment: T::min_size().get(),
-            label: None,
-            usages: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-            is_dirty: false,
-            _marker: std::marker::PhantomData,
-        }
+    pub fn with_alignment(mut self, alignment: u32) -> Self {
+        self.data = EncaseDynamicStorageBuffer::new_with_alignment(Vec::new(), alignment as u64);
+        self
     }
 
     pub fn with_label(mut self, label: Label) -> Self {
@@ -156,7 +147,7 @@ impl<T: ShaderType> StorageBufferArray<T> {
         self.is_dirty
     }
 
-    pub fn alignment(&self) -> u64 {
+    pub fn alignment(&self) -> u32 {
         self.alignment
     }
 
@@ -204,7 +195,7 @@ impl<T: ShaderType + WriteInto> StorageBufferArray<T> {
     pub fn set(&mut self, index: usize, values: impl IntoIterator<Item = T>) -> Vec<DynamicOffset> {
         self.is_dirty = true;
         self.data
-            .set_offset(index as wgpu::BufferAddress * self.alignment);
+            .set_offset(index as wgpu::BufferAddress * self.alignment as u64);
 
         let offsets = values
             .into_iter()

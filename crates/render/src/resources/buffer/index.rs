@@ -133,7 +133,7 @@ impl IndexBuffer {
     pub fn update(&mut self, device: &RenderDevice, indices: &Indices) {
         let size = indices.size() as usize;
         if size > self.buffer.size() as usize {
-            let usage = self.buffer.as_ref().usage();
+            let usage = self.buffer.usage();
             self.buffer = Buffer::with_data(device, indices.data(), usage, None);
             self.len = indices.len();
             self.format = indices.format();
