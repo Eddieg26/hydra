@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ecs = { path = "../ecs" }
+asset = { path = "../asset" }
+render = { path = "../render" }
+transform = { path = "../transform" }
+math = { path = "../math" }

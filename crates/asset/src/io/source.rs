@@ -6,6 +6,7 @@ use crate::{
     io::{deserialize, serialize},
 };
 use serde::{Deserialize, Serialize};
+use smol::io::AsyncReadExt;
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -301,17 +302,24 @@ impl AssetSource {
         path.append_ext("meta")
     }
 
+    pub async fn read_to_string(&self, path: &Path) -> Result<String, AssetIoError> {
+        let mut reader = self.reader(path).await?;
+        let mut content = String::new();
+        reader.read_to_string(&mut content).await?;
+        Ok(content)
+    }
+
     pub async fn read_asset_bytes(&self, path: &Path) -> Result<Vec<u8>, AssetIoError> {
         let mut reader = self.reader(path).await?;
         let mut bytes = vec![];
-        reader.read_to_end(&mut bytes).await?;
+        AsyncReader::read_to_end(&mut reader, &mut bytes).await?;
         Ok(bytes)
     }
 
     pub async fn read_metadata_bytes(&self, path: &Path) -> Result<Vec<u8>, AssetIoError> {
         let mut reader = self.reader(&Self::metadata_path(path)).await?;
         let mut bytes = vec![];
-        reader.read_to_end(&mut bytes).await?;
+        AsyncReader::read_to_end(&mut reader, &mut bytes).await?;
         Ok(bytes)
     }
 
