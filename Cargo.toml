@@ -14,6 +14,7 @@ members = [
     "crates/ecs",
     "crates/math",
     "crates/render",
+    "crates/render-3d",
     "crates/transform",
     "crates/window",
     "examples/ecs/*",
