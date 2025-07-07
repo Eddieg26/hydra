@@ -22,28 +22,6 @@ pub struct AssetPath<'a> {
     name: Option<Box<str>>,
 }
 
-impl<'a> From<AssetPath<'a>> for PathBuf {
-    fn from(value: AssetPath<'a>) -> Self {
-        let source = match value.source {
-            SourceName::Default => "",
-            SourceName::Name(ref name) => name,
-        };
-
-        let path = format!("{}://{}", source, value.path.display());
-        match &value.name {
-            Some(name) => PathBuf::from(format!("{}@{}", path, &name)),
-            None => PathBuf::from(path),
-        }
-    }
-}
-
-impl std::fmt::Display for AssetPath<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let path: PathBuf = self.into();
-        write!(f, "{}", path.display())
-    }
-}
-
 impl<'a> AssetPath<'a> {
     pub fn new(source: SourceName<'a>, path: impl AsRef<Path>) -> Self {
         Self {
@@ -136,6 +114,27 @@ impl<'a> AssetPath<'a> {
             path: self.path,
             name: self.name,
         }
+    }
+}
+
+impl<'a> From<AssetPath<'a>> for PathBuf {
+    fn from(value: AssetPath<'a>) -> Self {
+        let path = match value.source {
+            SourceName::Default => value.path.display().to_string(),
+            SourceName::Name(ref name) => format!("{}://{}", name, value.path.display()),
+        };
+
+        match &value.name {
+            Some(name) => PathBuf::from(format!("{}@{}", path, &name)),
+            None => PathBuf::from(path),
+        }
+    }
+}
+
+impl std::fmt::Display for AssetPath<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let path: PathBuf = self.into();
+        write!(f, "{}", path.display())
     }
 }
 

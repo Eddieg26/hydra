@@ -310,37 +310,55 @@ impl AssetImporters {
 
 #[derive(thiserror::Error, Debug, Event)]
 pub enum ImportError {
-    #[error("{0}")]
-    File(AssetIoError),
+    #[error("Import failed for asset {path}: {error}")]
+    File {
+        path: AssetPath<'static>,
+        error: AssetIoError,
+    },
 
-    #[error("{0}")]
-    Folder(AssetIoError),
+    #[error("Failed to read folder {path}: {error}")]
+    Folder {
+        path: AssetPath<'static>,
+        error: AssetIoError,
+    },
 
-    #[error("Source: {name} {error}")]
+    #[error("Failed to read source {name}: {error}")]
     Source {
         name: SourceName<'static>,
         error: AssetIoError,
     },
 
-    #[error("{0}")]
-    LoadAsset(AssetIoError),
+    #[error("Failed to load asset {path}: {error}")]
+    LoadAsset { path: AssetPath<'static>, error: AssetIoError },
 
-    #[error("{0}")]
-    LoadArtifact(AssetIoError),
+    #[error("Failed to load artifact {:?}: {}", id, error)]
+    LoadArtifact { id: ErasedId, error: AssetIoError },
 
-    #[error("{0}")]
-    LoadMetadata(AssetIoError),
+    #[error("Failed to load metadata for asset {path}: {error}")]
+    LoadMetadata {
+        path: AssetPath<'static>,
+        error: AssetIoError,
+    },
 
-    #[error("{0}")]
-    ImportAsset(BoxedError),
+    #[error("Failed to import asset {path}: {error}")]
+    ImportAsset {
+        path: AssetPath<'static>,
+        error: BoxedError,
+    },
 
-    #[error("{0}")]
-    SaveAsset(AssetIoError),
+    #[error("Failed to import asset {path}: {error}")]
+    SaveAsset {
+        path: AssetPath<'static>,
+        error: AssetIoError,
+    },
 
-    #[error("{0}")]
-    ProcessAsset(BoxedError),
+    #[error("Failed to process asset {path}: {error}")]
+    ProcessAsset {
+        path: AssetPath<'static>,
+        error: BoxedError,
+    },
 
-    #[error("{0}")]
+    #[error("Unknown error occurred while importing asset {0}")]
     Unknown(AssetIoError),
 }
 

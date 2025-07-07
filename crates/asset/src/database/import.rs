@@ -180,13 +180,13 @@ impl AssetDatabase {
             }
 
             match source.is_dir(path.path()).await {
-                Ok(true) => match self.import_dir(path, source).await {
+                Ok(true) => match self.import_dir(path.clone(), source).await {
                     Ok(info) => {
                         imported.extend(info.imported);
                         removed.extend(info.removed);
                     }
                     Err(error) => {
-                        self.send_event(ImportError::Folder(error)).await;
+                        self.send_event(ImportError::Folder { path, error }).await;
                     }
                 },
                 Ok(false) => {
@@ -202,8 +202,8 @@ impl AssetDatabase {
                         Ok(Some(path)) => import.push(path.into_owned()),
                         Ok(None) => continue,
                         Err(error) => {
-                            self.send_event(ImportError::File(error)).await;
-                            skip.insert(path.into_owned());
+                            skip.insert(path.clone().into_owned());
+                            self.send_event(ImportError::File { path, error }).await;
                         }
                     }
                 }
@@ -315,7 +315,8 @@ impl AssetDatabase {
             let mut reader = match source.reader(path.path()).await {
                 Ok(reader) => reader,
                 Err(error) => {
-                    self.send_event(ImportError::LoadAsset(error)).await;
+                    self.send_event(ImportError::LoadAsset { path, error })
+                        .await;
                     continue;
                 }
             };
@@ -348,14 +349,19 @@ impl AssetDatabase {
             let artifacts = match importer.import(ctx, &mut reader, &metadata).await {
                 Ok(artifacts) => artifacts,
                 Err(error) => {
-                    self.send_event(ImportError::ImportAsset(error)).await;
+                    self.send_event(ImportError::ImportAsset { path, error })
+                        .await;
                     continue;
                 }
             };
 
             for artifact in artifacts {
                 if let Err(error) = self.config.cache().save_temp_artifact(&artifact).await {
-                    self.send_event(ImportError::SaveAsset(error)).await;
+                    self.send_event(ImportError::SaveAsset {
+                        path: artifact.meta.path,
+                        error,
+                    })
+                    .await;
                     continue;
                 }
 
@@ -387,7 +393,8 @@ impl AssetDatabase {
             let mut artifact = match self.config.cache().get_temp_artifact(id).await {
                 Ok(artifact) => artifact,
                 Err(error) => {
-                    self.send_event(ImportError::LoadArtifact(error)).await;
+                    self.send_event(ImportError::LoadArtifact { id, error })
+                        .await;
                     continue;
                 }
             };
@@ -406,7 +413,11 @@ impl AssetDatabase {
                 let metadata = match source.read_metadata_bytes(artifact.path().path()).await {
                     Ok(metadata) => metadata,
                     Err(error) => {
-                        self.send_event(ImportError::LoadMetadata(error)).await;
+                        self.send_event(ImportError::LoadMetadata {
+                            path: artifact.meta.path,
+                            error,
+                        })
+                        .await;
                         continue;
                     }
                 };
@@ -434,14 +445,19 @@ impl AssetDatabase {
                             .collect();
                     }
                     Err(error) => {
-                        self.send_event(ImportError::ProcessAsset(error)).await;
+                        self.send_event(ImportError::ProcessAsset {
+                            path: artifact.meta.path,
+                            error,
+                        })
+                        .await;
                         continue;
                     }
                 }
             }
 
             if let Err(error) = self.config.cache().save_artifact(&artifact).await {
-                self.send_event(ImportError::SaveAsset(error)).await;
+                self.send_event(ImportError::SaveAsset { path: artifact.meta.path, error })
+                    .await;
             } else if self.states.read().await.get_load_state(id).can_reload() {
                 self.reload(id);
             }
