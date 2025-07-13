@@ -1,25 +1,34 @@
 use asset::{
-    Asset, AssetEvent, AssetId, DefaultSettings, database::load::LoadError, embed_asset,
-    importer::ImportError, io::EmbeddedFs, plugin::AssetAppExt,
+    Artifact, Asset, AssetCache, AssetDatabase, AssetDatabaseBuilder, AssetEvent, AssetId,
+    AssetMetadata, AssetType, DefaultSettings, ErasedId,
+    database::AssetDatabaseError,
+    embed_asset,
+    ext::{DeserializeExt, SerializeExt},
+    io::{AssetPath, EmbeddedFs, FileSystem, LocalFs, VirtualFs},
+    plugin::{AssetAppExt, AssetPlugin},
 };
 use bytemuck::{Pod, Zeroable};
 use ecs::{
     App, Component, EventReader, Extract, Init, IntoSystemConfig, Plugin, Resource, Spawner, Start,
     app::Main,
+    core::task::{IoTaskPool, TaskPoolBuilder, block_on},
     system::Exists,
     unlifetime::{Read, SQuery},
 };
 use math::{Quat, Vec3};
 use render::{
     ArrayBuffer, AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder,
-    BlendMode, Camera, Color, DisableCulling, Draw, Indices, Lighting, LightingData, Material,
-    Mesh, MeshAttribute, MeshAttributeType, MeshAttributeValues, MeshTopology, ObjImportSettings,
-    PostRender, Process, Projection, RenderApp, RenderDevice, RenderPhase, Renderer, Shader,
-    ShaderSource, ShaderType, Texture, Texture2dSettings, Unlit, View, ViewData,
+    BlendMode, Camera, Color, DisableCulling, Draw, GpuShader, Indices, Lighting, LightingData,
+    Material, Mesh, MeshAttribute, MeshAttributeType, MeshAttributeValues, MeshTopology,
+    ObjImportSettings, ObjImporter, PostRender, Process, Projection, RenderApp, RenderDevice,
+    RenderPhase, Renderer, Shader, ShaderType, SubMesh, Texture, Texture2dImporter,
+    Texture2dSettings, Unlit, View, ViewData,
     plugin::{RenderAppExt, RenderPlugin},
     uniform::UniformBuffer,
     wgpu::{BufferUsages, ShaderStages},
 };
+use serde::{Deserialize, Serialize};
+use smol::io::{AsyncReadExt, AsyncWriteExt};
 use transform::{GlobalTransform, Transform};
 use window::plugin::WindowPlugin;
 
@@ -170,24 +179,22 @@ fn main() {
                 })
                 .finish();
         })
-        .run();
+        .add_systems(
+            Start,
+            |errors: EventReader<AssetDatabaseError>,
+             shaders: EventReader<AssetEvent<Shader>>,
+             meshes: EventReader<AssetEvent<Mesh>>,
+             lit: EventReader<AssetEvent<LitColor>>| {
+                for error in errors {
+                    println!("{error}");
+                }
 
-    //     .add_systems(
-    //         Start,
-    //         |import_errors: EventReader<ImportError>,
-    //          load_errors: EventReader<LoadError>,
-    //          events: EventReader<AssetEvent<Mesh>>| {
-    //             for error in import_errors {
-    //                 println!("Import error: {}", error);
-    //             }
-    //             for error in load_errors {
-    //                 println!("Load error: {}", error);
-    //             }
-    //             for event in events {
-    //                 println!("Event: {:?}", event);
-    //             }
-    //         },
-    //     )
+                for event in lit {
+                    println!("{:?}", event);
+                }
+            },
+        )
+        .run();
 }
 
 pub struct Opaque3d;
@@ -197,7 +204,7 @@ impl RenderPhase for Opaque3d {
     }
 }
 
-#[derive(Clone, Asset, AsBinding)]
+#[derive(Debug, Clone, Asset, AsBinding, Serialize, Deserialize)]
 pub struct UnlitColor {
     #[uniform(0)]
     color: Color,
@@ -220,7 +227,6 @@ impl Material for UnlitColor {
 }
 
 #[derive(Clone, Asset, AsBinding)]
-#[reload]
 pub struct UnlitTexture {
     #[texture(0)]
     #[sampler(1)]

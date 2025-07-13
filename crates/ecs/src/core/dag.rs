@@ -145,6 +145,11 @@ impl<N> IndexDag<N> {
         Ok(&self.topology)
     }
 
+    pub fn build_immutable(mut self) -> Result<ImmutableIndexDag<N>, CyclicDependency> {
+        self.build()?;
+        Ok(self.into_immutable())
+    }
+
     pub fn into_immutable(self) -> ImmutableIndexDag<N> {
         ImmutableIndexDag {
             nodes: self.nodes.into_boxed_slice(),
@@ -153,7 +158,6 @@ impl<N> IndexDag<N> {
             topology: self.topology.into_boxed_slice(),
         }
     }
-
 
     pub fn into_values(self) -> DagValues<N> {
         DagValues {

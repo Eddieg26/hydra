@@ -1,7 +1,7 @@
 use crate::{
     CameraRenderTargets, CameraSubGraph, DisableCulling, Draw, DrawPipeline, DrawTree, DrawView,
     ExtractError, GpuTexture, LightingData, MaterialBinding, ObjImporter, ProcessAssets,
-    QueueDraws, QueueViews, RenderGraphBuilder, RenderMesh, RenderTarget, Shader, SubMesh,
+    QueueDraws, QueueViews, RenderGraphBuilder, RenderMesh, RenderTarget, GpuShader, SubMesh,
     Texture2dImporter, ViewDrawCalls, VisibleDraws,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     draw::{
@@ -16,7 +16,7 @@ use crate::{
     renderer::{Camera, GraphPass, RenderGraph, SubGraph},
     resources::{
         AssetExtractors, ExtractInfo, Fallbacks, Mesh, PipelineCache, RenderAsset, RenderAssets,
-        RenderResource, ResourceExtractors, ShaderSource,
+        RenderResource, ResourceExtractors, Shader,
     },
     surface::{RenderSurface, RenderSurfaceTexture},
 };
@@ -57,12 +57,12 @@ impl Plugin for RenderPlugin {
             .register_event::<ExtractError>();
 
         app.add_render_resource::<Fallbacks>()
-            .add_render_asset::<Shader>()
+            .add_render_asset::<GpuShader>()
             .add_render_asset::<RenderMesh>()
             .add_render_asset::<GpuTexture>()
             .add_render_asset::<RenderTarget>()
             .add_render_asset::<SubMesh>()
-            .add_importer::<ShaderSource>()
+            .add_importer::<Shader>()
             .add_importer::<ObjImporter>()
             .add_importer::<Texture2dImporter>()
             .add_loader::<SubMesh>()
@@ -287,8 +287,8 @@ impl<D: Draw> Plugin for DrawPlugin<D> {
         })
         .register::<D>()
         .register::<GlobalTransform>()
-        .load_asset::<Shader>(D::shader().into())
-        .load_asset::<Shader>(D::Material::shader().into())
+        .load_asset::<GpuShader>(D::shader().into())
+        .load_asset::<GpuShader>(D::Material::shader().into())
         .add_render_resource::<LightingData<<D::Material as Material>::Lighting>>()
         .add_render_resource::<DrawPipeline<D>>();
 

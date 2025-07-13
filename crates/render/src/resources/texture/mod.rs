@@ -1,6 +1,6 @@
 use super::{Label, RenderAsset};
 use crate::device::RenderDevice;
-use asset::{Asset, Settings, importer::AssetImporter};
+use asset::{ext::PathExt, importer::AssetImporter, Asset, Settings};
 use ecs::system::unlifetime::Read;
 use smol::io::AsyncAsSync;
 use std::{ops::Range, sync::Arc};
@@ -420,7 +420,7 @@ impl AssetImporter for Texture2dImporter {
     async fn import(
         ctx: &mut asset::importer::ImportContext<'_>,
         reader: &mut dyn asset::io::AsyncReader,
-        metadata: &asset::AssetMetadata<Self::Settings>,
+        metadata: &asset::AssetSettings<Self::Settings>,
     ) -> Result<Self::Asset, Self::Error> {
         use image::error::*;
         let format = match ctx.path().ext() {

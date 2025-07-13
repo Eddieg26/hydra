@@ -1,137 +1,86 @@
 use super::AssetDatabase;
 use crate::{
-    asset::{Asset, AssetAction, AssetId, AssetType, ErasedAsset, ErasedId},
-    database::load::LoadPath,
+    AssetEvent, Assets,
+    asset::{Asset, AssetId, ErasedId},
+    database::state::LoadDependencies,
+    ext::DeserializeExt,
+    io::path::LoadPath,
 };
-use ecs::{Command, Commands, World};
-use serde::Deserialize;
+use ecs::{Command, Commands, Events, World};
 use std::{any::TypeId, collections::HashSet};
 
-pub struct LoadDependencies {
-    pub parent: Option<ErasedId>,
-    pub dependencies: Vec<ErasedId>,
-}
-
-impl LoadDependencies {
-    pub fn new(parent: Option<ErasedId>, dependencies: impl IntoIterator<Item = ErasedId>) -> Self {
-        Self {
-            parent,
-            dependencies: dependencies.into_iter().collect(),
-        }
-    }
-}
-
-pub struct LoadAsset<A: Asset + for<'a> Deserialize<'a>>(
-    LoadPath<'static>,
-    std::marker::PhantomData<A>,
-);
-impl<A: Asset + for<'a> Deserialize<'a>, P: Into<LoadPath<'static>>> From<P> for LoadAsset<A> {
+pub struct LoadAsset<A: Asset + DeserializeExt>(LoadPath<'static>, std::marker::PhantomData<A>);
+impl<A: Asset + DeserializeExt, P: Into<LoadPath<'static>>> From<P> for LoadAsset<A> {
     fn from(value: P) -> Self {
         Self(value.into(), Default::default())
     }
 }
 
-impl<A: Asset + for<'a> Deserialize<'a>> Command for LoadAsset<A> {
+impl<A: Asset + DeserializeExt> Command for LoadAsset<A> {
     fn execute(self, _: &mut World) {
         let _ = AssetDatabase::get().load::<A>(self.0);
     }
 }
 
-pub enum AssetCommand {
-    Add {
-        id: ErasedId,
-        ty: AssetType,
-        asset: ErasedAsset,
-        dependencies: Option<LoadDependencies>,
-    },
-    Modify {
-        id: ErasedId,
-        ty: AssetType,
-    },
-    Remove {
-        id: ErasedId,
-    },
-    Loaded {
-        id: ErasedId,
-        ty: AssetType,
-    },
+pub struct AddAsset<A: Asset> {
+    id: AssetId<A>,
+    asset: A,
+    dependencies: Option<LoadDependencies>,
 }
 
-impl Command for AssetCommand {
-    fn execute(self, world: &mut ecs::World) {
-        use AssetCommand::{Add, Loaded, Modify, Remove};
+impl<A: Asset> AddAsset<A> {
+    pub fn new(id: AssetId<A>, asset: A, dependencies: Option<LoadDependencies>) -> Self {
+        Self {
+            id,
+            asset,
+            dependencies,
+        }
+    }
+}
 
+impl<A: Asset> Command for AddAsset<A> {
+    fn execute(self, world: &mut World) {
         let db = AssetDatabase::get();
 
-        match self {
-            Add {
-                id,
+        world
+            .resource_mut::<Assets<A>>()
+            .insert(self.id, self.asset);
+
+        world
+            .resource_mut::<Events<AssetEvent<A>>>()
+            .writer()
+            .send(AssetEvent::Added { id: self.id });
+
+        if let Some(dependencies) = self.dependencies {
+            let ty = db.registry().get_ty(TypeId::of::<A>()).unwrap();
+            let loaded = db.states.write_blocking().loaded(
+                self.id.into(),
                 ty,
-                asset,
-                dependencies,
-            } => {
-                let meta = db.config.registry().get(ty).unwrap();
-                meta.add(world, id, asset);
+                &dependencies.dependencies,
+                dependencies.parent,
+            );
 
-                if let Some(dependencies) = dependencies {
-                    let loaded = db.states.write_blocking().loaded(
-                        id,
-                        ty,
-                        &dependencies.dependencies,
-                        dependencies.parent,
-                        meta.dependency_unload_action,
-                    );
-
-                    for (id, ty) in loaded {
-                        let meta = db.config.registry().get(ty).unwrap();
-                        meta.loaded(world, id);
-                    }
-                }
-            }
-            Modify { id, ty } => {
-                let meta = db.config.registry().get(ty).unwrap();
-                meta.modified(world, id);
-            }
-            Remove { id } => Self::remove_asset(world, db, vec![id]),
-            Loaded { id, ty } => {
-                let meta = db.config.registry().get(ty).unwrap();
+            for (id, ty) in loaded {
+                let meta = db.config.registry().get(ty);
                 meta.loaded(world, id);
             }
         }
     }
 }
 
-impl AssetCommand {
-    pub fn add(
-        id: impl Into<ErasedId>,
-        ty: AssetType,
-        asset: impl Into<ErasedAsset>,
-        dependencies: impl Into<Option<LoadDependencies>>,
-    ) -> Self {
-        Self::Add {
-            id: id.into(),
-            ty,
-            asset: asset.into(),
-            dependencies: dependencies.into(),
-        }
+pub struct RemoveAssets(Vec<ErasedId>);
+impl From<Vec<ErasedId>> for RemoveAssets {
+    fn from(value: Vec<ErasedId>) -> Self {
+        Self(value)
     }
+}
 
-    pub fn modify(id: impl Into<ErasedId>, ty: AssetType) -> Self {
-        Self::Modify { id: id.into(), ty }
-    }
+impl Command for RemoveAssets {
+    fn execute(self, world: &mut World) {
+        let db = AssetDatabase::get();
 
-    pub fn remove(id: impl Into<ErasedId>) -> Self {
-        Self::Remove { id: id.into() }
-    }
-
-    pub fn loaded(id: impl Into<ErasedId>, ty: AssetType) -> Self {
-        Self::Loaded { id: id.into(), ty }
-    }
-
-    fn remove_asset(world: &mut World, database: &AssetDatabase, ids: Vec<ErasedId>) {
-        let mut states = database.states.write_blocking();
-
-        let mut stack = ids;
+        let mut states = db.states.write_blocking();
+        let mut stack = self.0;
         let mut visited = HashSet::new();
 
         while let Some(id) = stack.pop() {
@@ -145,7 +94,7 @@ impl AssetCommand {
                 continue;
             };
 
-            let meta = database.config.registry().get(state.ty()).unwrap();
+            let meta = db.config.registry().get(state.ty());
             meta.remove(world, id);
 
             for dependent in state.dependents().iter().chain(state.children()).copied() {
@@ -158,13 +107,23 @@ impl AssetCommand {
                     continue;
                 }
 
-                match state.unload_action() {
-                    Some(AssetAction::Unload) => stack.push(dependent),
-                    Some(AssetAction::Reload) => database.reload(dependent),
-                    None => continue,
-                }
+                db.reload(dependent);
             }
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RemoveAsset<A: Asset>(AssetId<A>);
+impl<A: Asset> From<AssetId<A>> for RemoveAsset<A> {
+    fn from(value: AssetId<A>) -> Self {
+        Self(value)
+    }
+}
+
+impl<A: Asset> Command for RemoveAsset<A> {
+    fn execute(self, world: &mut World) {
+        RemoveAssets(vec![self.0.into()]).execute(world);
     }
 }
 
@@ -185,16 +144,10 @@ impl AssetDatabaseCommands for Commands<'_, '_> {
         asset: A,
         dependencies: Option<LoadDependencies>,
     ) {
-        let database = AssetDatabase::get();
-        let ty = database
-            .config
-            .registry()
-            .get_ty(TypeId::of::<A>())
-            .unwrap();
-        self.add(AssetCommand::add(id, ty, asset, dependencies));
+        self.add(AddAsset::new(id, asset, dependencies));
     }
 
     fn remove_asset<A: Asset>(&mut self, id: AssetId<A>) {
-        self.add(AssetCommand::remove(id));
+        self.add(RemoveAsset(id));
     }
 }

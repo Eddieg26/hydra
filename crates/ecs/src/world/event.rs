@@ -129,6 +129,10 @@ impl<'state, E: Event> EventReader<'state, E> {
     pub(crate) fn new(events: &'state Events<E>) -> Self {
         Self { events, index: 0 }
     }
+
+    pub fn len(&self) -> usize {
+        self.events.read.events.len()
+    }
 }
 
 impl<'state, E: Event> Iterator for EventReader<'state, E> {

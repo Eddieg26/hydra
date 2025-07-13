@@ -1,11 +1,12 @@
 pub mod asset;
-pub mod config;
 pub mod database;
+pub mod ext;
 pub mod io;
 pub mod plugin;
+pub mod settings;
 
 pub use asset::*;
-pub use config::*;
-pub use database::{AssetDatabase, commands::AssetCommand, state::LoadState};
+pub use database::{AssetDatabase, config::*, state::LoadState};
+pub use settings::*;
 
-pub use derive_asset::{Asset, Settings, AssetDependency};
+pub use derive_asset::{Asset, AssetDependency, Settings};

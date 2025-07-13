@@ -1,16 +1,14 @@
 use crate::{
-    Asset, AssetEvent, AssetId, Assets,
-    config::{
-        AssetConfigBuilder,
-        importer::{AssetImporter, ImportError},
-        processor::AssetProcessor,
-    },
+    Asset, AssetEvent, AssetId, AssetProcessor, Assets,
     database::{
-        AssetDatabase, DatabaseEvent,
-        commands::LoadDependencies,
-        load::{LoadError, LoadPath},
+        AssetDatabase, AssetDatabaseError, LoadDependencies,
+        config::{AssetDatabaseBuilder, importer::AssetImporter},
     },
-    io::{AssetCache, FileSystem, LocalFs, SourceName},
+    io::{
+        FileSystem,
+        local::LocalFs,
+        path::{AssetSource, LoadPath},
+    },
 };
 use ecs::app::{End, Plugin};
 use serde::Deserialize;
@@ -23,36 +21,29 @@ impl Plugin for AssetPlugin {
     }
 
     fn setup(&mut self, app: &mut ecs::AppBuilder) {
-        app.add_resource(AssetConfigBuilder::new());
-        app.add_systems(End, AssetDatabase::update);
-        app.register_event::<ImportError>();
-        app.register_event::<LoadError>();
+        app.add_resource(AssetDatabaseBuilder::new());
+        app.add_systems(End, AssetDatabase::update_database);
+        app.register_event::<AssetDatabaseError>();
     }
 
     fn finish(&mut self, app: &mut ecs::AppBuilder) {
-        let mut config = app
-            .remove_resource::<AssetConfigBuilder>()
+        let mut builder = app
+            .remove_resource::<AssetDatabaseBuilder>()
             .unwrap_or_default();
 
-        if config.source(&SourceName::Default).is_none() {
-            config.add_source(SourceName::Default, LocalFs::new("assets"));
+        if builder
+            .config()
+            .sources()
+            .get(&AssetSource::Default)
+            .is_none()
+        {
+            builder.add_source(AssetSource::Default, LocalFs::new("assets"));
         }
 
-        let commands = std::mem::take(&mut config.commands);
-        let load = std::mem::take(&mut config.load);
-        let db = AssetDatabase::init(config.build());
-
-        smol::block_on(async move {
-            db.send_event(DatabaseEvent::Setup).await;
-
-            for path in load {
-                db.send_event(DatabaseEvent::LoadAsset(path)).await;
-            }
-
-            for command in commands {
-                db.send_event(command).await;
-            }
-        });
+        let commands = std::mem::take(&mut builder.commands);
+        let db = AssetDatabase::init(builder);
+        db.import();
+        smol::block_on(db.send_event(commands));
     }
 }
 
@@ -63,7 +54,7 @@ pub trait AssetAppExt {
     fn add_processor<P: AssetProcessor>(&mut self) -> &mut Self;
     fn add_source<S: FileSystem>(
         &mut self,
-        name: impl Into<SourceName<'static>>,
+        name: impl Into<AssetSource<'static>>,
         source: S,
     ) -> &mut Self;
     fn add_asset<A: Asset>(&mut self, id: AssetId<A>, asset: A) -> &mut Self;
@@ -72,7 +63,7 @@ pub trait AssetAppExt {
         path: impl Into<LoadPath<'static>>,
     ) -> &mut Self;
     fn set_default_processor<P: AssetProcessor>(&mut self) -> &mut Self;
-    fn set_cache(&mut self, cache: AssetCache) -> &mut Self;
+    fn set_cache<F: FileSystem>(&mut self, fs: F) -> &mut Self;
 }
 
 impl AssetAppExt for ecs::AppBuilder {
@@ -98,7 +89,7 @@ impl AssetAppExt for ecs::AppBuilder {
 
     fn add_source<S: FileSystem>(
         &mut self,
-        name: impl Into<SourceName<'static>>,
+        name: impl Into<AssetSource<'static>>,
         source: S,
     ) -> &mut Self {
         self.world_mut().add_source(name, source);
@@ -123,15 +114,15 @@ impl AssetAppExt for ecs::AppBuilder {
         self
     }
 
-    fn set_cache(&mut self, cache: AssetCache) -> &mut Self {
-        self.world_mut().set_cache(cache);
+    fn set_cache<F: FileSystem>(&mut self, fs: F) -> &mut Self {
+        self.world_mut().set_cache(fs);
         self
     }
 }
 
 impl AssetAppExt for ecs::World {
     fn register_asset<A: Asset>(&mut self) -> &mut Self {
-        let config = self.get_or_insert_resource(AssetConfigBuilder::new);
+        let config = self.get_or_insert_resource(AssetDatabaseBuilder::new);
         if !config.is_registered::<A>() {
             config.register::<A>();
             self.add_resource(Assets::<A>::new());
@@ -144,15 +135,15 @@ impl AssetAppExt for ecs::World {
     fn add_loader<A: Asset + for<'a> Deserialize<'a>>(&mut self) -> &mut Self {
         self.register_asset::<A>();
 
-        let config = self.resource_mut::<AssetConfigBuilder>();
-        config.set_deserialize::<A>();
+        let config = self.resource_mut::<AssetDatabaseBuilder>();
+        config.add_loader::<A>();
 
         self
     }
 
     fn add_importer<I: AssetImporter>(&mut self) -> &mut Self {
         self.register_asset::<I::Asset>()
-            .resource_mut::<AssetConfigBuilder>()
+            .resource_mut::<AssetDatabaseBuilder>()
             .add_importer::<I>();
 
         self
@@ -160,8 +151,8 @@ impl AssetAppExt for ecs::World {
 
     fn add_processor<P: AssetProcessor>(&mut self) -> &mut Self {
         self.register_asset::<P::Output>()
-            .register_asset::<<P::Input as AssetImporter>::Asset>()
-            .resource_mut::<AssetConfigBuilder>()
+            .register_asset::<P::Input>()
+            .resource_mut::<AssetDatabaseBuilder>()
             .add_processor::<P>();
 
         self
@@ -169,10 +160,10 @@ impl AssetAppExt for ecs::World {
 
     fn add_source<S: FileSystem>(
         &mut self,
-        name: impl Into<SourceName<'static>>,
+        name: impl Into<AssetSource<'static>>,
         source: S,
     ) -> &mut Self {
-        let config = self.get_or_insert_resource(AssetConfigBuilder::new);
+        let config = self.get_or_insert_resource(AssetDatabaseBuilder::new);
         config.add_source(name, source);
         self
     }
@@ -181,7 +172,7 @@ impl AssetAppExt for ecs::World {
         self.register_asset::<A>();
 
         let mut dependencies = Vec::new();
-        asset.get(&mut dependencies);
+        asset.get_dependencies(|id| dependencies.push(id));
 
         let load_deps = if dependencies.is_empty() {
             None
@@ -189,8 +180,8 @@ impl AssetAppExt for ecs::World {
             Some(LoadDependencies::new(None, dependencies))
         };
 
-        let config = self.resource_mut::<AssetConfigBuilder>();
-        config.add_asset(id, asset, load_deps);
+        let builder = self.resource_mut::<AssetDatabaseBuilder>();
+        builder.add_asset(id, asset, load_deps);
 
         self
     }
@@ -201,22 +192,22 @@ impl AssetAppExt for ecs::World {
     ) -> &mut Self {
         self.register_asset::<A>();
 
-        let config = self.resource_mut::<AssetConfigBuilder>();
-        config.load_asset::<A>(path);
+        let builder = self.resource_mut::<AssetDatabaseBuilder>();
+        builder.load_asset::<A>(path);
 
         self
     }
 
     fn set_default_processor<P: AssetProcessor>(&mut self) -> &mut Self {
-        let config = self.get_or_insert_resource(AssetConfigBuilder::new);
-        config.set_default_processor::<P>();
+        let builder = self.get_or_insert_resource(AssetDatabaseBuilder::new);
+        builder.set_default_processor::<P>();
 
         self
     }
 
-    fn set_cache(&mut self, cache: AssetCache) -> &mut Self {
-        let config = self.get_or_insert_resource(AssetConfigBuilder::new);
-        config.set_cache(cache);
+    fn set_cache<F: FileSystem>(&mut self, fs: F) -> &mut Self {
+        let builder = self.get_or_insert_resource(AssetDatabaseBuilder::new);
+        builder.set_cache(fs);
 
         self
     }

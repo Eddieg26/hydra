@@ -12,3 +12,6 @@ render = { path = "../../crates/render" }
 window = { path = "../../crates/window" }
 uuid = { workspace = true, features = ["v4"] }
 bytemuck = { workspace = true }
+futures = { workspace = true }
+smol = { workspace = true }
+serde = { workspace = true, features = ["derive"] }

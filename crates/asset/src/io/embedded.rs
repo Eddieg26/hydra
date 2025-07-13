@@ -1,11 +1,15 @@
-use super::{AssetIoError, AsyncReader, AsyncWriter, FileSystem, PathExt, serialize};
+use super::{AsyncIoError, AsyncReader, AsyncWriter, FileSystem};
 use crate::{
-    AssetId,
-    asset::{Asset, AssetMetadata, Settings},
+    asset::{Asset, AssetId},
+    ext::{PathExt as _, SerializeExt},
+    io::BoxFuture,
+    settings::{AssetSettings, Settings},
 };
-use futures::{AsyncRead, AsyncSeek, AsyncWrite, future::BoxFuture};
 use serde::Serialize;
-use smol::lock::RwLock;
+use smol::{
+    io::{AsyncRead, AsyncSeek, AsyncWrite},
+    lock::RwLock,
+};
 use std::{
     collections::HashMap,
     io::{Cursor, Read, Seek, Write},
@@ -91,7 +95,7 @@ impl AsyncReader for EmbeddedReader {
     fn read_to_end<'a>(
         &'a mut self,
         buf: &'a mut Vec<u8>,
-    ) -> BoxFuture<'a, Result<usize, AssetIoError>> {
+    ) -> BoxFuture<'a, Result<usize, AsyncIoError>> {
         Box::pin(async move {
             let len = self.data.len();
             if self.position < len as u64 {
@@ -173,15 +177,16 @@ impl AsyncWrite for EmbeddedWriter {
     }
 }
 
-impl AsyncWriter for EmbeddedWriter {}
+impl AsyncWriter for EmbeddedWriter {
+    fn flush<'a>(&'a mut self) -> BoxFuture<'a, Result<(), AsyncIoError>> {
+        Box::pin(async move {
+            let mut fs = self.fs.write().await;
+            let data = std::mem::take(self.data.get_mut());
 
-impl Drop for EmbeddedWriter {
-    fn drop(&mut self) {
-        let mut fs = self.fs.write_arc_blocking();
-        let data = std::mem::take(self.data.get_mut());
-
-        let file = EmbeddedData::Dynamic(Arc::from(data));
-        fs.entries.insert(self.path.clone(), file);
+            let file = EmbeddedData::Dynamic(Arc::from(data));
+            fs.entries.insert(self.path.clone(), file);
+            Ok(())
+        })
     }
 }
 
@@ -210,8 +215,8 @@ impl EmbeddedFs {
         asset: &'static [u8],
         settings: S,
     ) -> AssetId<A> {
-        let metadata = AssetMetadata::<S>::new(id, settings);
-        let metabytes = match serialize(&metadata) {
+        let metadata = AssetSettings::<S>::new(id, settings);
+        let metabytes = match metadata.to_bytes() {
             Ok(metabytes) => metabytes,
             Err(err) => panic!("Failed to serialize metadata: {}", err),
         };
@@ -245,29 +250,29 @@ impl FileSystem for EmbeddedFs {
         "".as_ref()
     }
 
-    async fn reader(&self, path: &Path) -> Result<Self::Reader, AssetIoError> {
+    async fn reader(&self, path: &Path) -> Result<Self::Reader, AsyncIoError> {
         let fs = self.fs.read().await;
         match fs.entries.get(path).cloned() {
             Some(data) => Ok(EmbeddedReader { data, position: 0 }),
-            None => Err(AssetIoError::NotFound(path.to_path_buf())),
+            None => Err(AsyncIoError::NotFound(path.to_path_buf())),
         }
     }
 
-    async fn read_dir(&self, _: &Path) -> Result<Box<dyn super::PathStream>, AssetIoError> {
+    async fn read_dir(&self, _: &Path) -> Result<Box<dyn super::PathStream>, AsyncIoError> {
         let fs = self.fs.read().await;
         let paths = fs.entries.keys().cloned().collect::<Vec<_>>();
-        Ok(Box::new(futures::stream::iter(paths)))
+        Ok(Box::new(smol::stream::iter(paths)))
     }
 
-    async fn is_dir(&self, path: &Path) -> Result<bool, AssetIoError> {
+    async fn is_dir(&self, path: &Path) -> Result<bool, AsyncIoError> {
         let fs = self.fs.read().await;
         match fs.entries.contains_key(path) {
             true => Ok(false),
-            false => Err(AssetIoError::NotFound(path.to_path_buf())),
+            false => Err(AsyncIoError::NotFound(path.to_path_buf())),
         }
     }
 
-    async fn writer(&self, path: &Path) -> Result<Self::Writer, AssetIoError> {
+    async fn writer(&self, path: &Path) -> Result<Self::Writer, AsyncIoError> {
         let writer = EmbeddedWriter {
             data: Cursor::new(vec![]),
             path: path.to_path_buf(),
@@ -277,37 +282,37 @@ impl FileSystem for EmbeddedFs {
         Ok(writer)
     }
 
-    async fn create_dir(&self, _: &Path) -> Result<(), AssetIoError> {
-        Err(AssetIoError::from(std::io::ErrorKind::Unsupported))
+    async fn create_dir(&self, _: &Path) -> Result<(), AsyncIoError> {
+        Err(AsyncIoError::from(std::io::ErrorKind::Unsupported))
     }
 
-    async fn create_dir_all(&self, _: &Path) -> Result<(), AssetIoError> {
-        Err(AssetIoError::from(std::io::ErrorKind::Unsupported))
+    async fn create_dir_all(&self, _: &Path) -> Result<(), AsyncIoError> {
+        Err(AsyncIoError::from(std::io::ErrorKind::Unsupported))
     }
 
-    async fn rename(&self, from: &Path, to: &Path) -> Result<(), AssetIoError> {
+    async fn rename(&self, from: &Path, to: &Path) -> Result<(), AsyncIoError> {
         let mut fs = self.fs.write().await;
         match fs.entries.remove(from) {
             Some(entry) => match fs.entries.contains_key(to) {
-                true => return Err(AssetIoError::from(std::io::ErrorKind::AlreadyExists)),
+                true => return Err(AsyncIoError::from(std::io::ErrorKind::AlreadyExists)),
                 false => {
                     fs.entries.insert(to.to_path_buf(), entry);
                     Ok(())
                 }
             },
-            None => Err(AssetIoError::NotFound(from.to_path_buf())),
+            None => Err(AsyncIoError::NotFound(from.to_path_buf())),
         }
     }
 
-    async fn remove(&self, _: &Path) -> Result<(), AssetIoError> {
-        Err(AssetIoError::from(std::io::ErrorKind::Unsupported))
+    async fn remove(&self, _: &Path) -> Result<(), AsyncIoError> {
+        Err(AsyncIoError::from(std::io::ErrorKind::Unsupported))
     }
 
-    async fn remove_dir(&self, _: &Path) -> Result<(), AssetIoError> {
-        Err(AssetIoError::from(std::io::ErrorKind::Unsupported))
+    async fn remove_dir(&self, _: &Path) -> Result<(), AsyncIoError> {
+        Err(AsyncIoError::from(std::io::ErrorKind::Unsupported))
     }
 
-    async fn exists(&self, path: &Path) -> Result<bool, AssetIoError> {
+    async fn exists(&self, path: &Path) -> Result<bool, AsyncIoError> {
         let fs = self.fs.read().await;
         Ok(fs.entries.contains_key(path))
     }

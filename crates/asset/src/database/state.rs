@@ -1,4 +1,4 @@
-use crate::asset::{AssetAction, AssetType, ErasedId};
+use crate::asset::{AssetType, ErasedId};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +40,6 @@ pub struct AssetState {
     dependents: HashSet<ErasedId>,
     children: Vec<ErasedId>,
     parent: Option<ErasedId>,
-    unload_action: Option<AssetAction>,
 }
 
 impl AssetState {
@@ -50,14 +49,13 @@ impl AssetState {
 
     pub fn with_state(state: LoadState) -> Self {
         Self {
-            ty: AssetType::NONE,
+            ty: AssetType::UNKNOWN,
             state,
             dependency_status: HashMap::new(),
             dependencies: HashSet::new(),
             dependents: HashSet::new(),
             children: vec![],
             parent: None,
-            unload_action: None,
         }
     }
 
@@ -87,10 +85,6 @@ impl AssetState {
 
     pub fn children(&self) -> &[ErasedId] {
         &self.children
-    }
-
-    pub fn unload_action(&self) -> Option<AssetAction> {
-        self.unload_action
     }
 }
 
@@ -133,14 +127,12 @@ impl AssetStates {
         &mut self,
         id: ErasedId,
         ty: AssetType,
-        dependencies: &Vec<ErasedId>,
+        dependencies: &[ErasedId],
         parent: Option<ErasedId>,
-        unload_action: Option<AssetAction>,
     ) -> Vec<(ErasedId, AssetType)> {
         let mut state = self.states.remove(&id).unwrap_or_else(AssetState::new);
         state.ty = ty;
         state.state = LoadState::Loaded;
-        state.unload_action = unload_action;
         state.parent = parent;
 
         for dependency in dependencies.iter() {
@@ -255,5 +247,19 @@ impl AssetStates {
         }
 
         finished
+    }
+}
+
+pub struct LoadDependencies {
+    pub parent: Option<ErasedId>,
+    pub dependencies: Vec<ErasedId>,
+}
+
+impl LoadDependencies {
+    pub fn new(parent: Option<ErasedId>, dependencies: impl IntoIterator<Item = ErasedId>) -> Self {
+        Self {
+            parent,
+            dependencies: dependencies.into_iter().collect(),
+        }
     }
 }

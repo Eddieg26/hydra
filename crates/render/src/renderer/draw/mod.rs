@@ -532,12 +532,12 @@ impl<D: Draw> RenderResource for DrawPipeline<D> {
             label: None,
             layout,
             vertex: VertexState {
-                shader: vertex_shader.into(),
+                shader: *vertex_shader.as_ref(),
                 entry: "main".into(),
                 buffers,
             },
             fragment: Some(FragmentState {
-                shader: fragment_shader.into(),
+                shader: *fragment_shader.as_ref(),
                 entry: "main".into(),
                 targets: vec![Some(ColorTargetState {
                     format: surface.format(),
@@ -777,12 +777,14 @@ impl<V: View, R: RenderPhase> ViewDrawCalls<V, R> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum DrawError {
+    #[error("Invalid mesh key: expected {expected:?}, received {received:?}")]
     InvalidMeshKey {
         expected: MeshKey,
         received: MeshKey,
     },
+    #[error("Draw command skipped")]
     Skip,
 }
 

@@ -1,10 +1,7 @@
 use crate::{
-    AssetUsage, ExtractError, ExtractResource, RenderAsset, RenderResource, View,
+    AssetUsage, ExtractError, ExtractResource, RenderAsset, RenderResource, Shader, View,
     device::RenderDevice,
-    resources::{
-        Shader,
-        binding::{AsBinding, BindGroup, BindGroupLayout},
-    },
+    resources::binding::{AsBinding, BindGroup, BindGroupLayout},
 };
 use asset::{Asset, AssetId};
 use ecs::{

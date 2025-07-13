@@ -99,6 +99,10 @@ impl<V: View> RenderViews<V> {
         self.bind_group.as_ref()
     }
 
+    pub fn len(&self) -> usize {
+        self.views.len()
+    }
+
     pub(crate) fn extract(
         buffer: &mut Self,
         query: Main<SQuery<(Entity, &V, &GlobalTransform, &Camera)>>,

@@ -205,13 +205,13 @@ impl AssetExtractors {
                 AssetEvent::Added { id }
                 | AssetEvent::Modified { id }
                 | AssetEvent::Loaded { id } => {
-                    let asset = match assets.get_mut(*id).cloned() {
+                    let asset = match assets.get_mut(id).cloned() {
                         Some(source) => source,
                         None => continue,
                     };
 
                     if R::usage(&asset) == AssetUsage::Discard {
-                        assets.remove(*id);
+                        assets.remove(id);
                     }
 
                     extract_info.extracted.push((*id, asset));
@@ -327,6 +327,8 @@ impl ResourceExtractors {
             Err(ExtractError::Retry(_)) => world.resource_mut::<Self>().add::<R>(),
             Err(ExtractError::Error(error)) => world.send(ExtractError::<R>::Error(error)),
         }
+
+        R::Arg::update(&mut state, world);
     }
 }
 

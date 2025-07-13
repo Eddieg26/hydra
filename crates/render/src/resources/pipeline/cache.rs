@@ -1,7 +1,7 @@
 use super::{ComputePipeline, ComputePipelineDesc, PipelineId, RenderPipeline, RenderPipelineDesc};
 use crate::{
     device::RenderDevice,
-    resources::{ExtractInfo, extract::RenderAssets, shader::Shader},
+    resources::{ExtractInfo, extract::RenderAssets, shader::GpuShader},
 };
 use asset::AssetId;
 use ecs::{IndexMap, IndexSet, Resource};
@@ -25,7 +25,7 @@ pub enum QueuedPipeline {
 
 #[derive(Default)]
 pub struct PipelineCache {
-    shaders: HashMap<AssetId<Shader>, ShaderPipelines>,
+    shaders: HashMap<AssetId<GpuShader>, ShaderPipelines>,
     render_pipelines: HashMap<PipelineId, RenderPipeline>,
     compute_pipelines: HashMap<PipelineId, ComputePipeline>,
     pipeline_queue: IndexMap<PipelineId, QueuedPipeline>,
@@ -89,11 +89,11 @@ impl PipelineCache {
         pipeline
     }
 
-    pub fn remove_shader(&mut self, shader: &AssetId<Shader>) {
+    pub fn remove_shader(&mut self, shader: &AssetId<GpuShader>) {
         self.shaders.remove(shader);
     }
 
-    pub fn process_queue(&mut self, device: &RenderDevice, shaders: &RenderAssets<Shader>) {
+    pub fn process_queue(&mut self, device: &RenderDevice, shaders: &RenderAssets<GpuShader>) {
         let mut queue = IndexMap::new();
 
         for (_, pipeline) in self.pipeline_queue.drain(..) {
@@ -124,7 +124,7 @@ impl PipelineCache {
         self.pipeline_queue = queue;
     }
 
-    fn add_shader_dependency(&mut self, shader: &AssetId<Shader>, id: PipelineId) {
+    fn add_shader_dependency(&mut self, shader: &AssetId<GpuShader>, id: PipelineId) {
         self.shaders
             .entry(*shader)
             .or_default()
@@ -134,9 +134,9 @@ impl PipelineCache {
 
     pub(crate) fn queue(
         pipelines: &mut PipelineCache,
-        info: &ExtractInfo<Shader>,
+        info: &ExtractInfo<GpuShader>,
         device: &RenderDevice,
-        shaders: &RenderAssets<Shader>,
+        shaders: &RenderAssets<GpuShader>,
     ) {
         pipelines.process_queue(&device, &shaders);
         for id in &info.removed {

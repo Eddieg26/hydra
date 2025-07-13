@@ -2,7 +2,7 @@ use macro_utils::{
     Symbol,
     proc_macro2::TokenStream,
     quote::{self, format_ident, quote},
-    syn::{self, Attribute, Field, Variant, spanned::Spanned},
+    syn::{self, Field, Variant},
     workspace::get_crate_path,
 };
 
@@ -11,24 +11,10 @@ pub fn expand_derive_asset(input: &mut syn::DeriveInput) -> syn::Result<TokenStr
     let asset_name = &input.ident;
     let (impl_generics, type_generics, where_clause) = &input.generics.split_for_impl();
 
-    let mut attributes = input.attrs.iter();
-    let action = match attributes.next().map(AssetAction::parse) {
-        Some(Some(action)) => quote::quote! { Some(#asset_crate::#action) },
-        _ => quote::quote! { None },
-    };
-
-    if attributes.next().is_some() {
-        return Err(syn::Error::new(
-            input.span(),
-            "Only one of 'reload' or 'unload' attributes is allowed",
-        ));
-    }
-
-    let dependencies = AssetDependency::parse(&asset_crate, asset_name, input)?;
+    let dependencies = AssetDependencies::parse(&asset_crate, asset_name, input)?;
 
     Ok(quote::quote! {
         impl #impl_generics #asset_crate::Asset for #asset_name #type_generics #where_clause {
-            const DEPENDENCY_UNLOAD_ACTION: Option<#asset_crate::AssetAction> = #action;
         }
 
         #dependencies
@@ -39,31 +25,14 @@ pub fn expand_derive_asset_dependency(input: &mut syn::DeriveInput) -> syn::Resu
     let asset_crate = get_crate_path("asset");
     let asset_name = &input.ident;
 
-    let dependencies = AssetDependency::parse(&asset_crate, asset_name, input)?;
+    let dependencies = AssetDependencies::parse(&asset_crate, asset_name, input)?;
 
     Ok(quote::quote! { #dependencies })
 }
 
-struct AssetAction;
+struct AssetDependencies;
 
-impl AssetAction {
-    const RELOAD: Symbol = Symbol::new("reload");
-    const UNLOAD: Symbol = Symbol::new("unload");
-
-    fn parse(attribute: &Attribute) -> Option<TokenStream> {
-        if attribute.path().is_ident(&Self::RELOAD) {
-            Some(quote::quote! { AssetAction::Reload})
-        } else if attribute.path().is_ident(&Self::UNLOAD) {
-            Some(quote::quote! { AssetAction::Unload})
-        } else {
-            None
-        }
-    }
-}
-
-struct AssetDependency;
-
-impl AssetDependency {
+impl AssetDependencies {
     const DEPENDENCY: Symbol = Symbol::new("dependency");
 
     fn parse(
@@ -83,11 +52,11 @@ impl AssetDependency {
                     .enumerate()
                     .map(|(index, field)| match field.ident.as_ref() {
                         Some(ident) => {
-                            quote!(#crate_name::AssetDependency::get(&self.#ident, reader); )
+                            quote!(#crate_name::AssetDependencies::get_dependencies(&self.#ident, reader); )
                         }
                         None => {
                             let index = syn::Index::from(index);
-                            quote!(#crate_name::AssetDependency::get(&self.#index, reader); )
+                            quote!(#crate_name::AssetDependencies::get_dependencies(&self.#index, reader); )
                         }
                     });
 
@@ -109,11 +78,11 @@ impl AssetDependency {
                         .enumerate()
                         .map(|(i, field)| match field.ident.as_ref() {
                             Some(ident) => {
-                                quote!(#crate_name::AssetDependency::get(#ident, reader);)
+                                quote!(#crate_name::AssetDependencies::get_dependencies(#ident, reader);)
                             }
                             None => {
                                 let index = format_ident!("field_{i}");
-                                quote!(#crate_name::AssetDependency::get(#index, reader);)
+                                quote!(#crate_name::AssetDependencies::get_dependencies(#index, reader);)
                             }
                         });
 
@@ -148,7 +117,7 @@ impl AssetDependency {
             syn::Data::Union(data) => {
                 return Err(syn::Error::new(
                     data.union_token.span,
-                    "Union types are not supported for AssetDependency",
+                    "Union types are not supported for AssetDependencies",
                 ));
             }
         };
@@ -159,8 +128,8 @@ impl AssetDependency {
         };
 
         Ok(quote::quote! {
-            impl #impl_generics #crate_name::AssetDependency for #asset_name #type_generics #where_clause {
-                fn get<R: #crate_name::AssetDependencyReader>(&self, #reader: &mut R) {
+            impl #impl_generics #crate_name::AssetDependencies for #asset_name #type_generics #where_clause {
+                fn get_dependencies(&self, #reader: impl FnMut(#crate_name::ErasedId)) {
                     #body
                 }
             }

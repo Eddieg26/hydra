@@ -1,4 +1,4 @@
-use super::{AtomicId, Label, binding::BindGroupLayout, extract::RenderAssets, shader::Shader};
+use super::{AtomicId, Label, binding::BindGroupLayout, extract::RenderAssets, shader::GpuShader};
 use crate::device::RenderDevice;
 use asset::AssetId;
 use std::{borrow::Cow, sync::Arc};
@@ -23,14 +23,14 @@ pub struct VertexBufferLayout {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct VertexState {
-    pub shader: AssetId<Shader>,
+    pub shader: AssetId<GpuShader>,
     pub entry: Cow<'static, str>,
     pub buffers: Vec<VertexBufferLayout>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FragmentState {
-    pub shader: AssetId<Shader>,
+    pub shader: AssetId<GpuShader>,
     pub entry: Cow<'static, str>,
     pub targets: Vec<Option<ColorTargetState>>,
 }
@@ -67,7 +67,7 @@ impl RenderPipeline {
 
     pub fn create(
         device: &RenderDevice,
-        shaders: &RenderAssets<Shader>,
+        shaders: &RenderAssets<GpuShader>,
         id: PipelineId,
         desc: &RenderPipelineDesc,
     ) -> Option<Self> {
@@ -155,7 +155,7 @@ impl AsRef<wgpu::RenderPipeline> for RenderPipeline {
 pub struct ComputePipelineDesc {
     pub label: Label,
     pub layout: Vec<BindGroupLayout>,
-    pub shader: AssetId<Shader>,
+    pub shader: AssetId<GpuShader>,
     pub entry: Cow<'static, str>,
 }
 
@@ -174,7 +174,7 @@ impl ComputePipeline {
 
     pub fn create(
         device: &RenderDevice,
-        shaders: &RenderAssets<Shader>,
+        shaders: &RenderAssets<GpuShader>,
         id: PipelineId,
         desc: &ComputePipelineDesc,
     ) -> Option<Self> {

@@ -1,9 +1,10 @@
 use super::RenderAsset;
 use crate::device::RenderDevice;
 use asset::{
-    Asset, AssetMetadata, DefaultSettings,
+    Asset, AssetSettings, DefaultSettings,
+    ext::PathExt,
     importer::{AssetImporter, ImportContext},
-    io::{AssetIoError, AsyncReader},
+    io::{AsyncIoError, AsyncReader},
 };
 use ecs::system::{ArgItem, unlifetime::Read};
 use smol::io::AsyncReadExt;
@@ -37,7 +38,7 @@ impl Into<wgpu::naga::ShaderStage> for &ShaderStage {
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Asset)]
-pub enum ShaderSource {
+pub enum Shader {
     Spirv {
         data: Cow<'static, [u32]>,
     },
@@ -51,19 +52,17 @@ pub enum ShaderSource {
 }
 
 #[derive(Asset)]
-pub struct Shader {
+pub struct GpuShader {
     module: Arc<wgpu::ShaderModule>,
 }
-impl Shader {
-    pub fn new(device: &RenderDevice, source: ShaderSource) -> Self {
+impl GpuShader {
+    pub fn new(device: &RenderDevice, source: Shader) -> Self {
         let module = match source {
-            ShaderSource::Spirv { data } => {
-                device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: None,
-                    source: wgpu::ShaderSource::SpirV(Cow::Borrowed(&data)),
-                })
-            }
-            ShaderSource::Glsl { data, stage } => {
+            Shader::Spirv { data } => device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::SpirV(Cow::Borrowed(&data)),
+            }),
+            Shader::Glsl { data, stage } => {
                 device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label: None,
                     source: wgpu::ShaderSource::Glsl {
@@ -73,12 +72,10 @@ impl Shader {
                     },
                 })
             }
-            ShaderSource::Wgsl { data } => {
-                device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: None,
-                    source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&data)),
-                })
-            }
+            Shader::Wgsl { data } => device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&data)),
+            }),
         };
         Self {
             module: Arc::new(module),
@@ -86,7 +83,7 @@ impl Shader {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for Shader {
+impl<'de> serde::Deserialize<'de> for GpuShader {
     fn deserialize<D>(_: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -95,7 +92,7 @@ impl<'de> serde::Deserialize<'de> for Shader {
     }
 }
 
-impl From<wgpu::ShaderModule> for Shader {
+impl From<wgpu::ShaderModule> for GpuShader {
     fn from(shader: wgpu::ShaderModule) -> Self {
         Self {
             module: Arc::new(shader),
@@ -103,21 +100,21 @@ impl From<wgpu::ShaderModule> for Shader {
     }
 }
 
-impl std::ops::Deref for Shader {
+impl std::ops::Deref for GpuShader {
     type Target = wgpu::ShaderModule;
     fn deref(&self) -> &Self::Target {
         &self.module
     }
 }
 
-impl AsRef<wgpu::ShaderModule> for Shader {
+impl AsRef<wgpu::ShaderModule> for GpuShader {
     fn as_ref(&self) -> &wgpu::ShaderModule {
         &self.module
     }
 }
 
-impl RenderAsset for Shader {
-    type Source = ShaderSource;
+impl RenderAsset for GpuShader {
+    type Source = Shader;
 
     type Arg = Read<RenderDevice>;
 
@@ -125,7 +122,7 @@ impl RenderAsset for Shader {
         asset: Self::Source,
         device: &mut ArgItem<Self::Arg>,
     ) -> Result<Self, super::ExtractError<Self::Source>> {
-        Ok(Shader::new(device, asset))
+        Ok(GpuShader::new(device, asset))
     }
 
     fn usage(_: &Self::Source) -> super::AssetUsage {
@@ -135,7 +132,7 @@ impl RenderAsset for Shader {
 
 #[derive(Debug)]
 pub enum ShaderLoadError {
-    Io(AssetIoError),
+    Io(AsyncIoError),
     InvalidExt(String),
     Parse(String),
 }
@@ -158,8 +155,8 @@ impl From<wgpu::naga::front::glsl::Error> for ShaderLoadError {
     }
 }
 
-impl From<AssetIoError> for ShaderLoadError {
-    fn from(err: AssetIoError) -> Self {
+impl From<AsyncIoError> for ShaderLoadError {
+    fn from(err: AsyncIoError) -> Self {
         Self::Io(err)
     }
 }
@@ -176,14 +173,14 @@ impl std::fmt::Display for ShaderLoadError {
 
 impl From<std::io::Error> for ShaderLoadError {
     fn from(err: std::io::Error) -> Self {
-        Self::Io(AssetIoError::from(err))
+        Self::Io(AsyncIoError::from(err))
     }
 }
 
 impl std::error::Error for ShaderLoadError {}
 
-impl AssetImporter for ShaderSource {
-    type Asset = ShaderSource;
+impl AssetImporter for Shader {
+    type Asset = Shader;
 
     type Settings = DefaultSettings;
 
@@ -192,7 +189,7 @@ impl AssetImporter for ShaderSource {
     async fn import(
         ctx: &mut ImportContext<'_>,
         reader: &mut dyn AsyncReader,
-        _: &AssetMetadata<Self::Settings>,
+        _: &AssetSettings<Self::Settings>,
     ) -> Result<Self::Asset, Self::Error> {
         use wgpu::naga::{front::*, valid::*};
 
@@ -216,7 +213,7 @@ impl AssetImporter for ShaderSource {
 
                 let data = Cow::Owned(buffer.iter().map(|b| *b as u32).collect());
 
-                Ok(ShaderSource::Spirv { data })
+                Ok(Shader::Spirv { data })
             }
             Some("wgsl") => {
                 let mut data = String::new();
@@ -233,7 +230,7 @@ impl AssetImporter for ShaderSource {
 
                 let data = Cow::Owned(data);
 
-                Ok(ShaderSource::Wgsl { data })
+                Ok(Shader::Wgsl { data })
             }
             Some("vert") => {
                 let mut data = String::new();
@@ -241,7 +238,7 @@ impl AssetImporter for ShaderSource {
                     .read_to_string(&mut data)
                     .await
                     .map_err(ShaderLoadError::from)?;
-                Ok(ShaderSource::Glsl {
+                Ok(Shader::Glsl {
                     data: Cow::Owned(data),
                     stage: ShaderStage::Vertex,
                 })
@@ -252,7 +249,7 @@ impl AssetImporter for ShaderSource {
                     .read_to_string(&mut data)
                     .await
                     .map_err(ShaderLoadError::from)?;
-                Ok(ShaderSource::Glsl {
+                Ok(Shader::Glsl {
                     data: Cow::Owned(data),
                     stage: ShaderStage::Fragment,
                 })
@@ -263,7 +260,7 @@ impl AssetImporter for ShaderSource {
                     .read_to_string(&mut data)
                     .await
                     .map_err(ShaderLoadError::from)?;
-                Ok(ShaderSource::Glsl {
+                Ok(Shader::Glsl {
                     data: Cow::Owned(data),
                     stage: ShaderStage::Compute,
                 })

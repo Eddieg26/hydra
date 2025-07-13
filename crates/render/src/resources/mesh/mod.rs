@@ -4,7 +4,10 @@ use super::{
     extract::{ExtractError, ReadWrite, RenderAsset},
 };
 use crate::{RenderAssetType, device::RenderDevice, types::Color};
-use asset::{Asset, Settings, importer::AssetImporter, processor::AssetProcessor};
+use asset::{
+    Asset, Settings,
+    importer::{AssetImporter, AssetProcessor},
+};
 use ecs::{
     IndexMap,
     system::{ArgItem, unlifetime::Read},
@@ -12,7 +15,6 @@ use ecs::{
 use math::bounds::Aabb;
 use smol::io::AsyncAsSync;
 use std::{
-    borrow::Cow,
     hash::{DefaultHasher, Hash, Hasher},
     ops::Range,
 };
@@ -904,7 +906,7 @@ impl AssetImporter for ObjImporter {
     async fn import(
         ctx: &mut asset::importer::ImportContext<'_>,
         reader: &mut dyn asset::io::AsyncReader,
-        metadata: &asset::AssetMetadata<Self::Settings>,
+        metadata: &asset::AssetSettings<Self::Settings>,
     ) -> Result<Self::Asset, Self::Error> {
         let waker = waker_fn(|| {});
         let mut context = std::task::Context::from_waker(&waker);
@@ -952,7 +954,7 @@ impl AssetImporter for ObjImporter {
             // If we have a single model, we can flatten it into the main mesh.
             if !flatten {
                 let _ = ctx.add_child(
-                    model.name,
+                    &model.name,
                     SubMesh {
                         start_vertex: start_vertex as u32,
                         vertex_count: vertex_count as u32,
@@ -1020,16 +1022,15 @@ impl std::fmt::Display for ProcessError {
 }
 
 impl AssetProcessor for Mesh {
-    type Input = ObjImporter;
+    type Input = Mesh;
 
     type Output = Mesh;
 
     type Error = ProcessError;
 
     async fn process(
-        _: &mut asset::processor::ProcessContext<'_>,
-        mut asset: <Self::Input as AssetImporter>::Asset,
-        metadata: &asset::AssetMetadata<<Self::Input as AssetImporter>::Settings>,
+        _: &mut asset::ProcessContext<'_>,
+        mut asset: Self::Input,
     ) -> Result<Self::Output, Self::Error> {
         let Some(mut positions) = asset
             .remove_attribute(MeshAttributeType::Position)
@@ -1055,59 +1056,58 @@ impl AssetProcessor for Mesh {
             }
         };
 
-        if !metadata.wireframe {
-            let mut attributes = Vec::new();
+        let mut attributes = Vec::new();
 
-            if !asset.has_attribute(MeshAttributeType::Normal) {
-                let indices = bytemuck::cast_slice(indices.data());
-                let normals = MeshAttribute {
-                    ty: MeshAttributeType::Normal,
-                    values: MeshAttributeValues::Vec3(Mesh::calculate_normals(&positions, indices)),
-                };
+        if !asset.has_attribute(MeshAttributeType::Normal) {
+            let indices = bytemuck::cast_slice(indices.data());
+            let normals = MeshAttribute {
+                ty: MeshAttributeType::Normal,
+                values: MeshAttributeValues::Vec3(Mesh::calculate_normals(&positions, indices)),
+            };
 
-                attributes.push(normals);
-            }
+            attributes.push(normals);
+        }
 
-            if !asset.has_attribute(MeshAttributeType::TexCoord0)
-                && !asset.has_attribute(MeshAttributeType::TexCoord1)
-            {
-                let indices = bytemuck::cast_slice(indices.data());
-                let tex_coords = MeshAttribute {
-                    ty: MeshAttributeType::TexCoord0,
-                    values: MeshAttributeValues::Vec2(Mesh::calculate_tex_coords(
-                        &positions, indices,
-                    )),
-                };
+        if !asset.has_attribute(MeshAttributeType::TexCoord0)
+            && !asset.has_attribute(MeshAttributeType::TexCoord1)
+        {
+            let indices = bytemuck::cast_slice(indices.data());
+            let tex_coords = MeshAttribute {
+                ty: MeshAttributeType::TexCoord0,
+                values: MeshAttributeValues::Vec2(Mesh::calculate_tex_coords(&positions, indices)),
+            };
 
-                attributes.push(tex_coords);
-            }
+            attributes.push(tex_coords);
+        }
 
-            if !asset.has_attribute(MeshAttributeType::Tangent) {
-                let tex_coords = asset
-                    .attribute(MeshAttributeType::TexCoord0)
-                    .or(asset.attribute(MeshAttributeType::TexCoord1))
-                    .and_then(|a| match &a.values {
-                        MeshAttributeValues::Vec2(v) => Some(Cow::Borrowed(v)),
-                        _ => None,
-                    })
-                    .expect("Mesh must have texture coordinates to calculate tangents");
+        if !asset.has_attribute(MeshAttributeType::Tangent) {
+            let tex_coords = asset
+                .attribute(MeshAttributeType::TexCoord0)
+                .or(asset.attribute(MeshAttributeType::TexCoord1))
+                .or(attributes
+                    .iter()
+                    .find(|a| a.ty == MeshAttributeType::TexCoord0))
+                .and_then(|a| match &a.values {
+                    MeshAttributeValues::Vec2(v) => Some(v.as_slice()),
+                    _ => None,
+                })
+                .expect("Tangent calculation requires tex coords");
 
-                let indices = bytemuck::cast_slice(indices.data());
-                let tangents = MeshAttribute {
-                    ty: MeshAttributeType::Tangent,
-                    values: MeshAttributeValues::Vec4(Mesh::calculate_tangents(
-                        &positions,
-                        &tex_coords,
-                        indices,
-                    )),
-                };
+            let indices = bytemuck::cast_slice(indices.data());
+            let tangents = MeshAttribute {
+                ty: MeshAttributeType::Tangent,
+                values: MeshAttributeValues::Vec4(Mesh::calculate_tangents(
+                    &positions,
+                    &tex_coords,
+                    indices,
+                )),
+            };
 
-                attributes.push(tangents);
-            }
+            attributes.push(tangents);
+        }
 
-            for attribute in attributes {
-                asset.add_attribute(attribute);
-            }
+        for attribute in attributes {
+            asset.add_attribute(attribute);
         }
 
         asset.add_attribute(MeshAttribute {

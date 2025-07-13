@@ -1,7 +1,8 @@
 use crate::{
-    ArgItem, Component, Components, Despawned, Entities, Event, EventRegistry, IntoSystemConfigs,
-    Phase, Resource, Resources, RunMode, Schedule, SystemArg, Systems, World, WorldMode,
-    core::task::{CpuTaskPool, Task, TaskPoolSettings},
+    ArgItem, Component, Components, Entities, Event, EventRegistry, IntoSystemConfigs, Phase,
+    Resource, Resources, RunMode, Schedule, SystemArg, Systems, World, WorldMode,
+    app::defaults::DefaultPlugins,
+    core::task::{CpuTaskPool, Task},
     ext,
     world::{Archetypes, WorldCell},
 };
@@ -10,71 +11,11 @@ use std::{
     hash::Hash,
 };
 
+pub mod defaults;
+pub mod plugin;
 pub mod sync;
 
-#[allow(unused_variables)]
-pub trait Plugin: 'static {
-    fn name(&self) -> &'static str {
-        std::any::type_name::<Self>()
-    }
-
-    /// Setup is called when the plugin is added to the app.
-    /// It is used to register systems, resources, and other app components.
-    fn setup(&mut self, app: &mut AppBuilder);
-
-    fn build(&mut self, app: &mut AppBuilder) {}
-
-    /// Finish is called after all of a plugin's dependencies have been added and ran.
-    fn finish(&mut self, app: &mut AppBuilder) {}
-}
-
-pub trait PluginCollection {
-    fn add_plugin<P: Plugin>(&mut self, plugin: P) -> &mut Self;
-}
-
-pub trait PluginKit {
-    fn get<P: PluginCollection>(self, plugins: &mut P);
-}
-
-impl<T: Plugin> PluginKit for T {
-    fn get<P: PluginCollection>(self, plugins: &mut P) {
-        plugins.add_plugin(self);
-    }
-}
-
-#[macro_export]
-macro_rules! impl_plugin_kit_for_tuples {
-    ($(($($name:ident),*)),*)  => {
-        $(
-            #[allow(non_snake_case)]
-            impl<$($name: PluginKit),+> PluginKit for ($($name),+) {
-                fn get<Pc: PluginCollection>(self, plugins: &mut Pc) {
-                    let ($($name),+) = self;
-                    $(
-                        $name.get(plugins);
-                    )+
-                }
-            }
-        )+
-    };
-}
-
-impl_plugin_kit_for_tuples!((A, B));
-impl_plugin_kit_for_tuples!((A, B, C));
-impl_plugin_kit_for_tuples!((A, B, C, D));
-impl_plugin_kit_for_tuples!((A, B, C, D, E));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q));
+pub use plugin::*;
 
 pub trait AppTag: 'static {
     fn name(&self) -> &'static str {
@@ -138,33 +79,12 @@ pub struct AppBuildInfo {
 
 impl AppBuildInfo {
     pub fn new() -> Self {
-        let mut world = World::new();
-        world.register_event::<Despawned>();
-
         Self {
-            world,
+            world: World::new(),
             schedule: Schedule::new(RunMode::Sequential),
             plugins: Vec::new(),
             registered: HashSet::new(),
         }
-    }
-
-    pub fn add_main_phases(&mut self) {
-        self.schedule.add_phase(Init);
-        self.schedule.add_phase(Run);
-        self.schedule.add_sub_phase(Run, Start);
-        self.schedule.add_sub_phase(Run, PreUpdate);
-        self.schedule.add_sub_phase(Run, Update);
-        self.schedule.add_sub_phase(Run, PostUpdate);
-        self.schedule.add_sub_phase(Run, End);
-        self.schedule.add_phase(Shutdown);
-    }
-
-    pub fn add_sub_phases(&mut self) {
-        self.schedule.add_phase(Init);
-        self.schedule.add_phase(Run);
-        self.schedule.add_phase(Extract);
-        self.schedule.add_phase(Shutdown);
     }
 
     pub fn into_app(mut self, main: Option<MainWorld>) -> App {
@@ -187,12 +107,10 @@ pub enum AppType {
         config: AppBuildInfo,
         secondary: HashMap<Box<dyn AppTag>, AppBuilder>,
         runner: Option<Box<dyn Fn(Apps) -> Apps>>,
-        task_pool_settings: TaskPoolSettings,
         building: bool,
     },
     Sub {
         config: AppBuildInfo,
-        task_pool_settings: TaskPoolSettings,
         building: bool,
     },
 }
@@ -203,7 +121,6 @@ impl Default for AppType {
             config: AppBuildInfo::new(),
             secondary: HashMap::new(),
             runner: None,
-            task_pool_settings: TaskPoolSettings::default(),
             building: false,
         }
     }
@@ -212,16 +129,22 @@ impl Default for AppType {
 pub struct AppBuilder(AppType);
 impl AppBuilder {
     pub fn new() -> Self {
-        let mut config = AppBuildInfo::new();
-        config.add_main_phases();
-
-        Self(AppType::Main {
-            config,
+        let mut builder = Self(AppType::Main {
+            config: AppBuildInfo::new(),
             secondary: HashMap::new(),
             runner: None,
-            task_pool_settings: TaskPoolSettings::default(),
             building: false,
-        })
+        });
+
+        builder.add_plugins(DefaultPlugins::default());
+        builder
+    }
+
+    pub fn is_main(&self) -> bool {
+        match self.0 {
+            AppType::Main { .. } => true,
+            AppType::Sub { .. } => false,
+        }
     }
 
     pub fn world(&self) -> &World {
@@ -360,40 +283,17 @@ impl AppBuilder {
         self
     }
 
-    pub fn task_pool_settings(&self) -> &TaskPoolSettings {
-        match &self.0 {
-            AppType::Main {
-                task_pool_settings, ..
-            } => task_pool_settings,
-            AppType::Sub {
-                task_pool_settings, ..
-            } => task_pool_settings,
-        }
-    }
-
-    pub fn task_pool_settings_mut(&mut self) -> &mut TaskPoolSettings {
-        match &mut self.0 {
-            AppType::Main {
-                task_pool_settings, ..
-            } => task_pool_settings,
-            AppType::Sub {
-                task_pool_settings, ..
-            } => task_pool_settings,
-        }
-    }
-
     pub fn add_sub_app(&mut self, app: impl AppTag) -> &mut AppBuilder {
         let app = Box::new(app) as Box<dyn AppTag>;
         match &mut self.0 {
             AppType::Main { secondary, .. } => secondary.entry(app).or_insert_with(|| {
-                let mut config = AppBuildInfo::new();
-                config.add_sub_phases();
-
-                AppBuilder(AppType::Sub {
-                    config,
-                    task_pool_settings: TaskPoolSettings::default(),
+                let mut app = AppBuilder(AppType::Sub {
+                    config: AppBuildInfo::new(),
                     building: false,
-                })
+                });
+
+                app.add_plugins(DefaultPlugins::default());
+                app
             }),
             AppType::Sub { .. } => panic!("Cannot add sub app to a sub app"),
         }
@@ -453,14 +353,12 @@ impl AppBuilder {
                 config,
                 secondary,
                 runner,
-                task_pool_settings,
                 ..
             } => {
                 let mut main = Self(AppType::Main {
                     config,
                     secondary,
                     runner,
-                    task_pool_settings,
                     building: true,
                 });
 
@@ -470,19 +368,15 @@ impl AppBuilder {
                     mut config,
                     secondary,
                     runner,
-                    task_pool_settings,
                     ..
                 } = main.0
                 else {
                     panic!("Expected AppConfigKind::Main");
                 };
 
-                task_pool_settings.init_task_pools();
-
                 let sub = secondary
                     .into_values()
                     .map(|mut builder| {
-                        builder.info_mut().add_sub_phases();
                         builder.build_plugins();
 
                         let main_world = MainWorld::new(&mut config.world);
@@ -497,19 +391,13 @@ impl AppBuilder {
                     None => Self::default_runner(Apps::new(main, sub)),
                 }
             }
-            AppType::Sub {
-                config,
-                task_pool_settings,
-                ..
-            } => {
+            AppType::Sub { config, .. } => {
                 let mut builder = Self(AppType::Sub {
                     config,
-                    task_pool_settings,
                     building: true,
                 });
 
                 builder.build_plugins();
-                builder.task_pool_settings().init_task_pools();
 
                 let app = builder.into_build_info().into_app(None);
                 Apps::new(app, vec![])

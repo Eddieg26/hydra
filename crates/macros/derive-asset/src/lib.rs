@@ -1,7 +1,7 @@
 use macro_utils::{derive_marker, syn};
 mod expand;
 
-#[proc_macro_derive(Asset, attributes(reload, unload, dependency))]
+#[proc_macro_derive(Asset, attributes(dependency))]
 pub fn derive_asset(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let mut input = syn::parse_macro_input!(input as syn::DeriveInput);
     match expand::expand_derive_asset(&mut input) {
