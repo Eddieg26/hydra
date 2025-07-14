@@ -12,7 +12,7 @@ use crate::{
         library::AssetLibrary,
     },
     ext::{DeserializeExt, SerializeExt},
-    io::{AsyncIoError, AsyncReader, BoxFuture, path::AssetPath},
+    io::{AsyncIoError, AsyncReader, BoxFuture, LoadPath, path::AssetPath},
     settings::{AssetSettings, ErasedAssetSettings, Settings},
 };
 use serde::{Deserialize, Serialize};
@@ -158,18 +158,20 @@ impl<'a> ProcessContext<'a> {
         self.ty
     }
 
-    pub async fn get_id(&self, path: &AssetPath<'static>) -> Option<&ErasedId> {
-        self.library.get(path)
-    }
-
     pub async fn load<A: Asset + for<'de> Deserialize<'de>>(
         &mut self,
-        id: AssetId<A>,
+        path: impl Into<LoadPath<'static>>,
     ) -> Result<LoadedAsset<A>, AsyncIoError> {
-        let artifact = self
-            .cache
-            .read_artifact(ArtifactPath::Cache, &id.into())
-            .await?;
+        let path: LoadPath<'static> = path.into();
+        let id = match path {
+            LoadPath::Path(path) => *self
+                .library
+                .get(&path)
+                .ok_or(AsyncIoError::NotFound((&path).into()))?,
+            LoadPath::Id(id) => id,
+        };
+
+        let artifact = self.cache.read_artifact(ArtifactPath::Cache, &id).await?;
 
         let asset = A::from_bytes(artifact.data()).map_err(AsyncIoError::from)?;
         self.dependencies.push(ImportDependency::new(

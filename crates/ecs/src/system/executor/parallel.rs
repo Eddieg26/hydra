@@ -29,7 +29,7 @@ impl ParallelExecutor {
             dependencies: systems.dependencies().to_vec(),
             queue: initial_systems.clone(),
             completed: FixedBitSet::with_capacity(systems.len()),
-            skipped: FixedBitSet::with_capacity(systems.len()),
+            ran: FixedBitSet::with_capacity(systems.len()),
             running: 0,
         };
 
@@ -47,7 +47,7 @@ impl ParallelExecutor {
     fn reset(&self, mut state: MutexGuard<'_, ExecutionState>) {
         state.running = 0;
         state.completed.clear();
-        state.skipped.clear();
+        state.ran.clear();
         state.queue = self.initial_systems.clone();
         state.dependencies = self.systems.dependencies().to_vec();
     }
@@ -61,16 +61,10 @@ impl SystemExecutor for ParallelExecutor {
         });
 
         let state = self.state.lock().unwrap();
-        for index in self
-            .systems
-            .topology()
-            .iter()
-            .filter_map(|i| (!state.skipped[*i]).then_some(i))
-        {
+        for index in state.ran.ones() {
             unsafe {
-                self.systems.nodes()[*index]
-                    .cast_mut()
-                    .update(world.get_mut())
+                let system = self.systems.nodes()[index].cast_mut();
+                system.update(world.get_mut())
             };
         }
 
@@ -82,7 +76,7 @@ pub struct ExecutionState {
     dependencies: Vec<usize>,
     queue: FixedBitSet,
     completed: FixedBitSet,
-    skipped: FixedBitSet,
+    ran: FixedBitSet,
     running: usize,
 }
 
@@ -92,7 +86,7 @@ impl Default for ExecutionState {
             dependencies: Default::default(),
             queue: Default::default(),
             completed: Default::default(),
-            skipped: Default::default(),
+            ran: Default::default(),
             running: 0,
         }
     }
@@ -182,16 +176,16 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
     }
 
     fn run_system(&self, index: usize) {
-        let skipped = unsafe { self.systems.nodes()[index].cast_mut().run(self.world) };
-        self.system_done(index, skipped);
+        let ran = unsafe { self.systems.nodes()[index].cast_mut().run(self.world) };
+        self.system_done(index, ran);
     }
 
-    fn system_done(&self, index: usize, skipped: bool) {
+    fn system_done(&self, index: usize, ran: bool) {
         let mut state = self.state.lock().unwrap();
 
         state.running -= 1;
         state.completed.set(index, true);
-        state.skipped.set(index, skipped);
+        state.ran.set(index, ran);
 
         for dependent in self.systems.dependents()[index].ones() {
             state.dependencies[dependent] -= 1;

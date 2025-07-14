@@ -139,7 +139,7 @@ impl<V: View> RenderViews<V> {
             .collect::<HashMap<_, _>>();
     }
 
-    pub(crate) fn process(views: &mut Self, device: &RenderDevice) {
+    pub(crate) fn queue(views: &mut Self, device: &RenderDevice) {
         if let Some(buffer) = views
             .as_mut()
             .update(device)

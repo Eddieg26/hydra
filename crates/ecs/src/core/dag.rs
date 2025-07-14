@@ -1,4 +1,5 @@
 use fixedbitset::FixedBitSet;
+use std::collections::VecDeque;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CyclicDependency(pub Vec<usize>);
@@ -86,63 +87,143 @@ impl<N> IndexDag<N> {
     }
 
     pub fn build(&mut self) -> Result<&[usize], CyclicDependency> {
-        if self.is_dirty {
-            let mut order = vec![];
-            let mut visited = vec![false; self.nodes.len()];
-            let mut recursion_stack = vec![false; self.nodes.len()];
+        // if self.is_dirty {
+        //     let mut order = vec![];
+        //     let mut visited = vec![false; self.nodes.len()];
+        //     let mut recursion_stack = vec![false; self.nodes.len()];
 
-            fn visit(
-                index: usize,
-                dependents: &Vec<FixedBitSet>,
-                visited: &mut Vec<bool>,
-                recursion_stack: &mut Vec<bool>,
-                order: &mut Vec<usize>,
-            ) -> Result<(), Vec<usize>> {
-                if recursion_stack[index] {
-                    return Err(vec![index]);
+        //     fn visit(
+        //         index: usize,
+        //         dependents: &Vec<FixedBitSet>,
+        //         visited: &mut Vec<bool>,
+        //         recursion_stack: &mut Vec<bool>,
+        //         order: &mut Vec<usize>,
+        //     ) -> Result<(), Vec<usize>> {
+        //         if recursion_stack[index] {
+        //             return Err(vec![index]);
+        //         }
+
+        //         if visited[index] {
+        //             return Ok(());
+        //         }
+
+        //         visited[index] = true;
+        //         recursion_stack[index] = true;
+
+        //         for dependent in dependents[index].ones() {
+        //             if let Err(mut cycle) =
+        //                 visit(dependent, dependents, visited, recursion_stack, order)
+        //             {
+        //                 cycle.push(index);
+        //                 return Err(cycle);
+        //             }
+        //         }
+
+        //         recursion_stack[index] = false;
+        //         order.push(index);
+        //         Ok(())
+        //     }
+
+        //     for index in 0..self.nodes.len() {
+        //         if !visited[index] {
+        //             if let Err(mut cycle) = visit(
+        //                 index,
+        //                 &self.dependents,
+        //                 &mut visited,
+        //                 &mut recursion_stack,
+        //                 &mut order,
+        //             ) {
+        //                 cycle.reverse();
+        //                 return Err(CyclicDependency(cycle));
+        //             }
+        //         }
+        //     }
+
+        //     order.reverse();
+        //     self.topology = order;
+        // }
+
+        let mut order = Vec::new();
+        let mut dependencies = self.dependencies.clone();
+        let mut stack = self
+            .dependencies
+            .iter()
+            .enumerate()
+            .filter_map(|(index, count)| (*count == 0).then_some(index))
+            .collect::<VecDeque<_>>();
+
+        while let Some(index) = stack.pop_front() {
+            for dependent in self.dependents[index].ones() {
+                dependencies[dependent] -= 1;
+                if dependencies[dependent] == 0 {
+                    stack.push_back(dependent);
                 }
-
-                if visited[index] {
-                    return Ok(());
-                }
-
-                visited[index] = true;
-                recursion_stack[index] = true;
-
-                for dependent in dependents[index].ones() {
-                    if let Err(mut cycle) =
-                        visit(dependent, dependents, visited, recursion_stack, order)
-                    {
-                        cycle.push(index);
-                        return Err(cycle);
-                    }
-                }
-
-                recursion_stack[index] = false;
-                order.push(index);
-                Ok(())
             }
 
-            for index in 0..self.nodes.len() {
-                if !visited[index] {
-                    if let Err(mut cycle) = visit(
-                        index,
-                        &self.dependents,
-                        &mut visited,
-                        &mut recursion_stack,
-                        &mut order,
-                    ) {
-                        cycle.reverse();
-                        return Err(CyclicDependency(cycle));
-                    }
-                }
-            }
-
-            order.reverse();
-            self.topology = order;
+            order.push(index);
         }
 
+        if order.len() != self.nodes.len() {
+            if let Some(cycle) = self.find_cycle() {
+                return Err(CyclicDependency(cycle));
+            }
+        }
+
+        self.topology = order;
+
         Ok(&self.topology)
+    }
+
+    pub fn find_cycle(&self) -> Option<Vec<usize>> {
+        #[derive(Clone, Copy)]
+        enum VisitState {
+            Unvisited,
+            Visiting,
+            Visited,
+        }
+
+        let mut state = vec![VisitState::Unvisited; self.nodes.len()];
+        let mut path = Vec::new();
+
+        fn dfs<O>(
+            node: usize,
+            state: &mut [VisitState],
+            graph: &IndexDag<O>,
+            path: &mut Vec<usize>,
+        ) -> Option<Vec<usize>> {
+            state[node] = VisitState::Visiting;
+            path.push(node);
+
+            for next in graph.dependents[node].ones() {
+                match state[next] {
+                    VisitState::Unvisited => {
+                        if let Some(cycle) = dfs(next, state, graph, path) {
+                            return Some(cycle);
+                        }
+                    }
+                    VisitState::Visiting => {
+                        // Found a cycle!
+                        let start = path.iter().position(|&n| n == next).unwrap();
+                        return Some(path[start..].to_vec());
+                    }
+                    VisitState::Visited => {}
+                }
+            }
+
+            state[node] = VisitState::Visited;
+            path.pop();
+            None
+        }
+
+        for i in 0..self.nodes.len() {
+            if let VisitState::Unvisited = state[i] {
+                if let Some(cycle_nodes) = dfs(i, &mut state, self, &mut path) {
+                    return Some(cycle_nodes);
+                }
+            }
+        }
+
+        None
     }
 
     pub fn build_immutable(mut self) -> Result<ImmutableIndexDag<N>, CyclicDependency> {
@@ -276,7 +357,7 @@ mod tests {
         let result = dag.build();
         assert!(result.is_ok());
         let topology = result.unwrap();
-        assert_eq!(topology, &[node2, node3, node1]);
+        assert_eq!(topology, &[node2, node1, node3]);
     }
 
     #[test]
@@ -303,12 +384,15 @@ mod tests {
         let mut dag = super::IndexDag::new();
         let node1 = dag.add_node("Node1");
         let node2 = dag.add_node("Node2");
+        let node3 = dag.add_node("Node3");
 
         let result = dag.build();
         assert!(result.is_ok());
         let topology = result.unwrap();
-        assert!(topology.contains(&node1));
-        assert!(topology.contains(&node2));
+
+        assert_eq!(topology[0], node1);
+        assert_eq!(topology[1], node2);
+        assert_eq!(topology[2], node3);
     }
 
     #[test]

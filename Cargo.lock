@@ -2388,6 +2388,7 @@ dependencies = [
  "uuid",
  "waker-fn",
  "wgpu",
+ "wgsl-macro",
  "window",
 ]
 
@@ -3363,6 +3364,15 @@ dependencies = [
  "serde",
  "thiserror 2.0.12",
  "web-sys",
+]
+
+[[package]]
+name = "wgsl-macro"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "352be560369fcefc0cb9c62fb2a7c4c2d5c191f3af62b8bf9f0b4beae0e81b64"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

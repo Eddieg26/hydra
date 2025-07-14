@@ -305,6 +305,7 @@ impl ResourceExtractors {
         main_extractors: Main<&mut ResourceExtractors>,
         extractors: &mut ResourceExtractors,
     ) {
+        
         extractors.0.extend(main_extractors.into_inner().0.drain());
     }
 

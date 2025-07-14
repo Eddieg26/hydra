@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, path::Path};
+use std::{
+    borrow::Cow,
+    path::{Path, PathBuf},
+};
 
 use crate::asset::ErasedId;
 
@@ -104,7 +107,7 @@ impl<'a> AssetPath<'a> {
 
     fn parse(path: &'a str) -> Self {
         let (source, start) = match path.find("://") {
-            Some(index) => (AssetSource::from(&path[..index]), index),
+            Some(index) => (AssetSource::from(&path[..index]), index + 3),
             None => (AssetSource::Default, 0),
         };
 
@@ -134,6 +137,13 @@ impl From<String> for AssetPath<'static> {
     }
 }
 
+impl From<PathBuf> for AssetPath<'static> {
+    fn from(value: PathBuf) -> Self {
+        let path = format!("{}", value.display());
+        AssetPath::parse(&path).to_owned()
+    }
+}
+
 impl std::ops::Deref for AssetPath<'_> {
     type Target = Path;
 
@@ -145,6 +155,20 @@ impl std::ops::Deref for AssetPath<'_> {
 impl AsRef<Path> for AssetPath<'_> {
     fn as_ref(&self) -> &Path {
         &self.path
+    }
+}
+
+impl From<&AssetPath<'_>> for PathBuf {
+    fn from(value: &AssetPath) -> Self {
+        let path = match value.source {
+            AssetSource::Default => format!("{}", value.path.display()),
+            AssetSource::Name(ref name) => format!("{}://{}", name, value.path.display()),
+        };
+
+        match &value.name {
+            Some(name) => PathBuf::from(format!("{}@{}", path, &name)),
+            None => PathBuf::from(path),
+        }
     }
 }
 
@@ -184,5 +208,33 @@ impl std::fmt::Display for LoadPath<'_> {
             LoadPath::Path(path) => write!(f, "{:?}", path),
             LoadPath::Id(id) => write!(f, "{}", id.to_string()),
         }
+    }
+}
+
+mod tests {
+    use crate::io::{AssetPath, AssetSource};
+    use std::{borrow::Cow, path::PathBuf};
+
+    #[test]
+    fn test_asset_path() {
+        let path = AssetPath::from(PathBuf::from("test.txt"));
+        assert_eq!(AssetSource::Default, path.source);
+        assert_eq!(PathBuf::from(&path), PathBuf::from("test.txt"));
+        assert_eq!(None, path.name());
+
+        let path = AssetPath::from(PathBuf::from("models/test.obj"));
+        assert_eq!(AssetSource::Default, path.source);
+        assert_eq!(PathBuf::from(&path), PathBuf::from("models/test.obj"));
+        assert_eq!(None, path.name());
+
+        let path = AssetPath::from(PathBuf::from("models/test.obj@cube"));
+        assert_eq!(AssetSource::Default, path.source);
+        assert_eq!(PathBuf::from(&path), PathBuf::from("models/test.obj@cube"));
+        assert_eq!(Some("cube"), path.name());
+
+        let path = AssetPath::from(PathBuf::from("remote://models/test.obj@cube"));
+        assert_eq!(AssetSource::Name(Cow::Borrowed("remote")), path.source);
+        assert_eq!(PathBuf::from(&path), PathBuf::from("remote://models/test.obj@cube"));
+        assert_eq!(Some("cube"), path.name());
     }
 }

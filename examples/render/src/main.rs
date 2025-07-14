@@ -17,15 +17,7 @@ use ecs::{
 };
 use math::{Quat, Vec3};
 use render::{
-    ArrayBuffer, AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder,
-    BlendMode, Camera, Color, DisableCulling, Draw, GpuShader, Indices, Lighting, LightingData,
-    Material, Mesh, MeshAttribute, MeshAttributeType, MeshAttributeValues, MeshTopology,
-    ObjImportSettings, ObjImporter, PostRender, Process, Projection, RenderApp, RenderDevice,
-    RenderPhase, Renderer, Shader, ShaderType, SubMesh, Texture, Texture2dImporter,
-    Texture2dSettings, Unlit, View, ViewData,
-    plugin::{RenderAppExt, RenderPlugin},
-    uniform::UniformBuffer,
-    wgpu::{BufferUsages, ShaderStages},
+    plugin::{RenderAppExt, RenderPlugin}, uniform::UniformBuffer, wgpu::{BufferUsages, ShaderStages}, ArrayBuffer, AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, BlendMode, Camera, Color, DisableCulling, Draw, GpuShader, Indices, Lighting, LightingData, Material, Mesh, MeshAttribute, MeshAttributeType, MeshAttributeValues, MeshTopology, ObjImportSettings, ObjImporter, PostRender, Process, Projection, Queue, RenderApp, RenderDevice, RenderPhase, Renderer, Shader, ShaderSettings, ShaderType, SubMesh, Texture, Texture2dImporter, Texture2dSettings, Unlit, View, ViewData
 };
 use serde::{Deserialize, Serialize};
 use smol::io::{AsyncReadExt, AsyncWriteExt};
@@ -74,27 +66,27 @@ const QUAD_TEX_COORDS: &[math::Vec2] = &[
 
 fn main() {
     let fs = EmbeddedFs::new();
-    embed_asset!(fs, VERT_ID, "vert.wgsl", DefaultSettings::default());
-    embed_asset!(fs, VERT_ID_2, "vert2.wgsl", DefaultSettings::default());
-    embed_asset!(fs, FRAG_ID, "frag.wgsl", DefaultSettings::default());
-    embed_asset!(fs, FRAG_ID_2, "frag2.wgsl", DefaultSettings::default());
+    embed_asset!(fs, VERT_ID, "vert.wgsl", ShaderSettings::default());
+    embed_asset!(fs, VERT_ID_2, "vert2.wgsl", ShaderSettings::default());
+    embed_asset!(fs, FRAG_ID, "frag.wgsl", ShaderSettings::default());
+    embed_asset!(fs, FRAG_ID_2, "frag2.wgsl", ShaderSettings::default());
     embed_asset!(
         fs,
         FRAG_ID_3,
         "forward-lighting.wgsl",
-        DefaultSettings::default()
+        ShaderSettings::default()
     );
     embed_asset!(
         fs,
         DRAW_LIGHT_FRAG,
         "draw-light.frag.wgsl",
-        DefaultSettings::default()
+        ShaderSettings::default()
     );
     embed_asset!(
         fs,
         DRAW_LIGHT_VERT,
         "draw-light.vert.wgsl",
-        DefaultSettings::default()
+        ShaderSettings::default()
     );
     embed_asset!(fs, CUBE_ID, "cube.obj", ObjImportSettings::default());
     embed_asset!(
@@ -511,7 +503,7 @@ impl ForwardLighting {
         }
     }
 
-    fn process(lighting: &mut LightingData<Self>, device: &RenderDevice) {
+    fn queue(lighting: &mut LightingData<Self>, device: &RenderDevice) {
         lighting.update(device);
     }
 
@@ -572,7 +564,7 @@ impl Plugin for ForwardLightingPlugin {
             Extract,
             ForwardLighting::extract.when::<Exists<LightingData<ForwardLighting>>>(),
         );
-        sub_app.add_systems(Process, ForwardLighting::process);
+        sub_app.add_systems(Queue, ForwardLighting::queue);
         sub_app.add_systems(PostRender, ForwardLighting::clear_buffer);
     }
 }

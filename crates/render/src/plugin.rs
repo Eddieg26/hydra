@@ -1,8 +1,8 @@
 use crate::{
     CameraRenderTargets, CameraSubGraph, DisableCulling, Draw, DrawPipeline, DrawTree, DrawView,
-    ExtractError, GpuTexture, LightingData, MaterialBinding, ObjImporter, ProcessAssets,
-    QueueDraws, QueueViews, RenderGraphBuilder, RenderMesh, RenderTarget, GpuShader, SubMesh,
-    Texture2dImporter, ViewDrawCalls, VisibleDraws,
+    ExtractError, GlobalShaderConstant, GlobalShaderConstants, GpuShader, GpuTexture, LightingData,
+    MaterialBinding, ObjImporter, ProcessAssets, QueueDraws, QueueViews, RenderGraphBuilder,
+    RenderMesh, RenderTarget, SubMesh, Texture2dImporter, ViewDrawCalls, VisibleDraws,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     draw::{
         Renderer, RendererPass,
@@ -45,6 +45,7 @@ impl Plugin for RenderPlugin {
             .add_sub_phase(Run, PostRender)
             .add_systems(Init, RenderSurface::create_surface)
             .add_systems(Init, RenderGraph::create_graph)
+            .add_systems(Init, GlobalShaderConstants::init)
             .add_systems(Extract, RenderSurface::resize_surface)
             .add_systems(Queue, RenderSurface::queue_surface)
             .add_systems(Render, RenderGraph::run_graph)
@@ -54,6 +55,7 @@ impl Plugin for RenderPlugin {
             .add_resource(AssetExtractors::default())
             .add_resource(ResourceExtractors::default())
             .add_resource(PipelineCache::default())
+            .add_resource(GlobalShaderConstants::new())
             .register_event::<ExtractError>();
 
         app.add_render_resource::<Fallbacks>()
@@ -94,6 +96,7 @@ impl Plugin for RenderPlugin {
 
 pub trait RenderAppExt {
     fn register_draw<D: Draw>(&mut self) -> &mut Self;
+    fn register_shader_constant<C: GlobalShaderConstant>(&mut self) -> &mut Self;
     fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self;
     fn add_sub_graph<S: SubGraph>(&mut self) -> &mut Self;
     fn add_sub_graph_pass<S: SubGraph, P: GraphPass>(&mut self, pass: P) -> &mut Self;
@@ -105,6 +108,12 @@ pub trait RenderAppExt {
 impl RenderAppExt for AppBuilder {
     fn register_draw<D: Draw>(&mut self) -> &mut Self {
         self.add_plugins(DrawPlugin::<D>::new())
+    }
+
+    fn register_shader_constant<C: GlobalShaderConstant>(&mut self) -> &mut Self {
+        self.get_or_insert_resource(|| GlobalShaderConstants::new())
+            .register::<C>();
+        self
     }
 
     fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self {
@@ -209,7 +218,7 @@ impl<V: View> Plugin for ViewPlugin<V> {
                     Extract,
                     RenderViews::<V>::extract.when::<Exists<RenderViews<V>>>(),
                 )
-                .add_systems(Process, RenderViews::<V>::process);
+                .add_systems(Queue, RenderViews::<V>::queue);
         })
         .register::<V>()
         .add_render_resource::<RenderViews<V>>();

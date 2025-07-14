@@ -2,7 +2,7 @@ use ecs::Resource;
 use std::sync::Arc;
 use wgpu::{Adapter, Device, Queue, RequestDeviceError};
 
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct RenderDevice {
     device: Arc<Device>,
     pub queue: Arc<Queue>,

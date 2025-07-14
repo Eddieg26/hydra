@@ -6,7 +6,7 @@ use crate::{
     },
     settings::{AssetSettings, Settings},
 };
-use smol::io::AsyncWriteExt;
+use smol::io::{AsyncReadExt, AsyncWriteExt};
 use std::{collections::HashMap, path::Path};
 
 pub struct AssetFileSystem(Box<dyn ErasedFileSystem>);
@@ -56,7 +56,15 @@ impl AssetFileSystem {
     pub async fn read(&self, path: &Path) -> Result<Vec<u8>, AsyncIoError> {
         let mut reader = self.reader(path).await?;
         let mut data = Vec::new();
-        reader.read_to_end(&mut data).await?;
+        AsyncReader::read_to_end(&mut reader, &mut data).await?;
+
+        Ok(data)
+    }
+
+    pub async fn read_to_string(&self, path: &Path) -> Result<String, AsyncIoError> {
+        let mut reader = self.reader(path).await?;
+        let mut data = String::new();
+        reader.read_to_string(&mut data).await?;
 
         Ok(data)
     }
@@ -73,8 +81,7 @@ impl AssetFileSystem {
     ) -> Result<AssetSettings<S>, AsyncIoError> {
         let mut reader = self.reader(&path.append_ext("meta")).await?;
         let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes).await?;
-
+        AsyncReader::read_to_end(&mut reader, &mut bytes).await?;
         AssetSettings::<S>::from_bytes(&bytes).map_err(AsyncIoError::from)
     }
 

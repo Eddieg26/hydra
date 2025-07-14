@@ -191,17 +191,7 @@ impl Schedule {
 
     pub fn build(self, world: &mut World) -> Result<Systems, ScheduleBuildError> {
         let mode = self.mode;
-        let mut hierarchy = self.hierarchy;
         let mut phases = self.phases;
-
-        if let Err(error) = hierarchy.build() {
-            let names = error
-                .0
-                .iter()
-                .map(|index| phases.nodes()[*index].phase.name())
-                .collect();
-            return Err(ScheduleBuildError::CyclicHierarchy(names));
-        }
 
         if let Err(error) = phases.build() {
             let names = error
@@ -212,11 +202,28 @@ impl Schedule {
             return Err(ScheduleBuildError::CyclicDependency(names));
         }
 
-        let mut hierarchy = HashMap::new();
+        let mut hierarchy = IndexDag::new();
+        let mut map = HashMap::new();
         for index in phases.topology() {
+            let node = *map
+                .entry(*index)
+                .or_insert_with(|| hierarchy.add_node(*index));
             if let Some(parent) = phases.nodes()[*index].parent {
-                hierarchy.entry(parent).or_insert(vec![]).push(*index);
+                let parent = *map
+                    .entry(parent)
+                    .or_insert_with(|| hierarchy.add_node(parent));
+
+                hierarchy.add_dependency(parent, node);
             }
+        }
+
+        if let Err(error) = hierarchy.build() {
+            let names = error
+                .0
+                .iter()
+                .map(|index| phases.nodes()[*index].phase.name())
+                .collect();
+            return Err(ScheduleBuildError::CyclicHierarchy(names));
         }
 
         let phases = phases.map(|config| config.build(world, mode));
@@ -224,7 +231,7 @@ impl Schedule {
         Ok(Systems {
             mode,
             phases: phases.into_immutable(),
-            hierarchy,
+            hierarchy: hierarchy.into_immutable(),
             map: self.map,
         })
     }
@@ -252,7 +259,7 @@ impl std::fmt::Display for ScheduleBuildError {
 pub struct Systems {
     mode: RunMode,
     phases: ImmutableIndexDag<PhaseNode>,
-    hierarchy: HashMap<usize, Vec<usize>>,
+    hierarchy: ImmutableIndexDag<usize>,
     map: HashMap<&'static str, usize>,
 }
 
@@ -262,18 +269,17 @@ impl Systems {
     }
 
     pub fn run(&self, phase: impl Phase, world: &mut World) {
-        if let Some(index) = self.map.get(phase.name()).copied() {
-            let world = unsafe { WorldCell::new_mut(world) };
+        let world = unsafe { WorldCell::new_mut(world) };
 
-            let mut stack = vec![index];
-            while let Some(index) = stack.pop() {
-                self.phases.nodes()[index].run(world);
-                if let Some(children) = self.hierarchy.get(&index) {
-                    for child in children.iter().rev() {
-                        stack.insert(0, *child);
-                    }
-                }
-            }
+        if let Some(index) = self.map.get(phase.name()).copied() {
+            self.visit(index, &|node| node.run(world));
+        }
+    }
+
+    pub fn visit(&self, index: usize, visiter: &impl Fn(&PhaseNode)) {
+        visiter(&self.phases.nodes()[index]);
+        for child in self.hierarchy.dependents()[index].ones() {
+            self.visit(self.hierarchy.nodes()[child], visiter);
         }
     }
 
@@ -337,10 +343,13 @@ mod tests {
         let systems = schedule.build(&mut world).unwrap();
 
         let main_index = systems.map["MainPhase"];
-        let sub_indices = systems.hierarchy.get(&main_index).unwrap();
+        let sub_indices = systems.hierarchy.dependents()[main_index].ones();
         let sub_names: Vec<_> = sub_indices
-            .iter()
-            .map(|&i| systems.phases.nodes()[i].phase.name())
+            .map(|i| {
+                systems.phases.nodes()[systems.hierarchy.nodes()[i]]
+                    .phase
+                    .name()
+            })
             .collect();
 
         assert!(sub_names.contains(&"SubPhase1"));
@@ -390,5 +399,38 @@ mod tests {
         } else {
             panic!("Expected a cyclic hierarchy error");
         }
+    }
+
+    #[test]
+    fn test_render_order() {
+        let mut schedule = Schedule::new(RunMode::Sequential);
+        let run = TestPhase("Run");
+        let process = TestPhase("Process");
+        let process_assets = TestPhase("ProcessAssets");
+        let queue = TestPhase("Queue");
+        let queue_views = TestPhase("QueueViews");
+        let queue_draws = TestPhase("QueueDraws");
+        let pre_render = TestPhase("PreRender");
+        let render = TestPhase("Render");
+        let present = TestPhase("Present");
+        let post_render = TestPhase("PostRender");
+
+        schedule.add_phase(run);
+        schedule.add_sub_phase(run, process);
+        schedule.add_sub_phase(process, process_assets);
+        schedule.add_sub_phase(run, queue);
+        schedule.add_sub_phase(queue, queue_views);
+        schedule.add_sub_phase(queue, queue_draws);
+        schedule.add_sub_phase(run, pre_render);
+        schedule.add_sub_phase(run, render);
+        schedule.add_sub_phase(run, present);
+        schedule.add_sub_phase(run, post_render);
+
+        let mut world = World::new();
+        let systems = schedule.build(&mut world).unwrap();
+
+        systems.visit(0, &|node| {
+            println!("{}", node.phase.name());
+        });
     }
 }
