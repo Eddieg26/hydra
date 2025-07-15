@@ -19,7 +19,7 @@ members = [
     "crates/window",
     "examples/ecs/*",
     "examples/window",
-    "examples/render",
+    "examples/render", "crates/input",
 ]
 
 

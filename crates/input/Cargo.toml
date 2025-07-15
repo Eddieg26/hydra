@@ -1,0 +1,8 @@
+[package]
+name = "input"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ecs = { path = "../ecs" }
+gilrs = "0.11.0"
