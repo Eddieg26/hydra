@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 ecs = { path = "../ecs" }
 gilrs = "0.11.0"
+smol_str = "0.3.2"

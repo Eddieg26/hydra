@@ -12,6 +12,7 @@ members = [
     "crates/macros/*",
     "crates/asset",
     "crates/ecs",
+    "crates/input",
     "crates/math",
     "crates/render",
     "crates/render-3d",
@@ -19,7 +20,7 @@ members = [
     "crates/window",
     "examples/ecs/*",
     "examples/window",
-    "examples/render", "crates/input",
+    "examples/render",
 ]
 
 
