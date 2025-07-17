@@ -5,6 +5,11 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GamepadId(pub(crate) usize);
+impl From<usize> for GamepadId {
+    fn from(value: usize) -> Self {
+        Self(value)
+    }
+}
 
 #[derive(Debug)]
 pub struct Gamepad {
