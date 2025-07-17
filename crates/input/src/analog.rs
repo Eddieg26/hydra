@@ -1,6 +1,8 @@
 use std::{collections::HashMap, hash::Hash};
+use ecs::Resource;
 
-pub struct Analogs<T: Hash + Copy + Eq>(HashMap<T, f32>);
+#[derive(Resource)]
+pub struct Analogs<T: Hash + Copy + Eq + 'static>(HashMap<T, f32>);
 
 impl<T: Hash + Copy + Eq + std::fmt::Debug> std::fmt::Debug for Analogs<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

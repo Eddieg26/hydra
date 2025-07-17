@@ -1,16 +1,18 @@
-use std::error::Error;
-
 use crate::{
     events::{
-        AxisMotion, CursorEntered, CursorLeft, CursorMoved, DoubleTapGesture, DroppedFile,
-        HoveredFile, HoveredFileCancelled, KeyEvent, ModifiersChanged, MouseInput, MouseScroll,
-        PanGesture, PinchGesture, RotationGesture, ScaleFactorChanged, TouchEvent,
-        TouchpadPressure, WindowClosed, WindowCreated, WindowDestroyed, WindowFocused, WindowMoved,
-        WindowOccluded, WindowResized,
+        AxisMotion, CursorEntered, CursorLeft, CursorMoved, DroppedFile, HoveredFile,
+        HoveredFileCancelled, ModifiersChanged, ScaleFactorChanged, WindowClosed, WindowCreated,
+        WindowDestroyed, WindowFocused, WindowMoved, WindowOccluded, WindowResized,
     },
+    translate::{self},
     window::{Window, WindowConfig},
 };
 use ecs::{Apps, Command, Commands, Event, Events, Resource};
+use input::{
+    DoubleTapGesture, KeyboardInput, MouseInput, MouseScroll, PanGesture, PinchGesture,
+    RotationGesture, TouchInput, TouchpadPressure,
+};
+use std::error::Error;
 use winit::{
     application::ApplicationHandler,
     error::EventLoopError,
@@ -41,7 +43,7 @@ impl WindowApp {
         self.apps.shutdown();
     }
 
-    fn run_event<E: Event>(&mut self, event: E) {
+    fn send_event<E: Event>(&mut self, event: E) {
         self.apps
             .world_mut()
             .resource_mut::<Events<E>>()
@@ -98,7 +100,7 @@ impl ApplicationHandler for WindowApp {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, window: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
-                self.run_event(WindowClosed::new(window));
+                self.send_event(WindowClosed::new(window));
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
@@ -110,72 +112,77 @@ impl ApplicationHandler for WindowApp {
                     app.inner().request_redraw();
                 }
             }
-            WindowEvent::Destroyed => self.run_event(WindowDestroyed::new(window)),
-            WindowEvent::Resized(size) => self.run_event(WindowResized::new(size)),
-            WindowEvent::Moved(position) => self.run_event(WindowMoved::new(position)),
-            WindowEvent::DroppedFile(path) => self.run_event(DroppedFile::new(path)),
-            WindowEvent::HoveredFile(path) => self.run_event(HoveredFile::new(path)),
-            WindowEvent::HoveredFileCancelled => self.run_event(HoveredFileCancelled),
-            WindowEvent::Focused(focused) => self.run_event(WindowFocused::new(focused)),
-            WindowEvent::KeyboardInput {
-                device_id,
-                event,
-                is_synthetic,
-            } => self.run_event(KeyEvent::new(device_id, event, is_synthetic)),
+            WindowEvent::Destroyed => self.send_event(WindowDestroyed::new(window)),
+            WindowEvent::Resized(size) => self.send_event(WindowResized::new(size)),
+            WindowEvent::Moved(position) => self.send_event(WindowMoved::new(position)),
+            WindowEvent::DroppedFile(path) => self.send_event(DroppedFile::new(path)),
+            WindowEvent::HoveredFile(path) => self.send_event(HoveredFile::new(path)),
+            WindowEvent::HoveredFileCancelled => self.send_event(HoveredFileCancelled),
+            WindowEvent::Focused(focused) => self.send_event(WindowFocused::new(focused)),
+            WindowEvent::KeyboardInput { event, .. } => {
+                let event = KeyboardInput {
+                    code: translate::physical_key(event.physical_key),
+                    key: translate::logical_key(event.logical_key),
+                    state: translate::button_state(event.state),
+                    text: event.text,
+                    repeat: event.repeat,
+                };
+
+                self.send_event(event);
+            }
             WindowEvent::ModifiersChanged(modifiers) => {
-                self.run_event(ModifiersChanged::new(modifiers))
+                self.send_event(ModifiersChanged::new(modifiers))
             }
             WindowEvent::CursorMoved {
                 device_id,
                 position,
-            } => self.run_event(CursorMoved::new(device_id, position)),
+            } => self.send_event(CursorMoved::new(device_id, position)),
             WindowEvent::CursorEntered { device_id } => {
-                self.run_event(CursorEntered::new(device_id))
+                self.send_event(CursorEntered::new(device_id))
             }
-            WindowEvent::CursorLeft { device_id } => self.run_event(CursorLeft::new(device_id)),
+            WindowEvent::CursorLeft { device_id } => self.send_event(CursorLeft::new(device_id)),
             WindowEvent::AxisMotion {
                 device_id,
                 axis,
                 value,
-            } => self.run_event(AxisMotion::new(device_id, axis, value)),
-            WindowEvent::MouseWheel {
-                device_id,
-                delta,
-                phase,
-            } => self.run_event(MouseScroll::new(device_id, delta, phase)),
-            WindowEvent::MouseInput {
-                device_id,
-                state,
-                button,
-            } => self.run_event(MouseInput::new(device_id, state, button)),
-            WindowEvent::PinchGesture {
-                device_id,
-                delta,
-                phase,
-            } => self.run_event(PinchGesture::new(device_id, delta, phase)),
-            WindowEvent::PanGesture {
-                device_id,
-                delta,
-                phase,
-            } => self.run_event(PanGesture::new(device_id, delta, phase)),
-            WindowEvent::DoubleTapGesture { device_id } => {
-                self.run_event(DoubleTapGesture::new(device_id))
+            } => self.send_event(AxisMotion::new(device_id, axis, value)),
+            WindowEvent::MouseWheel { delta, .. } => {
+                let delta = translate::mouse_delta(delta);
+                self.send_event(MouseScroll { delta });
             }
-            WindowEvent::RotationGesture {
-                device_id,
-                delta,
-                phase,
-            } => self.run_event(RotationGesture::new(device_id, delta, phase)),
+            WindowEvent::MouseInput { state, button, .. } => {
+                let input = MouseInput {
+                    button: translate::mouse_button(button),
+                    state: translate::button_state(state),
+                };
+                self.send_event(input);
+            }
+            WindowEvent::PinchGesture { delta, phase, .. } => {
+                self.send_event(PinchGesture::new(delta, translate::touch_phase(phase)))
+            }
+            WindowEvent::PanGesture { delta, phase, .. } => self.send_event(PanGesture::new(
+                delta.x,
+                delta.y,
+                translate::touch_phase(phase),
+            )),
+            WindowEvent::DoubleTapGesture { .. } => self.send_event(DoubleTapGesture),
+            WindowEvent::RotationGesture { delta, phase, .. } => {
+                self.send_event(RotationGesture::new(delta, translate::touch_phase(phase)))
+            }
             WindowEvent::TouchpadPressure {
-                device_id,
-                pressure,
-                stage,
-            } => self.run_event(TouchpadPressure::new(device_id, pressure, stage)),
-            WindowEvent::Touch(touch) => self.run_event(TouchEvent::from(touch)),
+                pressure, stage, ..
+            } => self.send_event(TouchpadPressure::new(pressure, stage)),
+            WindowEvent::Touch(touch) => self.send_event(TouchInput::new(
+                touch.id,
+                translate::touch_phase(touch.phase),
+                touch.location.x as f32,
+                touch.location.y as f32,
+                touch.force.map(translate::touch_force),
+            )),
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                self.run_event(ScaleFactorChanged::new(scale_factor))
+                self.send_event(ScaleFactorChanged::new(scale_factor))
             }
-            WindowEvent::Occluded(occluded) => self.run_event(WindowOccluded::new(occluded)),
+            WindowEvent::Occluded(occluded) => self.send_event(WindowOccluded::new(occluded)),
             _ => {}
         }
     }

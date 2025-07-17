@@ -211,6 +211,7 @@ impl std::fmt::Display for LoadPath<'_> {
     }
 }
 
+#[allow(unused_imports)]
 mod tests {
     use crate::io::{AssetPath, AssetSource};
     use std::{borrow::Cow, path::PathBuf};

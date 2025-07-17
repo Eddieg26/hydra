@@ -1,7 +1,7 @@
 pub mod app;
 pub mod events;
-pub mod keyboard;
 pub mod plugin;
+pub mod translate;
 pub mod window;
 pub mod winit;
 

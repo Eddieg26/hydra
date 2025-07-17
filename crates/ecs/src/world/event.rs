@@ -53,6 +53,16 @@ impl<E: Event> Events<E> {
         EventReader::new(self)
     }
 
+    pub fn send_immediate(&mut self, event: E) {
+        self.read.events.push(event);
+    }
+
+    pub fn trigger(&mut self, entity: Entity, event: E) {
+        let index = self.read.events.len();
+        self.read.events.push(event);
+        self.read.entities.entry(entity).or_default().push(index);
+    }
+
     pub fn entity(&self, entity: Entity) -> std::slice::Iter<'_, usize> {
         self.read
             .entities

@@ -1,9 +1,10 @@
+use ecs::Resource;
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ButtonState {
     /// The element is currently pressed.
     Pressed,
@@ -11,14 +12,15 @@ pub enum ButtonState {
     Released,
 }
 
-pub struct Buttons<T: Hash + Copy + Eq> {
+#[derive(Resource)]
+pub struct Buttons<T: Hash + Clone + Eq + 'static> {
     /// The states of the buttons.
     states: HashMap<T, ButtonState>,
     /// The buttons that are currently being held down.
     down: HashSet<T>,
 }
 
-impl<T: Hash + Copy + Eq> Default for Buttons<T> {
+impl<T: Hash + Clone + Eq> Default for Buttons<T> {
     fn default() -> Self {
         Self {
             states: HashMap::new(),
@@ -27,7 +29,7 @@ impl<T: Hash + Copy + Eq> Default for Buttons<T> {
     }
 }
 
-impl<T: Hash + Copy + Eq + std::fmt::Debug> std::fmt::Debug for Buttons<T> {
+impl<T: Hash + Clone + Eq + std::fmt::Debug> std::fmt::Debug for Buttons<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Buttons")
             .field("states", &self.states)
@@ -36,7 +38,7 @@ impl<T: Hash + Copy + Eq + std::fmt::Debug> std::fmt::Debug for Buttons<T> {
     }
 }
 
-impl<T: Hash + Copy + Eq> Buttons<T> {
+impl<T: Hash + Clone + Eq> Buttons<T> {
     pub fn new() -> Self {
         Self {
             states: HashMap::new(),
@@ -46,7 +48,7 @@ impl<T: Hash + Copy + Eq> Buttons<T> {
 
     pub fn set(&mut self, key: T, state: ButtonState) {
         if state == ButtonState::Pressed {
-            self.down.insert(key);
+            self.down.insert(key.clone());
             self.states.insert(key, state);
         } else if let Some(ButtonState::Pressed) = self.states.get(&key) {
             self.down.remove(&key);
@@ -64,7 +66,7 @@ impl<T: Hash + Copy + Eq> Buttons<T> {
     }
 
     pub fn get(&self, key: &T) -> Option<ButtonState> {
-        self.states.get(key).copied()
+        self.states.get(key).cloned()
     }
 
     pub fn get_pressed(&self) -> impl Iterator<Item = &T> {
@@ -103,7 +105,7 @@ impl<T: Hash + Copy + Eq> Buttons<T> {
         self.states.keys()
     }
 
-    pub fn reset(&mut self) {
+    pub fn clear(&mut self) {
         self.states.clear();
         self.down.clear();
     }
