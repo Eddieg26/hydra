@@ -22,5 +22,4 @@ encase = { version = "0.10.0", features = ["glam"] }
 tobj = "4.0.3"
 waker-fn = "1.2.0"
 image = "0.25.6"
-naga_oil = "0.18.0"
-wgsl-macro = {version = "0.3.2", features = ["serde"]}
+wgsl-macro = { version = "0.3.2", features = ["serde"] }
