@@ -1,17 +1,14 @@
 use super::{
     VertexBufferLayout,
-    buffer::{IndexBuffer, Indices, VertexBuffer},
+    buffer::Indices,
     extract::{ExtractError, ReadWrite, RenderAsset},
 };
-use crate::{RenderAssetType, device::RenderDevice, types::Color};
+use crate::{RenderAssetType, types::Color};
 use asset::{
     Asset, Settings,
     importer::{AssetImporter, AssetProcessor},
 };
-use ecs::{
-    IndexMap,
-    system::{ArgItem, unlifetime::Read},
-};
+use ecs::{IndexMap, system::ArgItem};
 use math::bounds::Aabb;
 use smol::io::AsyncAsSync;
 use std::{
@@ -20,7 +17,7 @@ use std::{
 };
 use thiserror::Error;
 use waker_fn::waker_fn;
-use wgpu::{BufferUsages, IndexFormat, VertexStepMode};
+use wgpu::{IndexFormat, VertexStepMode};
 
 pub mod allocator;
 
