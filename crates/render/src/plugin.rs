@@ -3,6 +3,7 @@ use crate::{
     ExtractError, GlobalShaderConstant, GlobalShaderConstants, GpuShader, GpuTexture, LightingData,
     MaterialBinding, ObjImporter, ProcessAssets, QueueDraws, QueueViews, RenderGraphBuilder,
     RenderMesh, RenderTarget, SubMesh, Texture2dImporter, ViewDrawCalls, VisibleDraws,
+    allocator::MeshAllocatorPlugin,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     draw::{
         Renderer, RendererPass,
@@ -34,6 +35,7 @@ impl Plugin for RenderPlugin {
     fn setup(&mut self, app: &mut ecs::AppBuilder) {
         app.add_plugins((WindowPlugin, AssetPlugin))
             .add_sub_app(RenderApp)
+            .add_plugins(MeshAllocatorPlugin)
             .add_sub_phase(Run, Process)
             .add_sub_phase(Process, ProcessAssets)
             .add_sub_phase(Run, Queue)

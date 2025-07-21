@@ -1,8 +1,5 @@
 use crate::{
-    CameraRenderTargets, Color, ExtractResource, FragmentState, Frustum, GraphPass, Mesh, MeshKey,
-    MeshLayout, PassBuilder, PipelineCache, PipelineId, RenderAssets, RenderContext,
-    RenderGraphError, RenderMesh, RenderPipelineDesc, RenderResource, RenderState, RenderSurface,
-    Shader, SubMesh, VertexState,
+    allocator::MeshAllocator, CameraRenderTargets, Color, ExtractResource, FragmentState, Frustum, GraphPass, Mesh, MeshFormat, MeshKey, MeshLayout, PassBuilder, PipelineCache, PipelineId, RenderAssets, RenderContext, RenderGraphError, RenderMesh, RenderPipelineDesc, RenderResource, RenderState, RenderSurface, Shader, SubMesh, VertexState
 };
 use asset::{AssetId, ErasedId};
 use ecs::{
@@ -942,34 +939,43 @@ impl<D: Draw> DrawCommand<DrawView<D>> for ValidateMeshKey<D> {
 
 pub struct DrawModel<V: View, M: ModelData>(std::marker::PhantomData<(V, M)>);
 impl<V: View, M: ModelData> DrawCommand<V> for DrawModel<V, M> {
-    type Arg = (Read<RenderAssets<RenderMesh>>, Read<RenderAssets<SubMesh>>);
+    type Arg = (
+        Read<MeshAllocator>,
+        Read<RenderAssets<RenderMesh>>,
+        Read<RenderAssets<SubMesh>>,
+    );
 
     fn execute<'w>(
         state: &mut RenderState<'w>,
         _: &RenderView<V>,
         draw: &DrawCall<V>,
-        (meshes, sub_meshes): ArgItem<'w, 'w, Self::Arg>,
+        (meshes, render_meshes, sub_meshes): ArgItem<'w, 'w, Self::Arg>,
     ) -> Result<(), DrawError> {
         let DrawCall { key, instances, .. } = draw;
 
-        let mesh = meshes.get(&(key.mesh).into()).ok_or(DrawError::Skip)?;
+        let mesh = render_meshes
+            .get(&(key.mesh.into()))
+            .ok_or(DrawError::Skip)?;
+        let vertex_buffer = meshes.vertex_slice(&key.mesh).ok_or(DrawError::Skip)?;
         let submesh = key
             .sub_mesh
             .and_then(|id| sub_meshes.get(&id.into()))
             .copied()
             .unwrap_or(SubMesh::from(mesh));
 
-        let vertices = submesh.start_vertex..submesh.start_vertex + submesh.vertex_count;
-        let indices = submesh.start_index..submesh.start_index + submesh.index_count;
+        let vertices = submesh.start_vertex + vertex_buffer.range.start
+            ..submesh.start_vertex  + vertex_buffer.range.start + submesh.vertex_count;
+        state.set_vertex_buffer(0, vertex_buffer.buffer.slice(..));
 
-        state.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
-
-        match mesh.index_buffer() {
-            Some(buffer) => {
-                state.set_index_buffer(buffer.slice(..));
+        match mesh.format() {
+            MeshFormat::Indexed { format, .. } => {
+                let buffer = meshes.index_slice(&key.mesh).ok_or(DrawError::Skip)?;
+                let indices = submesh.start_index + buffer.range.start
+                    ..submesh.start_index + submesh.index_count + buffer.range.end;
+                state.set_index_buffer(buffer.buffer.slice(..), format);
                 Ok(state.draw_indexed(indices, vertices.start as i32, instances.clone()))
             }
-            None => Ok(state.draw(vertices, instances.clone())),
+            MeshFormat::NonIndexed => Ok(state.draw(vertices, instances.clone())),
         }
     }
 }

@@ -1,7 +1,6 @@
 use crate::{
     resources::{
-        BindGroup, BindGroupId, Buffer, BufferSlice, BufferSliceId, IndexSlice, PipelineId,
-        RenderPipeline,
+        BindGroup, BindGroupId, Buffer, BufferSlice, BufferSliceId, PipelineId, RenderPipeline,
     },
     types::{Color, Viewport},
 };
@@ -41,14 +40,14 @@ impl<'a> RenderState<'a> {
         }
     }
 
-    pub fn set_index_buffer(&mut self, slice: IndexSlice<'_>) {
+    pub fn set_index_buffer(&mut self, slice: BufferSlice<'_>, format: IndexFormat) {
         match self.index_buffer.as_ref() {
             Some(id) if id != &slice.id() => {
-                self.pass.set_index_buffer(*slice, IndexFormat::Uint32);
+                self.pass.set_index_buffer(*slice, format);
                 self.index_buffer = Some(slice.id());
             }
             None => {
-                self.pass.set_index_buffer(*slice, IndexFormat::Uint32);
+                self.pass.set_index_buffer(*slice, format);
                 self.index_buffer = Some(slice.id());
             }
             _ => (),

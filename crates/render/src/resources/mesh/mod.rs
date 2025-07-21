@@ -20,7 +20,9 @@ use std::{
 };
 use thiserror::Error;
 use waker_fn::waker_fn;
-use wgpu::{BufferUsages, VertexStepMode};
+use wgpu::{BufferUsages, IndexFormat, VertexStepMode};
+
+pub mod allocator;
 
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
@@ -391,6 +393,12 @@ impl Mesh {
             .fold(usize::MAX, |len, curr| len.min(curr.values.len())) as u64
     }
 
+    pub fn vertex_size(&self) -> u64 {
+        self.attributes
+            .iter()
+            .fold(0, |size, attr| size + attr.values.size()) as u64
+    }
+
     pub fn index_count(&self) -> usize {
         self.indices.as_ref().map_or(0, |i| i.len())
     }
@@ -482,40 +490,17 @@ impl Mesh {
         (data, count)
     }
 
-    pub fn create_render_mesh(&mut self, device: &RenderDevice) -> RenderMesh {
-        let (data, _) = self.vertex_data();
+    pub fn create_render_mesh(&mut self) -> RenderMesh {
+        let attributes = self
+            .attributes()
+            .iter()
+            .map(|a| MeshAttributeLayout {
+                ty: a.ty,
+                format: a.values.format(),
+            })
+            .collect::<Vec<_>>();
 
-        let mut layout = vec![];
-        let mut stride = 0;
-        for attribute in &mut self.attributes {
-            stride += attribute.values.size();
-
-            layout.push(MeshAttributeLayout {
-                ty: attribute.ty,
-                format: attribute.values.format(),
-            });
-
-            if self.read_write == ReadWrite::Disabled {
-                attribute.values.clear();
-            }
-        }
-
-        let usage = match self.read_write {
-            ReadWrite::Enabled => BufferUsages::COPY_DST | BufferUsages::MAP_WRITE,
-            ReadWrite::Disabled => BufferUsages::empty(),
-        };
-
-        let vertex_buffer = VertexBuffer::new_from_data(device, &data, stride, Some(usage));
-
-        let index_buffer = self.indices.as_mut().map(|indices| {
-            let buffer = IndexBuffer::new(device, &indices, Some(usage));
-            if self.read_write == ReadWrite::Disabled {
-                indices.clear();
-            }
-            buffer
-        });
-
-        let layout = MeshLayout::from(layout);
+        let layout = MeshLayout::from(attributes);
         let key = MeshKey::from(&layout);
 
         self.calculate_bounds();
@@ -523,29 +508,15 @@ impl Mesh {
         RenderMesh {
             key,
             layout: layout.into(),
-            vertex_buffer,
-            index_buffer,
+            vertex_count: self.vertex_count() as u32,
+            format: match self.indices {
+                Some(ref indices) => MeshFormat::Indexed {
+                    format: indices.format(),
+                    count: indices.len() as u32,
+                },
+                None => MeshFormat::NonIndexed,
+            },
             bounds: self.bounds,
-        }
-    }
-
-    pub fn update(&mut self, device: &RenderDevice, buffers: &mut RenderMesh) {
-        let (data, _) = self.vertex_data();
-        let stride = self
-            .attributes
-            .iter()
-            .fold(0, |sum, a| sum + a.values.size());
-
-        buffers.vertex_buffer = VertexBuffer::new_from_data(device, &data, stride, None);
-
-        if self.dirty.contains(MeshDirty::INDICES) {
-            match (buffers.index_buffer.as_mut(), self.indices()) {
-                (Some(index), Some(indices)) => {
-                    index.update(device, indices);
-                    self.dirty.remove(MeshDirty::INDICES);
-                }
-                _ => (),
-            }
         }
     }
 
@@ -819,11 +790,17 @@ impl<'a> IntoIterator for &'a MeshLayout {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum MeshFormat {
+    Indexed { format: IndexFormat, count: u32 },
+    NonIndexed,
+}
+
 pub struct RenderMesh {
     key: MeshKey,
     layout: MeshLayout,
-    vertex_buffer: VertexBuffer,
-    index_buffer: Option<IndexBuffer>,
+    vertex_count: u32,
+    format: MeshFormat,
     bounds: Aabb,
 }
 
@@ -836,20 +813,26 @@ impl RenderMesh {
         &self.layout
     }
 
-    pub fn vertex_buffer(&self) -> &VertexBuffer {
-        &self.vertex_buffer
+    pub fn vertex_count(&self) -> u32 {
+        self.vertex_count
     }
 
-    pub fn index_buffer(&self) -> Option<&IndexBuffer> {
-        self.index_buffer.as_ref()
+    pub fn format(&self) -> MeshFormat {
+        self.format
     }
 
-    pub fn vertex_count(&self) -> usize {
-        self.vertex_buffer.len()
+    pub fn index_count(&self) -> Option<u32> {
+        match self.format {
+            MeshFormat::Indexed { count, .. } => Some(count),
+            MeshFormat::NonIndexed => None,
+        }
     }
 
-    pub fn index_count(&self) -> usize {
-        self.index_buffer.as_ref().map_or(0, |i| i.len())
+    pub fn index_format(&self) -> Option<IndexFormat> {
+        match self.format {
+            MeshFormat::Indexed { format, .. } => Some(format),
+            MeshFormat::NonIndexed => None,
+        }
     }
 
     pub fn bounds(&self) -> &Aabb {
@@ -859,20 +842,25 @@ impl RenderMesh {
 
 impl From<&RenderMesh> for SubMesh {
     fn from(mesh: &RenderMesh) -> Self {
-        SubMesh::new(0, mesh.vertex_count() as u32, 0, mesh.index_count() as u32)
+        Self {
+            start_vertex: 0,
+            vertex_count: mesh.vertex_count,
+            start_index: 0,
+            index_count: mesh.index_count().unwrap_or_default(),
+        }
     }
 }
 
 impl RenderAsset for RenderMesh {
     type Source = Mesh;
 
-    type Arg = Read<RenderDevice>;
+    type Arg = ();
 
     fn extract(
         mut asset: Self::Source,
-        arg: &mut ArgItem<Self::Arg>,
+        _: &mut ArgItem<Self::Arg>,
     ) -> Result<Self, ExtractError<Self::Source>> {
-        let mesh = asset.create_render_mesh(arg);
+        let mesh = asset.create_render_mesh();
         Ok(mesh)
     }
 }

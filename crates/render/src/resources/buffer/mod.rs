@@ -36,6 +36,26 @@ impl Buffer {
         }
     }
 
+    pub fn mapped(
+        device: &RenderDevice,
+        size: u64,
+        usage: wgpu::BufferUsages,
+        label: Label,
+    ) -> Self {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: label.as_deref(),
+            size,
+            usage,
+            mapped_at_creation: true,
+        });
+
+        Self {
+            id: BufferId::new(),
+            label,
+            inner: buffer,
+        }
+    }
+
     pub fn with_data(
         device: &RenderDevice,
         data: &[u8],
@@ -83,6 +103,10 @@ impl Buffer {
         self.inner.as_entire_buffer_binding()
     }
 
+    // pub fn unmap(&self) {
+    //     self.inner.unmap();
+    // }
+
     pub fn resize(&mut self, device: &RenderDevice, size: u64) {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
@@ -126,12 +150,6 @@ impl From<wgpu::Buffer> for Buffer {
             label: None,
             inner: buffer,
         }
-    }
-}
-
-impl AsRef<Buffer> for Buffer {
-    fn as_ref(&self) -> &Buffer {
-        self
     }
 }
 

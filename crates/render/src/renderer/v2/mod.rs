@@ -1,9 +1,12 @@
-use crate::{Mesh, PipelineId, Shader, SubMesh};
+use crate::{
+    IndexBuffer, Mesh, PipelineId, RenderAssets, RenderMesh, Shader, SubMesh, VertexBuffer,
+    storage::{StorageBuffer, StorageBufferArray},
+};
 use asset::{AssetId, ErasedId};
-use ecs::{Component, Entity};
+use ecs::{Component, Entity, IndexMap};
 use encase::{ShaderType, internal::WriteInto};
 use math::{Mat4, bounds::Aabb};
-use std::{collections::HashMap, ops::Range};
+use std::collections::HashMap;
 use transform::{GlobalTransform, LocalTransform};
 use wgpu::VertexFormat;
 
@@ -24,9 +27,6 @@ pub trait RenderPhase: Default + Copy + Ord + Eq + 'static {
 
     const SORT: bool = false;
 
-    /// Returns the sort key for the given view.
-    fn sort_key(view: &Self::View) -> u64;
-
     /// Returns the a new render phase for the item
     /// with the given view and global transform.
     /// This is used to sort the items in the phase.
@@ -43,7 +43,7 @@ pub trait Material: 'static {
     type Phase: RenderPhase<View = Self::View>;
 }
 
-pub trait Draw: Component + Clone + 'static {
+pub trait Drawable: Component + Clone + 'static {
     type View: View;
 
     type Model: Model;
@@ -51,6 +51,8 @@ pub trait Draw: Component + Clone + 'static {
     type Material: Material<View = Self::View>;
 
     const BATCH: bool = true;
+
+    fn model(&self) -> Self::Model;
 
     fn state() -> wgpu::PrimitiveState {
         wgpu::PrimitiveState::default()
@@ -61,14 +63,15 @@ pub trait Draw: Component + Clone + 'static {
     fn shader() -> impl Into<AssetId<Shader>>;
 }
 
-pub struct DrawItem<D: Draw> {
+pub struct DrawItem<D: Drawable> {
     pub entity: Entity,
-    pub draw: D,
     pub global: GlobalTransform,
     pub local: <D::View as View>::Transform,
+    pub draw: D,
+    pub key: BatchKey,
 }
 
-pub struct DrawSet<D: Draw>(Vec<DrawItem<D>>);
+pub struct DrawSet<D: Drawable>(Vec<DrawItem<D>>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BatchKey {
@@ -77,8 +80,26 @@ pub struct BatchKey {
     sub_mesh: AssetId<SubMesh>,
 }
 
-pub struct CullData {
-    index: u32,
+#[derive(Debug, Clone, Copy, ShaderType)]
+pub struct IndirectDrawArgs {
+    pub instance_count: u32,
+    pub first_instance: u32,
+    pub vertex_count: u32,
+    pub first_vertex: u32,
+}
+
+#[derive(Debug, Clone, Copy, ShaderType)]
+pub struct IndirectDrawIndexedArgs {
+    pub index_count: u32,
+    pub instance_count: u32,
+    pub first_index: u32,
+    pub base_vertex: i32,
+    pub first_instance: u32,
+}
+
+pub struct RenderData {
+    batch: u32,
+    instance: u32,
     matrix: Mat4,
     bounds: Aabb,
 }
@@ -89,4 +110,53 @@ pub struct DrawCall<P: RenderPhase> {
     pipeline: PipelineId,
 }
 
+pub struct ModelDataBuffer<M: Model>(StorageBufferArray<M>);
+
+pub struct DrawArgBuffer(StorageBufferArray<IndirectDrawArgs>);
+impl DrawArgBuffer {
+    pub fn write(&mut self, args: &IndirectDrawArgs) -> u32 {
+        todo!()
+    }
+}
+
+pub struct DrawIndexedArgBuffer(StorageBufferArray<IndirectDrawIndexedArgs>);
+impl DrawIndexedArgBuffer {
+    pub fn write(&mut self, args: &IndirectDrawIndexedArgs) -> u32 {
+        todo!()
+    }
+}
+
+impl<M: Model> ModelDataBuffer<M> {
+    pub fn write(&mut self, value: &M) -> u32 {
+        self.0.push(value) / self.0.alignment()
+    }
+}
+
 pub struct ViewDrawSets<P: RenderPhase>(HashMap<Entity, Vec<DrawCall<P>>>);
+
+fn queue<D: Drawable>(
+    drawables: &DrawSet<D>,
+    buffer: &mut ModelDataBuffer<D::Model>,
+    draw_buffer: &mut DrawArgBuffer,
+    draw_indexed_buffer: &mut DrawIndexedArgBuffer,
+    meshes: &RenderAssets<RenderMesh>,
+) {
+    let mut batches = IndexMap::new();
+
+    for (index, drawable) in drawables.0.iter().enumerate() {
+        batches
+            .entry(drawable.key)
+            .or_insert(Vec::new())
+            .push(index);
+    }
+
+    for (batch, (key, indices)) in batches.iter().enumerate() {
+        let dispatch_size = indices.len();
+        for drawable in indices.iter().map(|i| &drawables.0[*i]) {
+            // Write model data into global model data buffer
+            let instance = buffer.write(&drawable.draw.model());
+            let matrix = drawable.global.matrix();
+            let bounds = *meshes.get(&key.mesh.into()).unwrap().bounds();
+        }
+    }
+}

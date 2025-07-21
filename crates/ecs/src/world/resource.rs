@@ -126,10 +126,11 @@ impl Resources {
         }
 
         let index = self.meta.len();
-        let meta = ResourceMeta::new::<SEND, R>(self.data.len());
+        let offset = ext::align_to(self.data.len(), 0x8);
+        let meta = ResourceMeta::new::<SEND, R>(offset);
 
         self.is_send = self.is_send && SEND;
-        self.data.resize(meta.offset + meta.size, 0);
+        self.data.resize(offset + meta.size, 0);
         self.index.insert(id, ResourceId(index as u32));
         self.meta.push(meta);
 
