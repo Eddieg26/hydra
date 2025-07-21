@@ -126,7 +126,7 @@ impl Resources {
         }
 
         let index = self.meta.len();
-        let offset = ext::align_to(self.data.len(), 0x8);
+        let offset = ext::align_to(self.data.len(), std::mem::size_of::<usize>());
         let meta = ResourceMeta::new::<SEND, R>(offset);
 
         self.is_send = self.is_send && SEND;
