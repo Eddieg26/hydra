@@ -1,13 +1,14 @@
 use crate::{
-    IndexBuffer, Mesh, MeshFormat, PipelineId, RenderAssets, RenderMesh, Shader, SubMesh,
-    VertexBuffer,
+    ArrayBuffer, IndexBuffer, Mesh, MeshFormat, PipelineId, RenderAssets, RenderMesh, Shader,
+    SubMesh, VertexBuffer,
     storage::{StorageBuffer, StorageBufferArray},
+    uniform::UniformBufferArray,
 };
 use asset::{AssetId, ErasedId};
 use ecs::{Component, Entity, IndexMap};
 use encase::{ShaderType, internal::WriteInto};
-use math::{Mat4, Vec3};
-use std::collections::HashMap;
+use math::{Mat4, Vec3, bounds::Aabb};
+use std::{collections::HashMap, ops::Range};
 use transform::{GlobalTransform, LocalTransform};
 use wgpu::VertexFormat;
 
@@ -81,7 +82,8 @@ pub struct BatchKey {
     sub_mesh: AssetId<SubMesh>,
 }
 
-#[derive(Debug, Clone, Copy, ShaderType)]
+#[derive(Default, Debug, Clone, Copy, ShaderType, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
 pub struct IndirectDrawArgs {
     pub instance_count: u32,
     pub first_instance: u32,
@@ -89,7 +91,8 @@ pub struct IndirectDrawArgs {
     pub first_vertex: u32,
 }
 
-#[derive(Debug, Clone, Copy, ShaderType)]
+#[derive(Default, Debug, Clone, Copy, ShaderType, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
 pub struct IndirectDrawIndexedArgs {
     pub index_count: u32,
     pub instance_count: u32,
@@ -108,14 +111,9 @@ pub struct RenderData {
     indexed: u32,
 }
 
-pub struct RenderBatch {
-    items: Vec<RenderData>,
-}
-
-pub struct DrawCall<P: RenderPhase> {
-    index: usize,
-    phase: P,
-    pipeline: PipelineId,
+pub struct ViewDataBuffer<V: View> {
+    buffer: UniformBufferArray<V::Data>,
+    views: HashMap<Entity, V>,
 }
 
 pub struct RenderDataBuffer(StorageBufferArray<RenderData>);
@@ -127,17 +125,19 @@ impl RenderDataBuffer {
 
 pub struct ModelDataBuffer<M: Model>(StorageBufferArray<M>);
 
-pub struct DrawArgBuffer(StorageBufferArray<IndirectDrawArgs>);
-impl DrawArgBuffer {
-    pub fn write(&mut self, args: &IndirectDrawArgs) -> u32 {
-        todo!()
-    }
+pub struct DrawArgBuffers {
+    non_indexed: ArrayBuffer<IndirectDrawArgs>,
+
+    indexed: ArrayBuffer<IndirectDrawIndexedArgs>,
 }
 
-pub struct DrawIndexedArgBuffer(StorageBufferArray<IndirectDrawIndexedArgs>);
-impl DrawIndexedArgBuffer {
-    pub fn write(&mut self, args: &IndirectDrawIndexedArgs) -> u32 {
-        todo!()
+impl DrawArgBuffers {
+    pub fn push(&mut self, args: IndirectDrawArgs) -> u32 {
+        self.non_indexed.push(args)
+    }
+
+    pub fn push_indexed(&mut self, args: IndirectDrawIndexedArgs) -> u32 {
+        self.indexed.push(args)
     }
 }
 
@@ -147,17 +147,37 @@ impl<M: Model> ModelDataBuffer<M> {
     }
 }
 
-pub struct ViewDrawSets<P: RenderPhase>(HashMap<Entity, Vec<DrawCall<P>>>);
+pub struct ViewDrawCalls<P: RenderPhase>(HashMap<Entity, Vec<DrawCall<P>>>);
+
+#[derive(Clone)]
+pub enum DrawMode {
+    Direct {
+        dynamic_offset: u32,
+        bind_group: u32,
+        instances: Range<u32>,
+    },
+    Indirect,
+}
+
+#[derive(Clone)]
+pub struct DrawCall<P: RenderPhase> {
+    key: BatchKey,
+    phase: P,
+    pipeline: PipelineId,
+    mode: DrawMode,
+    function: u32,
+}
 
 fn queue<D: Drawable>(
     drawables: &DrawSet<D>,
+    draw_calls: &mut ViewDrawCalls<<D::Material as Material>::Phase>,
     render_buffer: &mut RenderDataBuffer,
     model_buffer: &mut ModelDataBuffer<D::Model>,
-    draw_buffer: &mut DrawArgBuffer,
-    draw_indexed_buffer: &mut DrawIndexedArgBuffer,
+    draw_arg_buffers: &mut DrawArgBuffers,
+    views: &ViewDataBuffer<D::View>,
     meshes: &RenderAssets<RenderMesh>,
 ) {
-    let mut batches = IndexMap::new();
+    let mut batches = HashMap::new();
 
     for (index, drawable) in drawables.0.iter().enumerate() {
         batches
@@ -166,26 +186,56 @@ fn queue<D: Drawable>(
             .push(index);
     }
 
-    for (batch, (key, indices)) in batches.iter().enumerate() {
-        let dispatch_size = indices.len();
-        for drawable in indices.iter().map(|i| &drawables.0[*i]) {
-            // Write model data into global cull data buffer
-            let instance = model_buffer.write(&drawable.draw.model());
-            let matrix = drawable.global.matrix();
-            let mesh = meshes.get(&key.mesh.into()).unwrap();
-            let data = RenderData {
-                batch: batch as u32,
-                instance: instance as u32,
-                matrix,
-                min_bounds: mesh.bounds().min,
-                max_bounds: mesh.bounds().max,
-                indexed: match mesh.format() {
-                    MeshFormat::NonIndexed => 0,
-                    _ => 1,
-                },
-            };
+    for (key, items) in batches {
+        let Some(mesh) = meshes.get(&key.mesh) else {
+            continue;
+        };
 
-            render_buffer.write(&data);
+        let (batch, bounds, indexed) = match mesh.format() {
+            MeshFormat::Indexed { count, .. } => {
+                let args = IndirectDrawIndexedArgs {
+                    index_count: count,
+                    ..Default::default()
+                };
+                let index = draw_arg_buffers.push_indexed(args);
+                (index, *mesh.bounds(), 1)
+            }
+            MeshFormat::NonIndexed => {
+                let args = IndirectDrawArgs {
+                    vertex_count: mesh.vertex_count(),
+                    ..Default::default()
+                };
+
+                let index = draw_arg_buffers.push(args);
+                (index, *mesh.bounds(), 0)
+            }
+        };
+
+        for drawable in items.iter().map(|i| &drawables.0[*i]) {
+            let instance = model_buffer.write(&drawable.draw.model()) / model_buffer.0.alignment();
+            render_buffer.write(&RenderData {
+                batch,
+                instance,
+                matrix: drawable.global.matrix(),
+                min_bounds: bounds.min,
+                max_bounds: bounds.max,
+                indexed,
+            });
+        }
+
+        let draw = DrawCall {
+            key,
+            phase: <D::Material as Material>::Phase::default(),
+            pipeline: todo!(),
+            mode: DrawMode::Indirect,
+            function: todo!(),
+        };
+
+        for view in views.views.keys() {
+            draw_calls.0.entry(*view).or_default().push(draw.clone());
         }
     }
+
+    // wgpu::RenderPass::draw_indirect(&mut self, draw_arg_buffers.non_indexed.buffer(), 0);
+    // wgpu::ComputePass::dispatch_workgroups(&mut self, size as u32, y, z);
 }
