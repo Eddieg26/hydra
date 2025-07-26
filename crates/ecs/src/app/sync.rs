@@ -1,6 +1,7 @@
 use crate::{
     AppTag, Commands, Component, Despawn, Despawned, Entity, EventReader, Extract, Plugin,
-    app::Main, system::Removed, unlifetime::SQuery,
+    system::{Main, Removed},
+    unlifetime::SQuery,
 };
 use derive_ecs::Resource;
 use std::collections::HashMap;
@@ -41,7 +42,7 @@ impl<A: AppTag + Default + Clone> SyncAppPlugin<A> {
 
 impl<A: AppTag + Default + Clone> Plugin for SyncAppPlugin<A> {
     fn setup(&mut self, app: &mut super::AppBuilder) {
-        app.add_sub_app(self.0.clone())
+        app.sub_app_mut(self.0.clone())
             .add_resource(EntityWorldMap::default())
             .add_systems(Extract, Self::sync_despawned_entities);
     }
@@ -91,7 +92,6 @@ impl<C: Component + Clone, A: AppTag + Default + Clone> Plugin for SyncComponent
     fn setup(&mut self, app: &mut super::AppBuilder) {
         app.add_plugins(SyncAppPlugin::<A>::new())
             .sub_app_mut(A::default())
-            .unwrap()
             .register::<C>()
             .register::<MainEntity>()
             .add_systems(Extract, Self::sync_component)

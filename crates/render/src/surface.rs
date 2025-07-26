@@ -1,8 +1,8 @@
 use crate::device::RenderDevice;
-use ecs::{Commands, Resource, app::Main, commands::AddResource};
+use ecs::{Resource, system::Main};
 use math::Size;
 use wgpu::{PresentMode, SurfaceConfiguration, SurfaceTargetUnsafe, rwh::HandleError};
-use window::{Window, app::WindowCommandsExt};
+use window::Window;
 
 #[derive(Debug)]
 pub enum RenderSurfaceError {
@@ -140,36 +140,6 @@ impl RenderSurface {
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(device, &self.config);
-    }
-
-    pub(crate) fn create_surface(
-        window: Main<&Window>,
-        mut commands: Commands,
-        mut main_commands: Main<Commands>,
-    ) {
-        let f = async {
-            let (surface, adapter) = match RenderSurface::new(&window).await {
-                Ok(value) => value,
-                Err(error) => return Err(error),
-            };
-
-            let device = match RenderDevice::new(&adapter).await {
-                Ok(device) => device,
-                Err(error) => return Err(RenderSurfaceError::Device(error)),
-            };
-
-            surface.configure(&device);
-
-            Ok((surface, device))
-        };
-
-        match smol::block_on(f) {
-            Ok((surface, device)) => {
-                commands.add(AddResource::from(surface));
-                commands.add(AddResource::from(device));
-            }
-            Err(error) => main_commands.exit_error(error),
-        };
     }
 
     pub(crate) fn resize_surface(

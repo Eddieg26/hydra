@@ -1,7 +1,7 @@
 use crate::{
     ComputePipeline, PipelineCache, PipelineId, RenderDevice, RenderPipeline, RenderSurface,
 };
-use ecs::{Commands, Entity, IndexMap, Resource, SystemMeta, World};
+use ecs::{Commands, Entity, IndexMap, Resource, World};
 use smol::lock::RwLock;
 use std::{
     any::Any,
@@ -487,7 +487,6 @@ pub struct RenderContext<'a> {
     device: &'a RenderDevice,
     surface: &'a RenderSurface,
     pipelines: &'a PipelineCache,
-    meta: &'a SystemMeta,
     buffers: Vec<wgpu::CommandBuffer>,
 }
 
@@ -497,7 +496,6 @@ impl<'a> RenderContext<'a> {
         world: &'a World,
         device: &'a RenderDevice,
         surface: &'a RenderSurface,
-        meta: &'a SystemMeta,
     ) -> Self {
         Self {
             view: None,
@@ -505,7 +503,6 @@ impl<'a> RenderContext<'a> {
             world,
             device,
             surface,
-            meta,
             pipelines: world.resource::<PipelineCache>(),
             buffers: Vec::new(),
         }
@@ -525,10 +522,6 @@ impl<'a> RenderContext<'a> {
 
     pub fn surface(&self) -> &'a RenderSurface {
         self.surface
-    }
-
-    pub fn meta(&self) -> &'a SystemMeta {
-        self.meta
     }
 
     pub fn get<R: GraphResource>(&self, id: GraphResourceId<R>) -> Option<&R> {
@@ -598,14 +591,8 @@ impl RenderGraph {
         }
     }
 
-    pub fn run(
-        &mut self,
-        world: &World,
-        device: &RenderDevice,
-        surface: &RenderSurface,
-        meta: &SystemMeta,
-    ) {
-        if let Ok(buffers) = RenderContext::new(self, world, device, surface, meta).run() {
+    pub fn run(&mut self, world: &World, device: &RenderDevice, surface: &RenderSurface) {
+        if let Ok(buffers) = RenderContext::new(self, world, device, surface).run() {
             device.queue.submit(buffers);
         }
     }
@@ -615,9 +602,8 @@ impl RenderGraph {
         world: &World,
         device: &RenderDevice,
         surface: &RenderSurface,
-        meta: &SystemMeta,
     ) {
-        graph.run(world, device, surface, meta);
+        graph.run(world, device, surface);
     }
 
     pub(crate) fn create_graph(mut commands: Commands) {

@@ -4,14 +4,14 @@ pub mod plugin;
 pub mod renderer;
 pub mod resources;
 pub mod surface;
-pub mod types;
+pub mod primitives;
 
 pub use app::*;
 pub use device::*;
 pub use renderer::*;
 pub use resources::*;
 pub use surface::*;
-pub use types::*;
+pub use primitives::*;
 
 pub mod wgpu {
     pub use wgpu::*;

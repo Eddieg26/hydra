@@ -9,26 +9,22 @@ use derive_ecs::PluginKit;
 pub struct TaskPoolPlugin;
 impl Plugin for TaskPoolPlugin {
     fn setup(&mut self, app: &mut AppBuilder) {
-        if app.is_main() {
-            app.add_resource(TaskPoolSettings::default());
-        }
+        app.add_resource(TaskPoolSettings::default());
     }
 
     fn finish(&mut self, app: &mut AppBuilder) {
-        if app.is_main() {
-            let settings = app
-                .remove_resource::<TaskPoolSettings>()
-                .unwrap_or_default();
-            settings.init_task_pools();
-        }
+        let settings = app
+            .remove_resource::<TaskPoolSettings>()
+            .unwrap_or_default();
+        settings.init_task_pools();
     }
 }
 
 #[derive(Default)]
-pub struct DefaultPhases;
-impl Plugin for DefaultPhases {
+pub struct DefaultPhases<const MAIN: bool = true>;
+impl<const MAIN: bool> Plugin for DefaultPhases<MAIN> {
     fn setup(&mut self, app: &mut AppBuilder) {
-        if app.is_main() {
+        if MAIN {
             app.add_phase(Init);
             app.add_phase(Run);
             app.add_sub_phase(Run, Start);

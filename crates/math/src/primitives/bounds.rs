@@ -2,23 +2,23 @@ use glam::{Affine3A, Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct Aabb {
+pub struct Bounds {
     pub min: Vec3,
     pub max: Vec3,
 }
 
-impl Aabb {
-    pub const ZERO: Self = Aabb::new(Vec3::ZERO, Vec3::ZERO);
+impl Bounds {
+    pub const ZERO: Self = Bounds::new(Vec3::ZERO, Vec3::ZERO);
 
     pub const fn new(min: Vec3, max: Vec3) -> Self {
-        Aabb { min, max }
+        Bounds { min, max }
     }
 
     pub fn area(&self) -> f32 {
         (self.max.x - self.min.x) * (self.max.y - self.min.y)
     }
 
-    pub fn intersects(&self, other: Aabb) -> bool {
+    pub fn intersects(&self, other: Bounds) -> bool {
         self.min.x <= other.max.x
             && self.max.x >= other.min.x
             && self.min.y <= other.max.y
@@ -40,7 +40,7 @@ impl Aabb {
         let min = matrix.transform_point3(self.min);
         let max = matrix.transform_point3(self.max);
 
-        Aabb {
+        Bounds {
             min: Vec3::new(min.x.min(max.x), min.y.min(max.y), min.z.min(max.z)),
             max: Vec3::new(min.x.max(max.x), min.y.max(max.y), min.z.max(max.z)),
         }
@@ -50,18 +50,18 @@ impl Aabb {
         let min = matrix.transform_point3(self.min);
         let max = matrix.transform_point3(self.max);
 
-        Aabb {
+        Bounds {
             min: Vec3::new(min.x.min(max.x), min.y.min(max.y), min.z.min(max.z)),
             max: Vec3::new(min.x.max(max.x), min.y.max(max.y), min.z.max(max.z)),
         }
     }
 }
 
-impl std::ops::Add for Aabb {
+impl std::ops::Add for Bounds {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
-        Aabb {
+        Bounds {
             min: Vec3::new(
                 self.min.x + other.min.x,
                 self.min.y + other.min.y,
@@ -76,11 +76,11 @@ impl std::ops::Add for Aabb {
     }
 }
 
-impl std::ops::Sub for Aabb {
+impl std::ops::Sub for Bounds {
     type Output = Self;
 
     fn sub(self, other: Self) -> Self {
-        Aabb {
+        Bounds {
             min: Vec3::new(
                 self.min.x - other.min.x,
                 self.min.y - other.min.y,
@@ -95,11 +95,11 @@ impl std::ops::Sub for Aabb {
     }
 }
 
-impl std::ops::Mul<f32> for Aabb {
+impl std::ops::Mul<f32> for Bounds {
     type Output = Self;
 
     fn mul(self, scalar: f32) -> Self {
-        Aabb {
+        Bounds {
             min: Vec3::new(
                 self.min.x * scalar,
                 self.min.y * scalar,
@@ -114,11 +114,11 @@ impl std::ops::Mul<f32> for Aabb {
     }
 }
 
-impl std::ops::Div<f32> for Aabb {
+impl std::ops::Div<f32> for Bounds {
     type Output = Self;
 
     fn div(self, scalar: f32) -> Self {
-        Aabb {
+        Bounds {
             min: Vec3::new(
                 self.min.x / scalar,
                 self.min.y / scalar,
@@ -133,7 +133,7 @@ impl std::ops::Div<f32> for Aabb {
     }
 }
 
-impl From<&[Vec3]> for Aabb {
+impl From<&[Vec3]> for Bounds {
     fn from(vertices: &[Vec3]) -> Self {
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = Vec3::splat(f32::NEG_INFINITY);
@@ -147,7 +147,7 @@ impl From<&[Vec3]> for Aabb {
     }
 }
 
-impl From<&[Vec2]> for Aabb {
+impl From<&[Vec2]> for Bounds {
     fn from(vertices: &[Vec2]) -> Self {
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = Vec3::splat(f32::NEG_INFINITY);
@@ -161,7 +161,7 @@ impl From<&[Vec2]> for Aabb {
     }
 }
 
-impl From<&[Vec4]> for Aabb {
+impl From<&[Vec4]> for Bounds {
     fn from(vertices: &[Vec4]) -> Self {
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = Vec3::splat(f32::NEG_INFINITY);

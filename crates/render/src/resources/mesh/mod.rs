@@ -3,13 +3,12 @@ use super::{
     buffer::Indices,
     extract::{ExtractError, ReadWrite, RenderAsset},
 };
-use crate::{RenderAssetType, types::Color};
+use crate::{RenderAssetType, primitives::Color};
 use asset::{
-    Asset, Settings,
-    importer::{AssetImporter, AssetProcessor},
+    importer::{AssetImporter, AssetProcessor}, Asset, AssetId, Settings
 };
-use ecs::{IndexMap, system::ArgItem};
-use math::bounds::Aabb;
+use ecs::{system::ArgItem, Component, IndexMap};
+use math::bounds::Bounds;
 use smol::io::AsyncAsSync;
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
@@ -249,7 +248,7 @@ pub struct Mesh {
     topology: MeshTopology,
     attributes: Vec<MeshAttribute>,
     indices: Option<Indices>,
-    bounds: Aabb,
+    bounds: Bounds,
     read_write: ReadWrite,
 
     #[serde(skip)]
@@ -262,7 +261,7 @@ impl Mesh {
             topology,
             attributes: Vec::new(),
             indices: None,
-            bounds: Aabb::ZERO,
+            bounds: Bounds::ZERO,
             read_write: ReadWrite::Disabled,
             dirty: MeshDirty::empty(),
         }
@@ -327,7 +326,7 @@ impl Mesh {
         indices
     }
 
-    pub fn bounds(&self) -> Aabb {
+    pub fn bounds(&self) -> Bounds {
         self.bounds
     }
 
@@ -408,15 +407,15 @@ impl Mesh {
 
         match (bounds_dirty, &attribute.values) {
             (true, MeshAttributeValues::Vec3(positions)) => {
-                self.bounds = Aabb::from(positions.as_slice());
+                self.bounds = Bounds::from(positions.as_slice());
                 self.dirty.remove(MeshDirty::BOUNDS);
             }
             (true, MeshAttributeValues::Vec2(positions)) => {
-                self.bounds = Aabb::from(positions.as_slice());
+                self.bounds = Bounds::from(positions.as_slice());
                 self.dirty.remove(MeshDirty::BOUNDS);
             }
             (true, MeshAttributeValues::Vec4(positions)) => {
-                self.bounds = Aabb::from(positions.as_slice());
+                self.bounds = Bounds::from(positions.as_slice());
                 self.dirty.remove(MeshDirty::BOUNDS);
             }
             _ => (),
@@ -798,7 +797,7 @@ pub struct RenderMesh {
     layout: MeshLayout,
     vertex_count: u32,
     format: MeshFormat,
-    bounds: Aabb,
+    bounds: Bounds,
 }
 
 impl RenderMesh {
@@ -832,7 +831,7 @@ impl RenderMesh {
         }
     }
 
-    pub fn bounds(&self) -> &Aabb {
+    pub fn bounds(&self) -> &Bounds {
         &self.bounds
     }
 }
@@ -1105,5 +1104,20 @@ impl AssetProcessor for Mesh {
         asset.attributes.sort_by_key(|a| a.ty);
 
         Ok(asset)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Component)]
+pub struct MeshFilter {
+    pub mesh: AssetId<Mesh>,
+    pub sub_mesh: Option<AssetId<SubMesh>>,
+}
+
+impl From<AssetId<Mesh>> for MeshFilter {
+    fn from(mesh: AssetId<Mesh>) -> Self {
+        Self {
+            mesh,
+            sub_mesh: None,
+        }
     }
 }

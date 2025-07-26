@@ -6,7 +6,7 @@ pub mod system;
 pub mod world;
 
 pub use app::{
-    App, AppBuildInfo, AppBuilder, AppTag, Apps, End, Extract, Init, Plugin, PluginCollection,
+    App, AppBuilder, AppConfig, AppTag, Apps, End, Extract, Init, Plugin, PluginCollection,
     PluginKit, Run, Shutdown, Start, Update,
 };
 pub use commands::{

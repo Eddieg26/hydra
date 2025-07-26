@@ -7,7 +7,7 @@ use crate::{
     translate::{self},
     window::{Window, WindowConfig},
 };
-use ecs::{Apps, Command, Commands, Event, Events, Resource};
+use ecs::{AppBuilder, Apps, Command, Commands, Event, Events, Resource};
 use input::{
     DoubleTapGesture, KeyboardInput, MouseInput, MouseScroll, PanGesture, PinchGesture,
     RotationGesture, TouchInput, TouchpadPressure,
@@ -21,34 +21,44 @@ use winit::{
     window::WindowId,
 };
 
-pub struct WindowApp {
-    apps: Apps,
+pub enum WindowApp {
+    Building { builder: AppBuilder },
+    Running { apps: Apps },
 }
 
 impl WindowApp {
-    pub fn new(apps: Apps) -> Self {
-        Self { apps }
+    pub fn new(builder: AppBuilder) -> Self {
+        Self::Building { builder }
     }
 
     pub fn start(&mut self) {
-        self.apps.init();
+        if let Self::Running { apps } = self {
+            apps.init();
+        }
     }
 
     pub fn update(&mut self) -> Option<AppExit> {
-        self.apps.run();
-        self.apps.world_mut().remove_resource::<AppExit>()
+        if let Self::Running { apps } = self {
+            apps.run();
+            apps.world_mut().remove_resource::<AppExit>()
+        } else {
+            None
+        }
     }
 
     pub fn shutdown(&mut self) {
-        self.apps.shutdown();
+        if let Self::Running { apps } = self {
+            apps.shutdown();
+        }
     }
 
     fn send_event<E: Event>(&mut self, event: E) {
-        self.apps
-            .world_mut()
-            .resource_mut::<Events<E>>()
-            .writer()
-            .send(event);
+        if let Self::Running { apps } = self {
+            apps.world_mut()
+                .resource_mut::<Events<E>>()
+                .writer()
+                .send(event);
+        }
     }
 
     fn run(&mut self, event_loop: EventLoop<()>) {
@@ -62,17 +72,20 @@ impl WindowApp {
         self.shutdown();
     }
 
-    pub fn runner(apps: Apps) -> Apps {
+    pub fn builder(builder: AppBuilder) -> Apps {
         match EventLoop::new() {
             Ok(event_loop) => {
-                let mut app = WindowApp::new(apps);
+                let mut app = Self::new(builder);
                 app.run(event_loop);
-                app.apps
+                match app {
+                    WindowApp::Running { apps } => apps,
+                    _ => Apps::empty(),
+                }
             }
             Err(e) => {
                 let error = AppRunError::new(e);
                 println!("{error}");
-                apps
+                Apps::empty()
             }
         }
     }
@@ -80,21 +93,31 @@ impl WindowApp {
 
 impl ApplicationHandler for WindowApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let has_window = self.apps.world().try_resource::<Window>().is_some();
+        match self {
+            WindowApp::Building { builder } => {
+                let config = builder
+                    .world_mut()
+                    .remove_resource::<WindowConfig>()
+                    .unwrap_or_default();
 
-        if !has_window {
-            let world = self.apps.world_mut();
-            let config = world.remove_resource::<WindowConfig>().unwrap_or_default();
-            let window = Window::new(config, event_loop);
-            let id = window.id();
-            world.add_resource(window);
-            world.send(WindowCreated::new(id));
+                let window = Window::new(config, event_loop);
+                let id = window.id();
 
-            self.start();
-        } else if let Some(exit) = self.update() {
-            println!("Application exit: {}", exit);
-            event_loop.exit();
-        }
+                builder.add_resource(window);
+                builder.world_mut().send(WindowCreated::new(id));
+
+                let mut apps = builder.build();
+                apps.init();
+                
+                *self = Self::Running { apps };
+            }
+            _ => {
+                if let Some(exit) = self.update() {
+                    println!("Application exit: {}", exit);
+                    event_loop.exit();
+                }
+            }
+        };
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, window: WindowId, event: WindowEvent) {
@@ -107,8 +130,8 @@ impl ApplicationHandler for WindowApp {
                 if let Some(exit) = self.update() {
                     println!("Application exit: {}", exit);
                     event_loop.exit();
-                } else {
-                    let app = self.apps.world().resource::<Window>();
+                } else if let Self::Running { apps } = self {
+                    let app = apps.world().resource::<Window>();
                     app.inner().request_redraw();
                 }
             }

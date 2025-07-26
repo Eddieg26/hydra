@@ -9,35 +9,31 @@ use wgpu::{BindingResource, BufferUsages, DynamicOffset};
 pub struct StorageBuffer<T: ShaderType + WriteInto> {
     value: T,
     data: EncaseStorageBuffer<Vec<u8>>,
-    buffer: Option<Buffer>,
-    label: Label,
-    usages: BufferUsages,
+    buffer: Buffer,
     is_dirty: bool,
 }
 
 impl<T: ShaderType + WriteInto> StorageBuffer<T> {
-    pub fn new(value: T) -> Self {
+    pub fn new(
+        device: &RenderDevice,
+        value: T,
+        usages: Option<BufferUsages>,
+        label: Label,
+    ) -> Self {
         let mut data = EncaseStorageBuffer::new(Vec::with_capacity(T::min_size().get() as usize));
         let _ = data.write(&value);
+
+        let usages = usages.unwrap_or(BufferUsages::empty())
+            | BufferUsages::STORAGE
+            | BufferUsages::COPY_DST;
+        let buffer = Buffer::with_data(device, data.as_ref(), usages, label);
 
         Self {
             value,
             data,
-            buffer: None,
-            label: Some(std::any::type_name::<T>().into()),
-            usages: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-            is_dirty: true,
+            buffer,
+            is_dirty: false,
         }
-    }
-
-    pub fn with_label(mut self, label: Label) -> Self {
-        self.label = label;
-        self
-    }
-
-    pub fn with_usages(mut self, usages: BufferUsages) -> Self {
-        self.usages = BufferUsages::STORAGE | BufferUsages::COPY_DST | usages;
-        self
     }
 
     pub fn get(&self) -> &T {
@@ -49,12 +45,12 @@ impl<T: ShaderType + WriteInto> StorageBuffer<T> {
         &mut self.value
     }
 
-    pub fn buffer(&self) -> Option<&Buffer> {
-        self.buffer.as_ref()
+    pub fn inner(&self) -> &Buffer {
+        &self.buffer
     }
 
-    pub fn binding(&self) -> Option<BindingResource> {
-        self.buffer.as_ref().map(|b| b.as_entire_binding())
+    pub fn binding(&self) -> BindingResource {
+        self.buffer.as_entire_binding()
     }
 
     pub fn data(&self) -> &[u8] {
@@ -74,72 +70,68 @@ impl<T: ShaderType + WriteInto> StorageBuffer<T> {
     /// Updates the buffer if it is dirty or creates a new buffer if it doesn't exist.
     /// Returns `true` only if a new buffer was created.
     pub fn update(&mut self, device: &RenderDevice) -> bool {
-        if !self.is_dirty {
-            return false;
+        if self.is_dirty {
+            let data = self.data.as_ref();
+            device.queue.write_buffer(self.buffer.as_ref(), 0, &data);
+            self.is_dirty = false;
+            true
+        } else {
+            false
         }
+    }
+}
 
-        match self.buffer.as_ref() {
-            Some(buffer) => {
-                let data = self.data.as_ref();
-                device.queue.write_buffer(buffer.as_ref(), 0, &data);
-                self.is_dirty = false;
-                false
-            }
-            None => {
-                let data = self.data.as_ref();
-                let buffer = Buffer::with_data(device, &data, self.usages, self.label.clone());
-                self.buffer = Some(buffer);
-                self.is_dirty = false;
-                true
-            }
-        }
+impl<T: ShaderType + WriteInto> AsRef<Buffer> for StorageBuffer<T> {
+    fn as_ref(&self) -> &Buffer {
+        &self.buffer
     }
 }
 
 pub struct StorageBufferArray<T: ShaderType> {
     data: EncaseDynamicStorageBuffer<Vec<u8>>,
-    buffer: Option<Buffer>,
+    buffer: Buffer,
     alignment: u32,
-    label: Label,
-    usages: BufferUsages,
     is_dirty: bool,
     _marker: std::marker::PhantomData<T>,
 }
 
 impl<T: ShaderType> StorageBufferArray<T> {
-    pub fn new() -> Self {
+    pub fn new(device: &RenderDevice, usages: Option<BufferUsages>, label: Label) -> Self {
+        let alignment = device
+            .limits()
+            .min_storage_buffer_offset_alignment
+            .max(T::min_size().get() as u32);
+
+        Self::with_alignment(device, alignment, usages, label)
+    }
+
+    pub fn with_alignment(
+        device: &RenderDevice,
+        alignment: u32,
+        usages: Option<BufferUsages>,
+        label: Label,
+    ) -> Self {
+        let usages = usages.unwrap_or(BufferUsages::empty())
+            | BufferUsages::STORAGE
+            | BufferUsages::COPY_DST;
+
+        let buffer = Buffer::new(device, alignment as u64, usages, label);
+
         Self {
             data: EncaseDynamicStorageBuffer::new(Vec::new()),
-            buffer: None,
-            alignment: T::min_size().get() as u32,
-            label: None,
-            usages: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            buffer,
+            alignment,
             is_dirty: false,
             _marker: std::marker::PhantomData,
         }
     }
 
-    pub fn with_alignment(mut self, alignment: u32) -> Self {
-        self.data = EncaseDynamicStorageBuffer::new_with_alignment(Vec::new(), alignment as u64);
-        self
+    pub fn inner(&self) -> &Buffer {
+        &self.buffer
     }
 
-    pub fn with_label(mut self, label: Label) -> Self {
-        self.label = label;
-        self
-    }
-
-    pub fn with_usages(mut self, usages: BufferUsages) -> Self {
-        self.usages = BufferUsages::STORAGE | BufferUsages::COPY_DST | usages;
-        self
-    }
-
-    pub fn inner(&self) -> Option<&Buffer> {
-        self.buffer.as_ref()
-    }
-
-    pub fn binding(&self) -> Option<BindingResource> {
-        self.buffer.as_ref().map(|b| b.as_entire_binding())
+    pub fn binding(&self) -> BindingResource {
+        self.buffer.as_entire_binding()
     }
 
     pub fn data(&self) -> &[u8] {
@@ -160,32 +152,26 @@ impl<T: ShaderType> StorageBufferArray<T> {
 
     /// Updates the buffer if it is dirty or if the size exceeds the current buffer size.
     /// Returns the size of the buffer if it was updated, or `None` if no update was needed.
-    /// If the buffer is empty, it will set the buffer to `None`.
     pub fn update(&mut self, device: &RenderDevice) -> Option<u64> {
         if !self.is_dirty {
             return None;
         }
 
-        let size = self.data.as_ref().len() as u64;
-        match self.buffer.as_ref() {
-            Some(buffer) if size > buffer.size() => {
-                let buffer = Buffer::new(device, size, self.usages, self.label.clone());
-                self.buffer = Some(buffer);
-            }
-            Some(buffer) => {
-                let data = bytemuck::cast_slice(self.data());
-                device.queue.write_buffer(buffer.as_ref(), 0, data);
-                self.is_dirty = false;
-                return None;
-            }
-            None if size == 0 => self.buffer = None,
-            None => {
-                let buffer = Buffer::new(device, size, self.usages, self.label.clone());
-                self.buffer = Some(buffer);
-            }
-        }
+        self.is_dirty = false;
 
-        Some(size)
+        let size = self.data.as_ref().len() as u64;
+        if size == 0 {
+            self.buffer.resize(device, self.alignment as u64);
+            Some(size)
+        } else if size != self.buffer.size() {
+            let size = size.max(self.alignment as u64);
+            self.buffer.resize_with_data(device, self.data.as_ref());
+            Some(size)
+        } else {
+            let data = bytemuck::cast_slice(self.data());
+            device.queue.write_buffer(self.buffer.as_ref(), 0, data);
+            None
+        }
     }
 }
 
@@ -214,5 +200,11 @@ impl<T: ShaderType + WriteInto> StorageBufferArray<T> {
         self.data.as_mut().clear();
         self.data.set_offset(0);
         self.is_dirty = true;
+    }
+}
+
+impl<T: ShaderType> AsRef<Buffer> for StorageBufferArray<T> {
+    fn as_ref(&self) -> &Buffer {
+        &self.buffer
     }
 }

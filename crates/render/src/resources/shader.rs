@@ -7,7 +7,7 @@ use asset::{
     io::{AssetPath, AsyncIoError, AsyncReader},
 };
 use ecs::{
-    Commands, Resource,
+    Resource,
     system::{ArgItem, unlifetime::Read},
 };
 use smol::io::AsyncReadExt;
@@ -69,21 +69,16 @@ impl GlobalShaderConstants {
             .or_insert(|device| C::get(device));
     }
 
-    pub(crate) fn init(mut commands: Commands) {
-        commands.add(|world: &mut ecs::World| {
-            let device = world.resource::<RenderDevice>().clone();
-            let constants = world.resource_mut::<GlobalShaderConstants>();
+    pub(crate) fn init(constants: &mut Self, device: &RenderDevice) {
+        let GlobalShaderConstants {
+            constants,
+            registry,
+        } = constants;
 
-            let GlobalShaderConstants {
-                constants,
-                registry,
-            } = constants;
-
-            for (name, f) in registry.drain() {
-                let constant = f(&device);
-                constants.set(name.to_string(), constant);
-            }
-        });
+        for (name, f) in registry.drain() {
+            let constant = f(&device);
+            constants.set(name.to_string(), constant);
+        }
     }
 }
 

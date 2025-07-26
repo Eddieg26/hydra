@@ -2,7 +2,7 @@ use super::{AtomicId, Label};
 use crate::device::RenderDevice;
 use bytemuck::NoUninit;
 use std::ops::{Deref, RangeBounds};
-use wgpu::{DynamicOffset, util::DeviceExt};
+use wgpu::{BufferUsages, util::DeviceExt};
 
 pub mod index;
 pub mod storage;
@@ -236,38 +236,30 @@ impl<'a> Deref for BufferSlice<'a> {
 
 pub struct ArrayBuffer<T: NoUninit> {
     values: Vec<T>,
-    buffer: Option<Buffer>,
-    usages: wgpu::BufferUsages,
-    label: Label,
+    buffer: Buffer,
     is_dirty: bool,
 }
 
 impl<T: NoUninit> ArrayBuffer<T> {
-    pub fn new(capacity: usize, usages: wgpu::BufferUsages) -> Self {
+    pub fn new(device: &RenderDevice, capacity: usize, usages: BufferUsages, label: Label) -> Self {
+        let size = (capacity * std::mem::size_of::<T>()) as u64;
         Self {
             values: Vec::with_capacity(capacity),
-            buffer: None,
-            usages,
-            label: None,
+            buffer: Buffer::new(device, size, usages, label),
             is_dirty: false,
         }
-    }
-
-    pub fn with_label(mut self, label: Label) -> Self {
-        self.label = label;
-        self
     }
 
     pub fn values(&self) -> &[T] {
         &self.values
     }
 
-    pub fn push(&mut self, value: T) -> DynamicOffset {
-        let offset = self.values.len() as DynamicOffset;
+    pub fn push(&mut self, value: T) -> usize {
+        let index = self.values.len();
         self.values.push(value);
         self.is_dirty = true;
 
-        offset
+        index
     }
 
     pub fn insert(&mut self, index: usize, value: T) {
@@ -298,10 +290,6 @@ impl<T: NoUninit> ArrayBuffer<T> {
         self.values.is_empty()
     }
 
-    pub fn buffer(&self) -> Option<&Buffer> {
-        self.buffer.as_ref()
-    }
-
     /// Updates the buffer if it is dirty or if the size exceeds the current buffer size.
     /// Returns the size of the buffer if it was updated, or `None` if no update was needed.
     /// If the buffer is empty, it will set the buffer to `None`.
@@ -310,25 +298,28 @@ impl<T: NoUninit> ArrayBuffer<T> {
             return None;
         }
 
-        let size = (self.values.len() * std::mem::size_of::<T>()) as u64;
-        match self.buffer.as_ref() {
-            Some(buffer) if size > buffer.size() => {
-                let buffer = Buffer::new(device, size, self.usages, self.label.clone());
-                self.buffer = Some(buffer);
-            }
-            Some(buffer) => {
-                let data = bytemuck::cast_slice(self.values.as_slice());
-                device.queue.write_buffer(buffer.as_ref(), 0, data);
-                self.is_dirty = false;
-                return None;
-            }
-            None if size == 0 => self.buffer = None,
-            None => {
-                let buffer = Buffer::new(device, size, self.usages, self.label.clone());
-                self.buffer = Some(buffer);
-            }
+        let data = bytemuck::cast_slice(&self.values);
+        let size = data.len() as u64;
+        if size > self.buffer.size() {
+            let data = bytemuck::cast_slice(&self.values);
+            self.buffer.resize_with_data(device, data);
+            self.is_dirty = false;
+            Some(size)
+        } else if size < self.buffer.size() / 2 {
+            self.buffer.resize_with_data(device, data);
+            self.is_dirty = false;
+            Some(size)
+        } else {
+            let data = bytemuck::cast_slice(&self.values);
+            device.queue.write_buffer(self.buffer.as_ref(), 0, data);
+            self.is_dirty = false;
+            None
         }
+    }
+}
 
-        Some(size)
+impl<T: NoUninit> AsRef<Buffer> for ArrayBuffer<T> {
+    fn as_ref(&self) -> &Buffer {
+        &self.buffer
     }
 }

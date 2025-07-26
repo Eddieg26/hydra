@@ -2,8 +2,7 @@ use asset::{AssetEvent, AssetId, Assets, asset::Asset};
 use ecs::{
     Command, Commands, Event, EventReader, EventWriter, IndexMap, IntoSystemConfig, Resource,
     SystemId, SystemMeta, WorldAccess,
-    app::Main,
-    system::{ArgItem, SystemArg, SystemConfig, unlifetime::StaticArg},
+    system::{ArgItem, Main, SystemArg, SystemConfig, unlifetime::StaticArg},
 };
 use std::{
     any::TypeId,
@@ -305,7 +304,6 @@ impl ResourceExtractors {
         main_extractors: Main<&mut ResourceExtractors>,
         extractors: &mut ResourceExtractors,
     ) {
-        
         extractors.0.extend(main_extractors.into_inner().0.drain());
     }
 

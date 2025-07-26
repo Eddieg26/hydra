@@ -32,6 +32,6 @@ impl Plugin for WindowPlugin {
             .register_event::<ScaleFactorChanged>()
             .register_event::<WindowOccluded>()
             .register_resource::<Window>()
-            .set_runner(WindowApp::runner);
+            .set_builder(WindowApp::builder);
     }
 }

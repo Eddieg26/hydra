@@ -1,175 +1,114 @@
-use crate::{
-    BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, BlendMode, Camera,
-    Frustum, Projection, RenderDevice, RenderResource, RenderSurface, uniform::UniformBufferArray,
-};
-use ecs::{
-    Component, Entity, Resource,
-    app::Main,
-    system::unlifetime::{Read, SQuery},
-};
-use encase::{ShaderType, internal::WriteInto};
-use math::Mat4;
+use ecs::{Component, Entity, Query, Resource, unlifetime::Read};
 use std::collections::HashMap;
 use transform::{GlobalTransform, LocalTransform};
-use wgpu::ShaderStages;
+use wgpu::{DynamicOffset, ShaderStages};
 
-pub trait ViewData: ShaderType + WriteInto + Send + Sync + 'static {
-    fn projection(&self) -> Mat4;
-}
+use crate::{
+    BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, RenderDevice,
+    RenderResource, uniform::UniformBufferArray,
+};
 
-pub trait View: Component + Clone {
-    type Data: ViewData;
+pub trait View: Clone + Component {
+    type Data: super::ShaderData;
 
     type Transform: LocalTransform;
 
-    type Item: Default + Copy + PartialOrd + Send + Sync + 'static;
-
-    fn data(&self, aspect_ratio: f32, camera: &Camera, transform: &GlobalTransform) -> Self::Data;
-
-    fn item(
-        &self,
-        data: &Self::Data,
-        mode: BlendMode,
-        local_transform: &Self::Transform,
-        global_transform: &GlobalTransform,
-    ) -> Self::Item;
-
-    fn projection(&self) -> Projection;
+    fn data(&self) -> Self::Data;
 }
 
-pub struct RenderView<V: View> {
+pub struct ViewInstance<V: View> {
     pub view: V,
     pub data: V::Data,
-    pub transform: GlobalTransform,
-    pub frustum: Frustum,
-    pub dynamic_offset: u32,
+    pub local: V::Transform,
+    pub global: GlobalTransform,
+    pub offset: DynamicOffset,
 }
 
-impl<V: View> RenderView<V> {
-    pub fn item(
-        &self,
-        mode: BlendMode,
-        local_transform: &V::Transform,
-        global_transform: &GlobalTransform,
-    ) -> V::Item {
-        self.view
-            .item(&self.data, mode, local_transform, global_transform)
+#[derive(Resource)]
+pub struct ViewSet<V: View>(pub(super) HashMap<Entity, ViewInstance<V>>);
+impl<V: View> ViewSet<V> {
+    pub fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+    pub(crate) fn extract(
+        views: &mut Self,
+        query: Query<(Entity, &GlobalTransform, &V::Transform, &V)>,
+    ) {
+        let mut extracted = HashMap::new();
+        for (entity, global, local, view) in query.iter() {
+            extracted.insert(
+                entity,
+                ViewInstance {
+                    view: view.clone(),
+                    data: view.data(),
+                    local: *local,
+                    global: *global,
+                    offset: 0,
+                },
+            );
+        }
+
+        views.0 = extracted;
     }
 }
 
 #[derive(Resource)]
-pub struct RenderViews<V: View> {
-    views: HashMap<Entity, RenderView<V>>,
+pub struct ViewBuffer<V: View> {
     buffer: UniformBufferArray<V::Data>,
+    bind_group: BindGroup,
     layout: BindGroupLayout,
-    bind_group: Option<BindGroup>,
 }
 
-impl<V: View> RenderViews<V> {
+impl<V: View> ViewBuffer<V> {
     pub const BINDING: u32 = 0;
-
-    pub fn new(device: &RenderDevice) -> Self {
-        let buffer = UniformBufferArray::new();
-
-        let layout = BindGroupLayoutBuilder::new()
-            .with_uniform(Self::BINDING, ShaderStages::all(), true, None, None)
-            .build(device);
-
-        Self {
-            views: HashMap::new(),
-            buffer,
-            layout,
-            bind_group: None,
-        }
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&Entity, &RenderView<V>)> {
-        self.views.iter()
-    }
-
-    pub fn get(&self, entity: &Entity) -> Option<&RenderView<V>> {
-        self.views.get(entity)
-    }
 
     pub fn layout(&self) -> &BindGroupLayout {
         &self.layout
     }
 
-    pub fn bind_group(&self) -> Option<&BindGroup> {
-        self.bind_group.as_ref()
+    pub fn bind_group(&self) -> &BindGroup {
+        &self.bind_group
     }
 
-    pub fn len(&self) -> usize {
-        self.views.len()
-    }
+    pub(crate) fn queue(views: &mut Self, extracted: &mut ViewSet<V>, device: &RenderDevice) {
+        for view in extracted.0.values_mut() {
+            view.offset = views.buffer.push(&view.data);
+        }
 
-    pub(crate) fn extract(
-        buffer: &mut Self,
-        query: Main<SQuery<(Entity, &V, &GlobalTransform, &Camera)>>,
-        surface: &RenderSurface,
-    ) {
-        buffer.as_mut().clear();
-
-        let aspect_ratio = surface.width() as f32 / surface.height() as f32;
-
-        buffer.views = query
-            .iter()
-            .map(|(entity, view, transform, camera)| {
-                let data = view.data(aspect_ratio, camera, transform);
-                let dynamic_offset = buffer.as_mut().push(&data);
-                let clip_from_world = data.projection() * transform.matrix().inverse();
-
-                let frustum = Frustum::from_world_projection(
-                    &clip_from_world,
-                    &transform.translation(),
-                    &transform.back(),
-                    view.projection().far(),
-                );
-
-                let view = RenderView {
-                    view: view.clone(),
-                    data,
-                    frustum,
-                    transform: *transform,
-                    dynamic_offset,
-                };
-
-                (entity, view)
-            })
-            .collect::<HashMap<_, _>>();
-    }
-
-    pub(crate) fn queue(views: &mut Self, device: &RenderDevice) {
-        if let Some(buffer) = views
-            .as_mut()
-            .update(device)
-            .and_then(|_| views.buffer.inner())
-        {
+        if let Some(buffer) = views.buffer.update(device).map(|_| views.buffer.as_ref()) {
             let bind_group = BindGroupBuilder::new(&views.layout)
                 .with_uniform(Self::BINDING, &buffer, 0, None)
                 .build(device);
 
-            views.bind_group = Some(bind_group);
+            views.bind_group = bind_group
         }
     }
 }
 
-impl<V: View> RenderResource for RenderViews<V> {
-    type Arg = Read<RenderDevice>;
-
-    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
-        Ok(Self::new(device))
-    }
-}
-
-impl<V: View> AsRef<UniformBufferArray<V::Data>> for RenderViews<V> {
+impl<V: View> AsRef<UniformBufferArray<V::Data>> for ViewBuffer<V> {
     fn as_ref(&self) -> &UniformBufferArray<V::Data> {
         &self.buffer
     }
 }
 
-impl<V: View> AsMut<UniformBufferArray<V::Data>> for RenderViews<V> {
-    fn as_mut(&mut self) -> &mut UniformBufferArray<V::Data> {
-        &mut self.buffer
+impl<V: View> RenderResource for ViewBuffer<V> {
+    type Arg = Read<RenderDevice>;
+
+    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
+        let buffer = UniformBufferArray::new(device, None, None);
+        let layout = BindGroupLayoutBuilder::new()
+            .with_uniform(Self::BINDING, ShaderStages::all(), true, None, None)
+            .build(device);
+
+        let bind_group = BindGroupBuilder::new(&layout)
+            .with_uniform(Self::BINDING, buffer.as_ref(), 0, None)
+            .build(device);
+
+        Ok(Self {
+            buffer,
+            bind_group,
+            layout,
+        })
     }
 }

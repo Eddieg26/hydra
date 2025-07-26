@@ -2,7 +2,7 @@ use crate::{
     resources::{
         BindGroup, BindGroupId, Buffer, BufferSlice, BufferSliceId, PipelineId, RenderPipeline,
     },
-    types::{Color, Viewport},
+    primitives::{Color, Viewport},
 };
 use std::{collections::HashMap, ops::Range};
 use wgpu::{IndexFormat, QuerySet, RenderBundle, ShaderStages};

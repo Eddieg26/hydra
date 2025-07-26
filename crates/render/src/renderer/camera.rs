@@ -1,13 +1,13 @@
 use crate::{
     RenderAssets, RenderDevice, RenderGraphError, RenderSurface, RenderSurfaceTexture,
     RenderTarget,
+    primitives::{Color, Viewport},
     renderer::graph::SubGraph,
     resources::RenderTexture,
-    types::{Color, Viewport},
 };
 use asset::AssetId;
 use ecs::{Component, Entity, IndexMap, Query, Resource, app::sync::MainEntity};
-use math::{Mat4, Size, Vec3, Vec3A, Vec4, bounds::Aabb, sphere::Sphere};
+use math::{Mat4, Size, Vec3, Vec3A, Vec4, bounds::Bounds, sphere::Sphere};
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Projection {
@@ -347,7 +347,7 @@ impl Frustum {
         Self { planes }
     }
 
-    pub fn intersects_aabb(&self, aabb: &Aabb) -> bool {
+    pub fn intersects_aabb(&self, aabb: &Bounds) -> bool {
         for plane in &self.planes {
             // Get the positive vertex in the direction of the plane normal
             let mut p_vertex = aabb.min;

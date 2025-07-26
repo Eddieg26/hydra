@@ -124,6 +124,17 @@ pub struct Schedule {
     map: HashMap<&'static str, usize>,
 }
 
+impl Default for Schedule {
+    fn default() -> Self {
+        Self {
+            mode: RunMode::Sequential,
+            phases: IndexDag::new(),
+            hierarchy: IndexDag::new(),
+            map: HashMap::new(),
+        }
+    }
+}
+
 impl Schedule {
     pub fn new(mode: RunMode) -> Self {
         Self {

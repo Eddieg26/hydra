@@ -1,3 +1,5 @@
+use derive_ecs::Resource;
+
 use super::{IntoSystemConfig, SystemConfig, SystemMeta};
 use crate::{
     Event, EventReader, EventWriter, Events, ModeId, WorldAccess,
@@ -398,6 +400,101 @@ unsafe impl SystemArg for &SystemMeta {
 }
 
 unsafe impl ReadOnly for &SystemMeta {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Resource)]
+pub struct MainWorld(WorldCell<'static>);
+impl MainWorld {
+    pub(crate) fn new(world: &mut World) -> Self {
+        let cell: WorldCell<'static> = unsafe { std::mem::transmute(world.cell()) };
+        Self(cell)
+    }
+}
+
+impl std::ops::Deref for MainWorld {
+    type Target = World;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.0.get() }
+    }
+}
+
+impl std::ops::DerefMut for MainWorld {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { self.0.get_mut() }
+    }
+}
+
+unsafe impl Send for MainWorld {}
+unsafe impl Sync for MainWorld {}
+
+pub struct Main<'w, 's, S: SystemArg>(ArgItem<'w, 's, S>);
+impl<'w, 's, S: SystemArg> Main<'w, 's, S> {
+    pub fn new(arg: ArgItem<'w, 's, S>) -> Self {
+        Self(arg)
+    }
+
+    pub fn into_inner(self) -> ArgItem<'w, 's, S> {
+        self.0
+    }
+}
+
+impl<'w, 's, S: SystemArg> std::ops::Deref for Main<'w, 's, S> {
+    type Target = ArgItem<'w, 's, S>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'w, 's, S: SystemArg> std::ops::DerefMut for Main<'w, 's, S> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+unsafe impl<S: SystemArg> SystemArg for Main<'_, '_, S> {
+    type Item<'w, 's> = Main<'w, 's, S>;
+    type State = S::State;
+
+    fn init(world: &mut World, access: &mut crate::WorldAccess) -> Self::State {
+        let main = world.resource_mut::<MainWorld>();
+        S::init(main, access)
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        mut world: WorldCell<'world>,
+        system: &'world crate::SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        let main = unsafe { world.get_mut().resource_mut::<MainWorld>().cell() };
+        let arg = unsafe { S::get(state, main, system) };
+        Main(arg)
+    }
+
+    fn update(state: &mut Self::State, world: &mut World) {
+        let main = world.resource_mut::<MainWorld>();
+        S::update(state, main);
+    }
+
+    unsafe fn validate(
+        state: &Self::State,
+        mut world: WorldCell,
+        system: &crate::SystemMeta,
+    ) -> bool {
+        unsafe {
+            let main = world.get_mut().resource_mut::<MainWorld>().cell();
+            S::validate(state, main, system)
+        }
+    }
+
+    fn exclusive() -> bool {
+        S::exclusive()
+    }
+
+    fn send() -> bool {
+        S::send()
+    }
+}
 
 macro_rules! impl_into_system_configs {
     ($($arg:ident),*) => {

@@ -1,13 +1,20 @@
 use crate::{
-    AssetUsage, ExtractError, ExtractResource, RenderAsset, RenderResource, Shader, View,
-    device::RenderDevice,
-    resources::binding::{AsBinding, BindGroup, BindGroupLayout},
+    AsBinding, BindGroup, BindGroupLayout, ExtractError, ExtractResource, RenderAsset,
+    RenderDevice, RenderResource, Shader, view::View,
 };
 use asset::{Asset, AssetId};
 use ecs::{
-    Resource,
-    system::unlifetime::{Read, SCommands},
+    Component, Resource,
+    unlifetime::{Read, SCommands},
 };
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum DepthWrite {
+    Enabled,
+    Disabled,
+}
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -41,175 +48,90 @@ impl Into<wgpu::BlendState> for BlendMode {
     }
 }
 
-pub enum DepthWrite {
-    Off,
-    On,
-}
+pub trait RenderPhase: 'static {
+    type View: View;
 
-pub trait RenderPhase: Send + Sync + 'static {
-    const SORT: bool = false;
+    type Item: Default + Copy + Eq + Ord + Send + Sync + 'static;
 
     fn mode() -> BlendMode;
 }
 
-pub trait Lighting: Send + Sync + 'static {
+pub trait Material: Clone + Asset + AsBinding {
     type View: View;
 
-    fn new(device: &RenderDevice) -> Self;
+    type Phase: RenderPhase<View = Self::View>;
 
-    fn bind_group_layout(&self) -> Option<&BindGroupLayout>;
-
-    fn bind_group(&self) -> Option<&BindGroup>;
-}
-
-#[derive(Resource)]
-pub struct LightingData<L: Lighting>(L);
-impl<L: Lighting> RenderResource for LightingData<L> {
-    type Arg = Read<RenderDevice>;
-
-    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, ExtractError<()>> {
-        Ok(Self(L::new(device)))
+    fn depth_write() -> DepthWrite {
+        DepthWrite::Enabled
     }
+
+    fn shader() -> impl Into<AssetId<Shader>>;
 }
 
-impl<L: Lighting> std::ops::Deref for LightingData<L> {
-    type Target = L;
+#[derive(Resource, Clone)]
+pub struct MaterialLayout<M: Material>(BindGroupLayout, std::marker::PhantomData<M>);
+impl<M: Material> std::ops::Deref for MaterialLayout<M> {
+    type Target = BindGroupLayout;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<L: Lighting> std::ops::DerefMut for LightingData<L> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-pub trait Material: Asset + AsBinding + Clone + Sized {
-    type Phase: RenderPhase;
-
-    type Lighting: Lighting;
-
-    fn depth_write() -> DepthWrite {
-        DepthWrite::On
-    }
-
-    fn shader() -> impl Into<AssetId<Shader>>;
-}
-
-#[derive(Resource)]
-pub struct Unlit<V: View>(std::marker::PhantomData<V>);
-impl<V: View> Lighting for Unlit<V> {
-    type View = V;
-
-    fn new(_: &RenderDevice) -> Self {
-        Self(Default::default())
-    }
-
-    fn bind_group_layout(&self) -> Option<&BindGroupLayout> {
-        None
-    }
-
-    fn bind_group(&self) -> Option<&BindGroup> {
-        None
-    }
-}
-
-#[derive(Resource)]
-pub struct MaterialLayout<M: Material> {
-    layout: BindGroupLayout,
-    _marker: std::marker::PhantomData<M>,
-}
-
-impl<M: Material> Clone for MaterialLayout<M> {
-    fn clone(&self) -> Self {
-        Self {
-            layout: self.layout.clone(),
-            _marker: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<M: Material> MaterialLayout<M> {
-    pub fn new(device: &RenderDevice) -> Self {
-        let layout = M::create_bind_group_layout(device);
-        Self {
-            layout,
-            _marker: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<M: Material> std::ops::Deref for MaterialLayout<M> {
-    type Target = BindGroupLayout;
-
-    fn deref(&self) -> &Self::Target {
-        &self.layout
-    }
-}
-
 impl<M: Material> AsRef<BindGroupLayout> for MaterialLayout<M> {
     fn as_ref(&self) -> &BindGroupLayout {
-        &self.layout
+        &self.0
     }
 }
 
 impl<M: Material> RenderResource for MaterialLayout<M> {
     type Arg = Read<RenderDevice>;
 
-    fn extract(device: ecs::system::ArgItem<Self::Arg>) -> Result<Self, ExtractError<()>> {
-        Ok(Self::new(&device))
+    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, ExtractError<()>> {
+        let layout = M::create_bind_group_layout(device);
+        Ok(Self(layout, std::marker::PhantomData))
     }
 }
 
-pub struct MaterialBinding<M: Material> {
-    bind_group: BindGroup,
-    _marker: std::marker::PhantomData<M>,
-}
-
-impl<M: Material> std::ops::Deref for MaterialBinding<M> {
+#[derive(Clone)]
+pub struct MaterialInstance<M: Material>(BindGroup, std::marker::PhantomData<M>);
+impl<M: Material> std::ops::Deref for MaterialInstance<M> {
     type Target = BindGroup;
 
     fn deref(&self) -> &Self::Target {
-        &self.bind_group
+        &self.0
     }
 }
 
-impl<M: Material> RenderAsset for MaterialBinding<M> {
+impl<M: Material> RenderAsset for MaterialInstance<M> {
     type Source = M;
 
     type Arg = (
         Read<RenderDevice>,
         Option<Read<MaterialLayout<M>>>,
-        SCommands,
         M::Arg,
+        SCommands,
     );
 
     fn extract(
         asset: Self::Source,
-        arg: &mut ecs::ArgItem<Self::Arg>,
+        (device, layout, arg, commands): &mut ecs::ArgItem<Self::Arg>,
     ) -> Result<Self, ExtractError<Self::Source>> {
-        let (device, layout, commands, arg) = arg;
-        let layout = match layout.as_ref() {
-            Some(layout) => layout,
+        let layout = match layout {
+            Some(layout) => layout.clone(),
             None => {
                 commands.add(ExtractResource::<MaterialLayout<M>>::new());
                 return Err(ExtractError::Retry(asset));
             }
         };
 
-        let binding = asset
+        let bind_group = asset
             .create_bind_group(device, &layout, arg)
             .map_err(|_| ExtractError::Retry(asset))?;
 
-        Ok(MaterialBinding {
-            bind_group: binding,
-            _marker: std::marker::PhantomData,
-        })
-    }
-
-    fn usage(_: &Self::Source) -> AssetUsage {
-        AssetUsage::Keep
+        Ok(Self(bind_group, std::marker::PhantomData))
     }
 }
+
+#[derive(Debug, Clone, Copy, Component)]
+pub struct MaterialRef<M: Material>(pub AssetId<M>);
