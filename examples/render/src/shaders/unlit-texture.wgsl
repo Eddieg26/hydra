@@ -1,6 +1,6 @@
 struct FragmentInput {
     @builtin(position) position: vec4<f32>,
-    @location(1) tex_coord: vec2<f32>,
+    @location(2) tex_coord: vec2<f32>,
 }
 
 @group(2) @binding(0) var texture: texture_2d<f32>;

@@ -134,9 +134,8 @@ pub fn expand_create_bind_group(input: &mut DeriveInput) -> Result<TokenStream> 
                 #(#fields: #types),*
             }
 
-            let mut buffer = UniformBuffer::new(#struct_name { #(#fields: self.#fields),* });
-            buffer.update(device);
-            #BINDINGS.with_uniform(#binding, buffer.buffer().unwrap(), 0, None);
+            let mut buffer = UniformBuffer::new(device, #struct_name { #(#fields: self.#fields),* }, None, None);
+            #BINDINGS.with_uniform(#binding, buffer.as_ref(), 0, None);
         });
     }
 

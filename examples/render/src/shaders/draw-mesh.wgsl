@@ -32,11 +32,20 @@ fn main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
 
     let object: mat4x4<f32> = objects[input.instance_id].model;
-    output.position = camera.projection * camera.view * object * vec4<f32>(input.position, 1.0);
-    output.world_pos = (camera.view * object * vec4<f32>(input.position, 1.0)).xyz;
-    output.normal = (camera.view * object * vec4<f32>(input.normal, 0.0)).xyz;
-    output.tangent = (camera.view * object * vec4<f32>(input.tangent.xyz, 0.0)).xyzw;
+    
+    // Calculate world position (model space -> world space)
+    let world_position = object * vec4<f32>(input.position, 1.0);
+    output.world_pos = world_position.xyz;
+    
+    // Calculate clip space position for rendering
+    output.position = camera.projection * camera.view * world_position;
+    
+    // Transform normal and tangent to world space
+    output.normal = (object * vec4<f32>(input.normal, 0.0)).xyz;
+    output.tangent = (object * vec4<f32>(input.tangent.xyz, 0.0)).xyzw;
     output.tangent.w = input.tangent.w; // Preserve the handedness of the tangent
+
     output.texcoord = input.texcoord;
+
     return output;
 }

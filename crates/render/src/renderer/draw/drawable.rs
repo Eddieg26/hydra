@@ -4,8 +4,8 @@ use crate::{
     RenderSurface, Shader, ShaderData, SubMesh, VertexState,
     allocator::MeshAllocator,
     cpu::UniformDataBuffer,
-    gpu::{DrawArgsBuffer, VisibleBuffer},
-    material::{DepthWrite, Material, MaterialInstance, MaterialLayout, MaterialRef, RenderPhase},
+    gpu::{DrawArgsBuffer, GpuDrawResources, StorageDataBuffer},
+    material::{DepthWrite, Material, MaterialInstance, MaterialLayout, RenderPhase},
     view::{View, ViewBuffer, ViewInstance},
 };
 use asset::{AssetId, ErasedId};
@@ -24,6 +24,8 @@ pub trait Drawable: Clone + Component + 'static {
 
     type Material: Material<View = Self::View>;
 
+    fn material(&self) -> AssetId<Self::Material>;
+    
     fn model(&self, transform: &GlobalTransform) -> Self::Model;
 
     fn primitive() -> wgpu::PrimitiveState {
@@ -51,15 +53,14 @@ impl<D: Drawable> DrawSet<D> {
             &<D::View as View>::Transform,
             &GlobalTransform,
             &MeshFilter,
-            &MaterialRef<D::Material>,
         )>,
     ) {
         let mut extracted = Vec::with_capacity(drawables.0.capacity());
-        for (entity, draw, local, global, filter, material) in query.iter() {
+        for (entity, draw, local, global, filter) in query.iter() {
             extracted.push(DrawInstance {
                 entity,
                 key: BatchKey {
-                    material: material.0.into(),
+                    material: draw.material().into(),
                     mesh: filter.mesh,
                     sub_mesh: filter.sub_mesh,
                 },
@@ -139,7 +140,7 @@ impl<D: Drawable> RenderResource for DrawPipeline<D> {
         Read<RenderDevice>,
         Read<RenderSurface>,
         Option<Read<UniformDataBuffer<D::Model>>>,
-        Option<Read<VisibleBuffer<D::Model>>>,
+        Option<Read<GpuDrawResources<D::Model>>>,
         Option<Read<ViewBuffer<D::View>>>,
         Option<Write<MaterialLayout<D::Material>>>,
         SCommands,
@@ -156,7 +157,7 @@ impl<D: Drawable> RenderResource for DrawPipeline<D> {
         let model_layout = if device.limits().max_storage_buffers_per_shader_stage == 0 {
             cpu_model.map(|v| v.layout())
         } else {
-            gpu_model.map(|v| v.layout())
+            gpu_model.map(|v| &v.layout)
         };
 
         let Some(model_layout) = model_layout else {
@@ -364,7 +365,7 @@ impl<V: View, P: RenderPhase<View = V>> ViewDrawSet<V, P> {
                 Ok(state.draw_indexed(indices, base_vertex, instances.clone()))
             }
             DrawMode::Indirect { offset } => {
-                let instances = world.resource::<VisibleBuffer<D::Model>>();
+                let instances = world.resource::<StorageDataBuffer<D::Model>>();
                 let draw_args = world.resource::<DrawArgsBuffer>();
 
                 state.set_bind_group(VIEW, views.bind_group(), &[view.offset]);
@@ -374,7 +375,7 @@ impl<V: View, P: RenderPhase<View = V>> ViewDrawSet<V, P> {
             }
             DrawMode::IndexedIndirect { offset, format } => {
                 let indices = meshes.index_slice(&call.mesh).ok_or(DrawError::Skip)?;
-                let instances = world.resource::<VisibleBuffer<D::Model>>();
+                let instances = world.resource::<StorageDataBuffer<D::Model>>();
                 let draw_args = world.resource::<DrawArgsBuffer>();
 
                 state.set_index_buffer(indices.buffer.slice(..), *format);

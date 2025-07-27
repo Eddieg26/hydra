@@ -55,6 +55,10 @@ pub trait GraphResource: Sized + Send + Sync + 'static {
 }
 
 pub struct GraphResourceId<R: GraphResource>(usize, std::marker::PhantomData<R>);
+impl<R: GraphResource> GraphResourceId<R> {
+    pub const NONE: Self = Self(usize::MAX, std::marker::PhantomData);
+}
+
 impl<R: GraphResource> From<usize> for GraphResourceId<R> {
     fn from(value: usize) -> Self {
         Self(value, Default::default())

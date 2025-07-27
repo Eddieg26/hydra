@@ -261,7 +261,7 @@ impl WorldAccess {
         }
 
         for (index, access) in self.archetypes.iter().enumerate() {
-            for other in self.archetypes.iter().skip(index) {
+            for other in self.archetypes.iter().skip(index + 1) {
                 if let Err(conflict) = access.conflicts(other) {
                     return Err(AccessError::from(ComponentId::from_usize(conflict)));
                 }

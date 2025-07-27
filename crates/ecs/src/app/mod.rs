@@ -1,11 +1,5 @@
 use crate::{
-    Component, Components, Entities, Event, EventRegistry, IntoSystemConfigs, Phase, Resource,
-    Resources, RunMode, Schedule, Systems, World, WorldMode,
-    app::defaults::DefaultPlugins,
-    core::task::{CpuTaskPool, Task},
-    ext,
-    system::MainWorld,
-    world::Archetypes,
+    app::defaults::{DefaultPhases, DefaultPlugins}, core::task::{CpuTaskPool, Task}, ext, system::MainWorld, world::Archetypes, Component, Components, Entities, Event, EventRegistry, IntoSystemConfigs, Phase, Resource, Resources, RunMode, Schedule, Systems, World, WorldMode
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -226,6 +220,19 @@ impl Default for AppConfig {
 impl AppConfig {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn with_plugin<P: Plugin>(plugin: P) -> Self {
+        let mut config = Self {
+            world: World::new(),
+            schedule: Schedule::new(RunMode::Sequential),
+            plugins: Vec::new(),
+            registered: HashSet::new(),
+        };
+
+        config.add_plugins(plugin);
+
+        config
     }
 
     pub fn world(&self) -> &World {
@@ -570,7 +577,7 @@ impl AppBuilder {
     pub fn sub_app_mut(&mut self, app: impl AppTag) -> &mut AppConfig {
         self.sub_apps
             .entry(Box::new(app))
-            .or_insert(AppConfig::new())
+            .or_insert(AppConfig::with_plugin(DefaultPhases::<false>::default()))
     }
 
     pub fn scoped_sub_app(

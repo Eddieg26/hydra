@@ -113,6 +113,10 @@ impl<T: super::ShaderData> UniformDataBuffer<T> {
     pub fn clear(&mut self) {
         self.buffer.clear();
     }
+    
+    pub fn reset(&mut self) {
+        self.buffer.reset();
+    }
 
     #[inline]
     fn create_batch(&mut self, offset: u32, batch_count: u32, batch: &[T]) -> BatchIndex {
@@ -132,7 +136,11 @@ impl<T: super::ShaderData> UniformDataBuffer<T> {
         data.update(device);
     }
 
-    pub fn queue<D, P>(
+    pub(crate) fn reset_buffer(data: &mut Self) {
+        data.reset();
+    }
+
+    pub(crate) fn queue<D, P>(
         views: &ViewSet<D::View>,
         drawables: &DrawSet<D>,
         pipeline: &DrawPipeline<D>,

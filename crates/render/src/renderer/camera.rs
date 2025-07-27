@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::{
     RenderAssets, RenderDevice, RenderGraphError, RenderSurface, RenderSurfaceTexture,
     RenderTarget,
@@ -7,6 +9,7 @@ use crate::{
 };
 use asset::AssetId;
 use ecs::{Component, Entity, IndexMap, Query, Resource, app::sync::MainEntity};
+use encase::ShaderType;
 use math::{Mat4, Size, Vec3, Vec3A, Vec4, bounds::Bounds, sphere::Sphere};
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -137,10 +140,7 @@ impl CameraRenderTargets {
         surface_texture: &RenderSurfaceTexture,
         render_targets: &RenderAssets<RenderTarget>,
     ) {
-        targets
-            .targets
-            .retain(|t, _| cameras.into_iter().any(|(e, _)| &e.0 == t));
-
+        let mut set = HashSet::new();
         for (entity, camera) in cameras.iter() {
             let remove = if let Some(id) = camera.target {
                 Self::add_render_target(
@@ -163,9 +163,11 @@ impl CameraRenderTargets {
                 )
             };
 
+            set.insert(entity.0);
             remove.then_some(|| targets.targets.shift_remove(&entity.0));
         }
 
+        targets.targets.retain(|e, _| set.contains(e));
         targets.targets.sort_by(|_, a, _, b| a.order.cmp(&b.order));
     }
 
@@ -297,7 +299,7 @@ impl SubGraph for CameraSubGraph {
 
 /// A plane is represented as a 4D vector: ax + by + cz + d = 0
 /// Where (a, b, c) is the normal and d is the distance
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, ShaderType)]
 struct Plane {
     normal: Vec3,
     d: f32,
@@ -315,6 +317,7 @@ impl Plane {
     }
 }
 
+#[derive(Clone, Copy, ShaderType)]
 pub struct Frustum {
     planes: [Plane; 6],
 }

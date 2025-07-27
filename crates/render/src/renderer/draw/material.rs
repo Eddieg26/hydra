@@ -4,7 +4,7 @@ use crate::{
 };
 use asset::{Asset, AssetId};
 use ecs::{
-    Component, Resource,
+    Resource,
     unlifetime::{Read, SCommands},
 };
 
@@ -51,7 +51,7 @@ impl Into<wgpu::BlendState> for BlendMode {
 pub trait RenderPhase: 'static {
     type View: View;
 
-    type Item: Default + Copy + Eq + Ord + Send + Sync + 'static;
+    type Item: Default + Copy + PartialEq + PartialOrd + Send + Sync + 'static;
 
     fn mode() -> BlendMode;
 }
@@ -132,6 +132,3 @@ impl<M: Material> RenderAsset for MaterialInstance<M> {
         Ok(Self(bind_group, std::marker::PhantomData))
     }
 }
-
-#[derive(Debug, Clone, Copy, Component)]
-pub struct MaterialRef<M: Material>(pub AssetId<M>);

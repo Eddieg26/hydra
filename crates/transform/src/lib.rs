@@ -42,6 +42,11 @@ impl Default for Transform2d {
 
 #[derive(Debug, Clone, Copy, Component)]
 pub struct GlobalTransform(Affine3A);
+impl Default for GlobalTransform {
+    fn default() -> Self {
+        Self::ORIGIN
+    }
+}
 
 impl GlobalTransform {
     pub const ORIGIN: Self = GlobalTransform(Affine3A::IDENTITY);
@@ -174,7 +179,7 @@ impl LocalTransform for Transform2d {
     }
 }
 
-pub(crate) fn update_global_transforms<L: LocalTransform>(
+pub fn update_global_transforms<L: LocalTransform>(
     root_query: Query<(Entity, &L, &mut GlobalTransform), Without<Parent>>,
     transform_query: Query<(Entity, &L, &mut GlobalTransform), With<Parent>>,
 ) {

@@ -153,6 +153,8 @@ impl AssetDatabase {
 
         folder.items = paths.clone();
 
+        let _ = fs.save_settings(&path, &folder).await;
+
         Ok(ScanInfo { paths, removed })
     }
 

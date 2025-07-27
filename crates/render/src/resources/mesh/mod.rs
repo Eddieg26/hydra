@@ -5,9 +5,10 @@ use super::{
 };
 use crate::{RenderAssetType, primitives::Color};
 use asset::{
-    importer::{AssetImporter, AssetProcessor}, Asset, AssetId, Settings
+    Asset, AssetId, Settings,
+    importer::{AssetImporter, AssetProcessor},
 };
-use ecs::{system::ArgItem, Component, IndexMap};
+use ecs::{Component, IndexMap, system::ArgItem};
 use math::bounds::Bounds;
 use smol::io::AsyncAsSync;
 use std::{
@@ -862,18 +863,16 @@ impl RenderAsset for RenderMesh {
 }
 
 #[derive(Settings, serde::Serialize, serde::Deserialize)]
-pub struct ObjImportSettings {
+pub struct MeshSettings {
     pub read_write: ReadWrite,
     pub import_normals: bool,
-    pub wireframe: bool,
 }
 
-impl Default for ObjImportSettings {
+impl Default for MeshSettings {
     fn default() -> Self {
         Self {
             read_write: ReadWrite::Disabled,
             import_normals: true,
-            wireframe: false,
         }
     }
 }
@@ -883,7 +882,7 @@ pub struct ObjImporter;
 impl AssetImporter for ObjImporter {
     type Asset = Mesh;
 
-    type Settings = ObjImportSettings;
+    type Settings = MeshSettings;
 
     type Error = tobj::LoadError;
 
@@ -953,13 +952,7 @@ impl AssetImporter for ObjImporter {
             normals = Mesh::calculate_normals(&positions, &indices);
         }
 
-        let topology = if metadata.wireframe {
-            MeshTopology::LineList
-        } else {
-            MeshTopology::TriangleList
-        };
-
-        let mut mesh = Mesh::new(topology);
+        let mut mesh = Mesh::new(MeshTopology::TriangleList);
         if !positions.is_empty() {
             mesh.add_attribute(MeshAttribute {
                 ty: MeshAttributeType::Position,
@@ -967,20 +960,18 @@ impl AssetImporter for ObjImporter {
             });
         }
 
-        if !metadata.wireframe {
-            if !tex_coords.is_empty() {
-                mesh.add_attribute(MeshAttribute {
-                    ty: MeshAttributeType::TexCoord0,
-                    values: MeshAttributeValues::Vec2(tex_coords),
-                });
-            }
+        if !tex_coords.is_empty() {
+            mesh.add_attribute(MeshAttribute {
+                ty: MeshAttributeType::TexCoord0,
+                values: MeshAttributeValues::Vec2(tex_coords),
+            });
+        }
 
-            if !normals.is_empty() {
-                mesh.add_attribute(MeshAttribute {
-                    ty: MeshAttributeType::Normal,
-                    values: MeshAttributeValues::Vec3(normals),
-                });
-            }
+        if !normals.is_empty() {
+            mesh.add_attribute(MeshAttribute {
+                ty: MeshAttributeType::Normal,
+                values: MeshAttributeValues::Vec3(normals),
+            });
         }
 
         if !indices.is_empty() {

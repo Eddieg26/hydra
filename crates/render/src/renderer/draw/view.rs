@@ -1,11 +1,12 @@
 use ecs::{Component, Entity, Query, Resource, unlifetime::Read};
+use math::{Mat4, Size};
 use std::collections::HashMap;
 use transform::{GlobalTransform, LocalTransform};
 use wgpu::{DynamicOffset, ShaderStages};
 
 use crate::{
     BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, RenderDevice,
-    RenderResource, uniform::UniformBufferArray,
+    RenderResource, RenderSurface, uniform::UniformBufferArray,
 };
 
 pub trait View: Clone + Component {
@@ -13,7 +14,11 @@ pub trait View: Clone + Component {
 
     type Transform: LocalTransform;
 
-    fn data(&self) -> Self::Data;
+    fn data(&self, transform: &GlobalTransform, projection: Mat4) -> Self::Data;
+
+    fn projection(&self, screen_size: Size) -> Mat4;
+
+    fn far(&self) -> f32;
 }
 
 pub struct ViewInstance<V: View> {
@@ -33,15 +38,18 @@ impl<V: View> ViewSet<V> {
 
     pub(crate) fn extract(
         views: &mut Self,
+        surface: &RenderSurface,
         query: Query<(Entity, &GlobalTransform, &V::Transform, &V)>,
     ) {
+        let screen_size = Size::new(surface.width() as f32, surface.height() as f32);
         let mut extracted = HashMap::new();
         for (entity, global, local, view) in query.iter() {
+            let projection = view.projection(screen_size);
             extracted.insert(
                 entity,
                 ViewInstance {
                     view: view.clone(),
-                    data: view.data(),
+                    data: view.data(global, projection),
                     local: *local,
                     global: *global,
                     offset: 0,

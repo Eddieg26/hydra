@@ -10,6 +10,7 @@ pub trait Plugin: 'static {
     /// It is used to register systems, resources, and other app components.
     fn setup(&mut self, app: &mut AppBuilder);
 
+    /// Build is called when [AppBuilder::build] is called
     fn build(&mut self, app: &mut AppBuilder) {}
 
     /// Finish is called after all of a plugin's dependencies have been added and ran.

@@ -1,9 +1,6 @@
 use crate::{
     CameraRenderTargets, Color, GraphPass, Name, PassBuilder, RenderContext, RenderGraphError,
-    RenderState,
-    drawable::ViewDrawSet,
-    material::RenderPhase,
-    view::{View, ViewSet},
+    RenderState, drawable::ViewDrawSet, material::RenderPhase, view::ViewSet,
 };
 use ecs::Entity;
 
@@ -15,15 +12,15 @@ pub struct RenderPhases(
 );
 
 impl RenderPhases {
-    pub fn add_phase<V: View, P: RenderPhase<View = V>>(&mut self) {
+    pub fn add_phase<P: RenderPhase>(&mut self) {
         self.0.push((
             |entity, ctx, state| {
-                let views = ctx.world().resource::<ViewSet<V>>();
+                let views = ctx.world().resource::<ViewSet<P::View>>();
                 let Some(view) = views.0.get(&entity) else {
                     return;
                 };
 
-                let draw_calls = ctx.world().resource::<ViewDrawSet<V, P>>();
+                let draw_calls = ctx.world().resource::<ViewDrawSet<P::View, P>>();
                 let Some(calls) = draw_calls.0.get(&entity) else {
                     return;
                 };
@@ -43,8 +40,16 @@ impl RenderPhases {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ClearMode {
+    Clear(Color),
+    Load,
+}
+
 pub trait Renderer: Send + Sync + 'static {
     const NAME: Name;
+
+    const CLEAR_MODE: ClearMode = ClearMode::Load;
 
     type Data: Send + Sync + 'static;
 
@@ -58,14 +63,14 @@ pub trait Renderer: Send + Sync + 'static {
     }
 }
 
-pub struct RendererPass<R: Renderer>(std::marker::PhantomData<R>);
-impl<R: Renderer> Default for RendererPass<R> {
+pub struct DrawPass<R: Renderer>(std::marker::PhantomData<R>);
+impl<R: Renderer> Default for DrawPass<R> {
     fn default() -> Self {
         Self(Default::default())
     }
 }
 
-impl<R: Renderer> GraphPass for RendererPass<R> {
+impl<R: Renderer> GraphPass for DrawPass<R> {
     const NAME: Name = R::NAME;
 
     fn setup(
@@ -94,7 +99,12 @@ impl<R: Renderer> GraphPass for RendererPass<R> {
                 view: &color,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(target.clear.unwrap_or(Color::black()).into()),
+                    load: match R::CLEAR_MODE {
+                        ClearMode::Clear(color) => {
+                            wgpu::LoadOp::Clear(target.clear.map_or(color.into(), |c| c.into()))
+                        }
+                        ClearMode::Load => wgpu::LoadOp::Load,
+                    },
                     store: wgpu::StoreOp::Store,
                 },
             })];

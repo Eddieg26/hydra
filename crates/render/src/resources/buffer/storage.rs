@@ -196,6 +196,10 @@ impl<T: ShaderType + WriteInto> StorageBufferArray<T> {
         offsets
     }
 
+    pub fn reset(&mut self) {
+        self.data.set_offset(0);
+    }
+
     pub fn clear(&mut self) {
         self.data.as_mut().clear();
         self.data.set_offset(0);
