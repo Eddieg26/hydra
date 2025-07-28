@@ -1,14 +1,14 @@
 use crate::{
-    BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, MeshFormat, RenderAssets,
-    RenderDevice, RenderMesh, RenderResource, SubMesh,
+    BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, Buffer, MeshFormat,
+    RenderAssets, RenderDevice, RenderMesh, RenderResource, ShaderData, SubMesh,
     drawable::{DrawCall, DrawMode, DrawPipeline, DrawSet, Drawable, ViewDrawSet},
     material::{Material, RenderPhase},
-    uniform::UniformBufferArray,
     view::ViewSet,
 };
 use ecs::{Resource, system::unlifetime::Read};
+use encase::DynamicUniformBuffer;
 use std::{collections::HashMap, num::NonZero, ops::Range};
-use wgpu::ShaderStages;
+use wgpu::{BufferUsages, ShaderStages};
 
 pub const MAX_OBJECT_COUNT: u32 = 512;
 
@@ -19,30 +19,35 @@ pub struct BatchIndex {
 }
 
 #[derive(Resource)]
-pub struct UniformDataBuffer<T: super::ShaderData> {
-    buffer: UniformBufferArray<T>,
+pub struct UniformDataBuffer<T: ShaderData> {
+    buffer: Buffer,
+    data: DynamicUniformBuffer<Vec<u8>>,
+    batch_size: u32,
+    item_size: u32,
     layout: BindGroupLayout,
     bind_groups: Vec<BindGroup>,
-    item_size: u32,  // Size of a single item in the buffer
-    batch_size: u32, // Size of a single batch in bytes
+    is_dirty: bool,
+    _marker: std::marker::PhantomData<T>,
 }
 
-impl<T: super::ShaderData> UniformDataBuffer<T> {
-    pub fn get_object_count(device: &RenderDevice) -> u32 {
-        let item_size = T::min_size().get() as u32;
-
-        (device.limits().max_uniform_buffer_binding_size / item_size).min(MAX_OBJECT_COUNT)
+impl<T: ShaderData> UniformDataBuffer<T> {
+    pub fn get_batch_size(device: &RenderDevice) -> u32 {
+        (device.limits().max_uniform_buffer_binding_size / std::mem::size_of::<T>() as u32)
+            .min(MAX_OBJECT_COUNT)
     }
 
     pub fn new(device: &RenderDevice) -> Self {
-        let item_size = T::min_size().get() as u32;
+        let item_size = std::mem::size_of::<T>() as u32;
+        let batch_size = Self::get_batch_size(device);
 
-        let batch_size = Self::get_object_count(device) * item_size;
-
-        let buffer = UniformBufferArray::with_alignment(device, batch_size, None, None);
+        let buffer = Buffer::new(
+            device,
+            (batch_size * item_size) as u64,
+            BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            None,
+        );
 
         let layout = BindGroupLayoutBuilder::new()
-            .with_label(ecs::ext::short_type_name::<Self>())
             .with_uniform(
                 0,
                 ShaderStages::VERTEX | ShaderStages::COMPUTE,
@@ -53,72 +58,19 @@ impl<T: super::ShaderData> UniformDataBuffer<T> {
             .build(device);
 
         let bind_group = BindGroupBuilder::new(&layout)
-            .with_uniform(0, buffer.as_ref(), 0, NonZero::new(batch_size as u64))
+            .with_uniform(0, &buffer, 0, NonZero::new(buffer.size()))
             .build(device);
 
         Self {
             buffer,
-            layout,
-            bind_groups: vec![bind_group],
-            item_size,
+            data: DynamicUniformBuffer::new_with_alignment(Vec::new(), item_size as u64),
             batch_size,
+            item_size,
+            layout,
+            is_dirty: false,
+            bind_groups: vec![bind_group],
+            _marker: Default::default(),
         }
-    }
-
-    pub fn push<'a>(&mut self, values: &[T]) -> Vec<BatchIndex> {
-        if values.is_empty() {
-            return Vec::new();
-        }
-
-        let batch_count = self.batch_size / self.item_size;
-        let current_batch_count = ((self.buffer.data().len() % self.batch_size as usize)
-            / self.item_size as usize) as u32;
-        let remaining = (batch_count - current_batch_count).min(values.len() as u32) as usize;
-        let initial =
-            self.create_batch(current_batch_count, remaining as u32, &values[0..remaining]);
-
-        let mut batches = vec![initial];
-        for values in values[remaining..].chunks(batch_count as usize) {
-            let batch = self.create_batch(0, batch_count, values);
-            batches.push(batch);
-        }
-
-        batches
-    }
-
-    #[inline]
-    fn create_batch(&mut self, offset: u32, batch_count: u32, batch: &[T]) -> BatchIndex {
-        let bind_group = self.buffer.data().len() / self.batch_size as usize;
-        let instances = offset..offset + batch_count;
-        for value in batch {
-            self.buffer.push(value);
-        }
-
-        BatchIndex {
-            bind_group,
-            instances,
-        }
-    }
-
-    pub fn update(&mut self, device: &RenderDevice) {
-        let Some(buffer_size) = self.buffer.update(device) else {
-            return;
-        };
-
-        let new_capacity = buffer_size as usize / self.batch_size as usize
-            + (buffer_size as usize % self.batch_size as usize).min(1);
-        let mut bind_groups = Vec::with_capacity(new_capacity);
-
-        for index in 0..new_capacity {
-            let offset = index as u64 * self.batch_size as u64;
-            let size = NonZero::new((buffer_size - offset).min(self.batch_size as u64));
-            let bind_group = BindGroupBuilder::new(&self.layout)
-                .with_uniform(0, self.buffer.as_ref(), offset, size)
-                .build(device);
-            bind_groups.push(bind_group);
-        }
-
-        self.bind_groups = bind_groups;
     }
 
     pub fn layout(&self) -> &BindGroupLayout {
@@ -129,16 +81,73 @@ impl<T: super::ShaderData> UniformDataBuffer<T> {
         &self.bind_groups
     }
 
-    pub fn item_size(&self) -> u32 {
-        self.item_size
-    }
-
     pub fn batch_size(&self) -> u32 {
         self.batch_size
     }
 
-    pub fn clear(&mut self) {
-        self.buffer.clear();
+    pub fn push(&mut self, values: &[T]) -> Vec<BatchIndex> {
+        if values.is_empty() {
+            return Vec::new();
+        }
+
+        let len = self.data.as_ref().len() as u32 / self.item_size;
+        let start = len % self.batch_size;
+        let initial = ((self.batch_size - start) as usize).min(values.len());
+        let mut batches = vec![self.create_batch(start, &values[..initial])];
+        for values in values[initial..].chunks(self.batch_size as usize) {
+            batches.push(self.create_batch(0, values));
+        }
+
+        self.is_dirty = true;
+
+        batches
+    }
+
+    fn create_batch(&mut self, start: u32, values: &[T]) -> BatchIndex {
+        let bind_group = self.data.as_ref().len() / (self.batch_size * self.item_size) as usize;
+        let instances = start..start + values.len() as u32;
+
+        for value in values {
+            self.data.write(value).unwrap();
+        }
+
+        BatchIndex {
+            bind_group,
+            instances,
+        }
+    }
+
+    pub fn update(&mut self, device: &RenderDevice) {
+        if self.data.as_ref().len() as u64 > self.buffer.size() {
+            let len = self.data.as_ref().len() as u32 / self.item_size;
+            let padding = self.batch_size - (len % self.batch_size);
+            let new_len = padding + len;
+            let batch_count = new_len / self.batch_size;
+
+            self.buffer
+                .resize(device, (new_len * self.item_size) as u64);
+            self.create_bind_groups(device, batch_count);
+        }
+
+        if self.is_dirty && self.data.as_ref().len() > 0 {
+            self.buffer.update(device, self.data.as_ref().as_slice());
+            self.is_dirty = false;
+        }
+    }
+
+    fn create_bind_groups(&mut self, device: &RenderDevice, count: u32) {
+        let mut bind_groups = Vec::with_capacity(count as usize);
+        let batch_size = self.batch_size * self.item_size;
+        for index in 0..count {
+            let offset = index * batch_size;
+            let size = NonZero::new(batch_size as u64);
+            let bind_group = BindGroupBuilder::new(&self.layout)
+                .with_uniform(0, &self.buffer, offset as u64, size)
+                .build(device);
+            bind_groups.push(bind_group);
+        }
+
+        self.bind_groups = bind_groups;
     }
 
     pub(crate) fn update_buffer(device: &RenderDevice, data: &mut Self) {
@@ -146,7 +155,8 @@ impl<T: super::ShaderData> UniformDataBuffer<T> {
     }
 
     pub(crate) fn clear_buffer(data: &mut Self) {
-        data.clear();
+        data.data.as_mut().clear();
+        data.data.set_offset(0);
     }
 
     pub(crate) fn queue<D, P>(
@@ -235,7 +245,7 @@ impl<T: super::ShaderData> UniformDataBuffer<T> {
     }
 }
 
-impl<T: super::ShaderData> RenderResource for UniformDataBuffer<T> {
+impl<T: ShaderData> RenderResource for UniformDataBuffer<T> {
     type Arg = Read<RenderDevice>;
 
     fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
@@ -243,8 +253,8 @@ impl<T: super::ShaderData> RenderResource for UniformDataBuffer<T> {
     }
 }
 
-impl<T: super::ShaderData> AsRef<UniformBufferArray<T>> for UniformDataBuffer<T> {
-    fn as_ref(&self) -> &UniformBufferArray<T> {
+impl<T: ShaderData> AsRef<Buffer> for UniformDataBuffer<T> {
+    fn as_ref(&self) -> &Buffer {
         &self.buffer
     }
 }

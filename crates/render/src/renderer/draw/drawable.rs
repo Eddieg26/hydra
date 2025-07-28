@@ -1,6 +1,6 @@
 use crate::{
     ExtractResource, FragmentState, GlobalShaderConstant, GlobalShaderConstants, Mesh, MeshFilter,
-    MeshKey, MeshLayout, PipelineCache, PipelineId, RenderAssets, RenderPipelineDesc,
+    MeshKey, MeshLayout,  PipelineCache, PipelineId, RenderAssets, RenderPipelineDesc,
     RenderResource, RenderState, RenderSurface, Shader, ShaderData, SubMesh, VertexState,
     allocator::MeshAllocator,
     constants::StorageBufferEnabled,
@@ -379,7 +379,7 @@ impl<V: View, P: RenderPhase<View = V>> ViewDrawSet<V, P> {
                 let bind_group = &models.bind_groups()[*bind_group];
                 let indices = call.sub_mesh.start_index + index.range.start
                     ..call.sub_mesh.start_index + call.sub_mesh.index_count + index.range.start;
-                let base_vertex = call.sub_mesh.start_vertex as i32;
+                let base_vertex = (vertex.range.start + call.sub_mesh.start_vertex) as i32;
 
                 state.set_index_buffer(index.buffer.slice(..), *format);
                 state.set_bind_group(VIEW, views.bind_group(), &[view.offset]);

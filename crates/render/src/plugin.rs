@@ -21,7 +21,6 @@ use crate::{
         AssetExtractors, ExtractInfo, Fallbacks, Mesh, PipelineCache, RenderAsset, RenderAssets,
         RenderResource, ResourceExtractors, Shader,
     },
-    shader,
     surface::{RenderSurface, RenderSurfaceTexture},
     view::{ViewBuffer, ViewSet},
 };
@@ -96,10 +95,7 @@ impl Plugin for RenderPlugin {
             .add_resource(surface)
             .add_resource(device)
             .resource_mut::<GlobalShaderConstants>()
-            .set(
-                StorageBufferEnabled::NAME,
-                shader::processor::ShaderConstant::Bool(false),
-            );
+            .set(StorageBufferEnabled::NAME, enabled);
     }
 
     fn finish(&mut self, app: &mut AppBuilder) {
@@ -463,7 +459,7 @@ impl<D: Drawable> Plugin for DrawPlugin<D> {
         // }
 
         let batch_size =
-            UniformDataBuffer::<D::Model>::get_object_count(app.resource::<RenderDevice>());
+            UniformDataBuffer::<D::Model>::get_batch_size(app.resource::<RenderDevice>());
         let mut constants = ShaderConstants::new();
         constants.set("BATCH_SIZE", ShaderConstant::U32(batch_size));
 

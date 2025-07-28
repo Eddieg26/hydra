@@ -298,14 +298,10 @@ impl<T: NoUninit> ArrayBuffer<T> {
             return None;
         }
 
-        let data = bytemuck::cast_slice(&self.values);
+        let data: &[u8] = bytemuck::cast_slice(&self.values);
         let size = data.len() as u64;
         if size > self.buffer.size() {
             let data = bytemuck::cast_slice(&self.values);
-            self.buffer.resize_with_data(device, data);
-            self.is_dirty = false;
-            Some(size)
-        } else if size < self.buffer.size() / 2 {
             self.buffer.resize_with_data(device, data);
             self.is_dirty = false;
             Some(size)

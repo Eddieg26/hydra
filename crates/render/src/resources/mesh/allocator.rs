@@ -158,7 +158,7 @@ impl InlineChunk {
         Self {
             allocator: Allocator::new(capacity),
             allocations: HashMap::new(),
-            buffer: Buffer::mapped(device, size, meta.usage.into(), None),
+            buffer: Buffer::new(device, size, meta.usage.into(), None),
             meta,
         }
     }
@@ -194,7 +194,7 @@ pub struct BlockChunk {
 
 impl BlockChunk {
     pub fn new(device: &RenderDevice, size: u32, meta: ChunkMeta) -> Self {
-        let buffer = Buffer::mapped(device, size as u64, meta.usage.into(), None);
+        let buffer = Buffer::new(device, size as u64, meta.usage.into(), None);
         Self { buffer, meta }
     }
 }
@@ -371,8 +371,7 @@ impl MeshAllocator {
 
             if let MeshChunk::Inline(chunk) = chunk {
                 if chunk.buffer.size() < pending.size {
-                    let buffer =
-                        Buffer::mapped(device, pending.size, chunk.meta.usage.into(), None);
+                    let buffer = Buffer::new(device, pending.size, chunk.meta.usage.into(), None);
                     let mut encoder = device.create_command_encoder(&Default::default());
 
                     encoder.copy_buffer_to_buffer(
@@ -387,8 +386,6 @@ impl MeshAllocator {
 
                     device.queue.submit(std::iter::once(encoder.finish()));
                 }
-
-                chunk.buffer.as_ref().unmap();
             }
 
             for pending in pending.allocations {
@@ -402,10 +399,6 @@ impl MeshAllocator {
                     ChunkUsage::Vertex => self.vertex_chunks.insert(pending.id, chunk_id),
                     ChunkUsage::Index => self.index_chunks.insert(pending.id, chunk_id),
                 };
-            }
-
-            if let MeshChunk::Block(chunk) = chunk {
-                chunk.buffer.as_ref().unmap();
             }
         }
     }
