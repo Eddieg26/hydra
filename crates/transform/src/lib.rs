@@ -13,6 +13,23 @@ pub struct Transform {
     pub rotation: Vec3,
 }
 
+impl Transform {
+    pub fn with_translation(mut self, translation: Vec3) -> Self {
+        self.translation = translation;
+        self
+    }
+
+    pub fn with_scale(mut self, scale: Vec3) -> Self {
+        self.scale = scale;
+        self
+    }
+
+    pub fn with_rotation(mut self, rotation: Vec3) -> Self {
+        self.rotation = rotation;
+        self
+    }
+}
+
 impl Default for Transform {
     fn default() -> Self {
         Self {
