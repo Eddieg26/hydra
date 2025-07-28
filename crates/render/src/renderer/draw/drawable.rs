@@ -1,17 +1,20 @@
 use crate::{
-    ExtractResource, FragmentState, Mesh, MeshFilter, MeshKey, MeshLayout, PipelineCache,
-    PipelineId, RenderAssets, RenderDevice, RenderPipelineDesc, RenderResource, RenderState,
-    RenderSurface, Shader, ShaderData, SubMesh, VertexState,
+    ExtractResource, FragmentState, GlobalShaderConstant, GlobalShaderConstants, Mesh, MeshFilter,
+    MeshKey, MeshLayout, PipelineCache, PipelineId, RenderAssets, RenderPipelineDesc,
+    RenderResource, RenderState, RenderSurface, Shader, ShaderData, SubMesh, VertexState,
     allocator::MeshAllocator,
+    constants::StorageBufferEnabled,
     cpu::UniformDataBuffer,
     gpu::{DrawArgsBuffer, GpuDrawResources, StorageDataBuffer},
     material::{DepthWrite, Material, MaterialInstance, MaterialLayout, RenderPhase},
+    processor::ShaderConstant,
     view::{View, ViewBuffer, ViewInstance},
 };
 use asset::{AssetId, ErasedId};
 use ecs::{
-    Component, Entity, Query, Resource, World,
-    unlifetime::{Read, SCommands, Write},
+    Component, Entity, Resource, World,
+    system::Main,
+    unlifetime::{Read, SCommands, SQuery, Write},
 };
 use std::{collections::HashMap, ops::Range};
 use transform::GlobalTransform;
@@ -25,7 +28,7 @@ pub trait Drawable: Clone + Component + 'static {
     type Material: Material<View = Self::View>;
 
     fn material(&self) -> AssetId<Self::Material>;
-    
+
     fn model(&self, transform: &GlobalTransform) -> Self::Model;
 
     fn primitive() -> wgpu::PrimitiveState {
@@ -47,13 +50,15 @@ impl<D: Drawable> DrawSet<D> {
 
     pub(crate) fn extract(
         drawables: &mut Self,
-        query: Query<(
-            Entity,
-            &D,
-            &<D::View as View>::Transform,
-            &GlobalTransform,
-            &MeshFilter,
-        )>,
+        query: Main<
+            SQuery<(
+                Entity,
+                &D,
+                &<D::View as View>::Transform,
+                &GlobalTransform,
+                &MeshFilter,
+            )>,
+        >,
     ) {
         let mut extracted = Vec::with_capacity(drawables.0.capacity());
         for (entity, draw, local, global, filter) in query.iter() {
@@ -71,6 +76,14 @@ impl<D: Drawable> DrawSet<D> {
         }
 
         drawables.0 = extracted;
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    pub(crate) fn clear_set(set: &mut Self) {
+        set.clear();
     }
 }
 
@@ -137,8 +150,8 @@ impl<D: Drawable> Clone for DrawPipeline<D> {
 impl<D: Drawable> RenderResource for DrawPipeline<D> {
     type Arg = (
         Write<PipelineCache>,
-        Read<RenderDevice>,
         Read<RenderSurface>,
+        Read<GlobalShaderConstants>,
         Option<Read<UniformDataBuffer<D::Model>>>,
         Option<Read<GpuDrawResources<D::Model>>>,
         Option<Read<ViewBuffer<D::View>>>,
@@ -147,18 +160,19 @@ impl<D: Drawable> RenderResource for DrawPipeline<D> {
     );
 
     fn extract(arg: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
-        let (cache, device, surface, cpu_model, gpu_model, views, layout, mut commands) = arg;
+        let (cache, surface, constants, cpu_model, gpu_model, views, layout, mut commands) = arg;
 
         let view_layout = match views {
             Some(views) => views.layout(),
             None => return Err(crate::resources::ExtractError::Retry(())),
         };
 
-        let model_layout = if device.limits().max_storage_buffers_per_shader_stage == 0 {
-            cpu_model.map(|v| v.layout())
-        } else {
-            gpu_model.map(|v| &v.layout)
-        };
+        let model_layout =
+            if let Some(ShaderConstant::Bool(true)) = constants.get(StorageBufferEnabled::NAME) {
+                gpu_model.map(|v| &v.layout)
+            } else {
+                cpu_model.map(|v| v.layout())
+            };
 
         let Some(model_layout) = model_layout else {
             return Err(crate::resources::ExtractError::Retry(()));
@@ -248,6 +262,7 @@ pub enum DrawMode {
     IndexedDirect {
         bind_group: usize,
         instances: Range<u32>,
+        format: IndexFormat,
     },
 }
 
@@ -322,6 +337,11 @@ impl<V: View, P: RenderPhase<View = V>> ViewDrawSet<V, P> {
         const INSTANCES: u32 = 1;
         const MATERIAL: u32 = 2;
 
+        let pipeline = world
+            .resource::<PipelineCache>()
+            .get_render_pipeline(&call.pipeline)
+            .ok_or(DrawError::Skip)?;
+
         let views = world.resource::<ViewBuffer<V>>();
         let meshes = world.resource::<MeshAllocator>();
         let vertex = meshes.vertex_slice(&call.mesh).ok_or(DrawError::Skip)?;
@@ -331,6 +351,7 @@ impl<V: View, P: RenderPhase<View = V>> ViewDrawSet<V, P> {
             .get(&call.material.into())
             .ok_or(DrawError::Skip)?;
 
+        state.set_pipeline(pipeline);
         state.set_vertex_buffer(0, vertex.buffer.slice(..));
 
         match &call.mode {
@@ -351,6 +372,7 @@ impl<V: View, P: RenderPhase<View = V>> ViewDrawSet<V, P> {
             DrawMode::IndexedDirect {
                 bind_group,
                 instances,
+                format,
             } => {
                 let index = meshes.index_slice(&call.mesh).ok_or(DrawError::Skip)?;
                 let models = world.resource::<UniformDataBuffer<D::Model>>();
@@ -359,6 +381,7 @@ impl<V: View, P: RenderPhase<View = V>> ViewDrawSet<V, P> {
                     ..call.sub_mesh.start_index + call.sub_mesh.index_count + index.range.start;
                 let base_vertex = call.sub_mesh.start_vertex as i32;
 
+                state.set_index_buffer(index.buffer.slice(..), *format);
                 state.set_bind_group(VIEW, views.bind_group(), &[view.offset]);
                 state.set_bind_group(INSTANCES, bind_group, &[]);
                 state.set_bind_group(MATERIAL, &material, &[]);
@@ -374,16 +397,24 @@ impl<V: View, P: RenderPhase<View = V>> ViewDrawSet<V, P> {
                 Ok(state.draw_indirect(draw_args.non_indexed().as_ref(), *offset))
             }
             DrawMode::IndexedIndirect { offset, format } => {
-                let indices = meshes.index_slice(&call.mesh).ok_or(DrawError::Skip)?;
+                let index = meshes.index_slice(&call.mesh).ok_or(DrawError::Skip)?;
                 let instances = world.resource::<StorageDataBuffer<D::Model>>();
                 let draw_args = world.resource::<DrawArgsBuffer>();
 
-                state.set_index_buffer(indices.buffer.slice(..), *format);
+                state.set_index_buffer(index.buffer.slice(..), *format);
                 state.set_bind_group(VIEW, views.bind_group(), &[view.offset]);
                 state.set_bind_group(INSTANCES, instances.bind_group(), &[]);
                 state.set_bind_group(MATERIAL, &material, &[]);
                 Ok(state.draw_indexed_indirect(draw_args.indexed().as_ref(), *offset))
             }
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    pub fn clear_set(set: &mut Self) {
+        set.clear();
     }
 }

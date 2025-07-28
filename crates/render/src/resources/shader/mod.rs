@@ -1,7 +1,7 @@
 use super::RenderAsset;
 use crate::device::RenderDevice;
 use asset::{
-    Asset, AssetProcessor, AssetSettings, Settings,
+    Asset, AssetId, AssetProcessor, AssetSettings, Settings,
     ext::PathExt,
     importer::{AssetImporter, ImportContext},
     io::{AssetPath, AsyncIoError, AsyncReader},
@@ -10,9 +10,11 @@ use ecs::{
     Resource,
     system::{ArgItem, unlifetime::Read},
 };
+use processor::{ShaderConstant, ShaderConstants, ShaderProcessor};
 use smol::io::AsyncReadExt;
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
-use wgsl_macro::{ShaderConstant, ShaderConstants, ShaderProcessor};
+
+pub mod processor;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ShaderStage {
@@ -52,6 +54,7 @@ pub trait GlobalShaderConstant: 'static {
 #[derive(Resource, Default)]
 pub struct GlobalShaderConstants {
     constants: ShaderConstants,
+    local: HashMap<AssetId<Shader>, ShaderConstants>,
     registry: HashMap<&'static str, fn(&RenderDevice) -> ShaderConstant>,
 }
 
@@ -59,6 +62,7 @@ impl GlobalShaderConstants {
     pub fn new() -> Self {
         Self {
             constants: ShaderConstants::new(),
+            local: HashMap::new(),
             registry: HashMap::new(),
         }
     }
@@ -69,10 +73,19 @@ impl GlobalShaderConstants {
             .or_insert(|device| C::get(device));
     }
 
+    pub fn local(&self, shader: &AssetId<Shader>) -> Option<&ShaderConstants> {
+        self.local.get(shader)
+    }
+
+    pub fn add_local(&mut self, shader: AssetId<Shader>, constants: ShaderConstants) {
+        self.local.insert(shader, constants);
+    }
+
     pub(crate) fn init(constants: &mut Self, device: &RenderDevice) {
         let GlobalShaderConstants {
             constants,
             registry,
+            ..
         } = constants;
 
         for (name, f) in registry.drain() {
@@ -125,6 +138,7 @@ impl GpuShader {
         device: &RenderDevice,
         source: Shader,
         globals: &ShaderConstants,
+        local: Option<&ShaderConstants>,
     ) -> Result<Self, ShaderError> {
         let module = match source {
             Shader::Spirv { data } => device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -153,6 +167,12 @@ impl GpuShader {
 
                 for (name, constant) in globals.iter() {
                     if !constants.contains(name) {
+                        constants.set(name.clone(), *constant);
+                    }
+                }
+
+                if let Some(local) = local {
+                    for (name, constant) in local.iter() {
                         constants.set(name.clone(), *constant);
                     }
                 }
@@ -210,10 +230,12 @@ impl RenderAsset for GpuShader {
     type Arg = (Read<RenderDevice>, Read<GlobalShaderConstants>);
 
     fn extract(
+        id: AssetId<Self::Source>,
         asset: Self::Source,
         (device, global_constants): &mut ArgItem<Self::Arg>,
     ) -> Result<Self, super::ExtractError<Self::Source>> {
-        GpuShader::new(device, asset, &global_constants)
+        let local = global_constants.local(&id);
+        GpuShader::new(device, asset, &global_constants, local)
             .map_err(|e| super::ExtractError::from_error(e))
     }
 
@@ -321,11 +343,11 @@ impl AssetImporter for Shader {
                     .await
                     .map_err(ShaderImportError::from)?;
 
-                let module = wgsl::parse_str(&data).map_err(ShaderImportError::from)?;
-                let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
-                validator
-                    .validate(&module)
-                    .map_err(|e| ShaderImportError::Parse(e.to_string()))?;
+                // let module = wgsl::parse_str(&data).map_err(ShaderImportError::from)?;
+                // let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
+                // validator
+                //     .validate(&module)
+                //     .map_err(|e| ShaderImportError::Parse(e.to_string()))?;
 
                 let data = Cow::Owned(data);
 

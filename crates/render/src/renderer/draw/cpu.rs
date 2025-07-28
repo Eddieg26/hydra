@@ -10,6 +10,9 @@ use ecs::{Resource, system::unlifetime::Read};
 use std::{collections::HashMap, num::NonZero, ops::Range};
 use wgpu::ShaderStages;
 
+pub const MAX_OBJECT_COUNT: u32 = 512;
+
+#[derive(Debug)]
 pub struct BatchIndex {
     pub bind_group: usize,
     pub instances: Range<u32>,
@@ -25,12 +28,18 @@ pub struct UniformDataBuffer<T: super::ShaderData> {
 }
 
 impl<T: super::ShaderData> UniformDataBuffer<T> {
-    fn new(device: &RenderDevice) -> Self {
+    pub fn get_object_count(device: &RenderDevice) -> u32 {
         let item_size = T::min_size().get() as u32;
 
-        let batch_size = (device.limits().max_uniform_buffer_binding_size / item_size) * item_size;
+        (device.limits().max_uniform_buffer_binding_size / item_size).min(MAX_OBJECT_COUNT)
+    }
 
-        let buffer = UniformBufferArray::with_alignment(device, item_size, None, None);
+    pub fn new(device: &RenderDevice) -> Self {
+        let item_size = T::min_size().get() as u32;
+
+        let batch_size = Self::get_object_count(device) * item_size;
+
+        let buffer = UniformBufferArray::with_alignment(device, batch_size, None, None);
 
         let layout = BindGroupLayoutBuilder::new()
             .with_label(ecs::ext::short_type_name::<Self>())
@@ -43,10 +52,14 @@ impl<T: super::ShaderData> UniformDataBuffer<T> {
             )
             .build(device);
 
+        let bind_group = BindGroupBuilder::new(&layout)
+            .with_uniform(0, buffer.as_ref(), 0, NonZero::new(batch_size as u64))
+            .build(device);
+
         Self {
             buffer,
             layout,
-            bind_groups: Vec::new(),
+            bind_groups: vec![bind_group],
             item_size,
             batch_size,
         }
@@ -71,6 +84,20 @@ impl<T: super::ShaderData> UniformDataBuffer<T> {
         }
 
         batches
+    }
+
+    #[inline]
+    fn create_batch(&mut self, offset: u32, batch_count: u32, batch: &[T]) -> BatchIndex {
+        let bind_group = self.buffer.data().len() / self.batch_size as usize;
+        let instances = offset..offset + batch_count;
+        for value in batch {
+            self.buffer.push(value);
+        }
+
+        BatchIndex {
+            bind_group,
+            instances,
+        }
     }
 
     pub fn update(&mut self, device: &RenderDevice) {
@@ -113,31 +140,13 @@ impl<T: super::ShaderData> UniformDataBuffer<T> {
     pub fn clear(&mut self) {
         self.buffer.clear();
     }
-    
-    pub fn reset(&mut self) {
-        self.buffer.reset();
-    }
-
-    #[inline]
-    fn create_batch(&mut self, offset: u32, batch_count: u32, batch: &[T]) -> BatchIndex {
-        let bind_group = self.buffer.data().len() / self.batch_size as usize;
-        let instances = offset..offset + batch_count;
-        for value in batch {
-            self.buffer.push(value);
-        }
-
-        BatchIndex {
-            bind_group,
-            instances,
-        }
-    }
 
     pub(crate) fn update_buffer(device: &RenderDevice, data: &mut Self) {
         data.update(device);
     }
 
-    pub(crate) fn reset_buffer(data: &mut Self) {
-        data.reset();
+    pub(crate) fn clear_buffer(data: &mut Self) {
+        data.clear();
     }
 
     pub(crate) fn queue<D, P>(
@@ -185,24 +194,23 @@ impl<T: super::ShaderData> UniformDataBuffer<T> {
                 let mut batches = instances.push(&data);
 
                 match mesh.format() {
-                    MeshFormat::Indexed { .. } => {
-                        view_draw_set
-                            .0
-                            .entry(*view)
-                            .or_default()
-                            .extend(batches.drain(..).map(|b| DrawCall {
-                                material: key.material,
-                                mesh: key.mesh,
-                                sub_mesh,
-                                mode: DrawMode::IndexedDirect {
-                                    bind_group: b.bind_group,
-                                    instances: b.instances,
-                                },
-                                pipeline: **pipeline,
-                                item: P::Item::default(),
-                                function: ViewDrawSet::<D::View, P>::draw::<D>,
-                            }))
-                    }
+                    MeshFormat::Indexed { format, .. } => view_draw_set
+                        .0
+                        .entry(*view)
+                        .or_default()
+                        .extend(batches.drain(..).map(|b| DrawCall {
+                            material: key.material,
+                            mesh: key.mesh,
+                            sub_mesh,
+                            mode: DrawMode::IndexedDirect {
+                                bind_group: b.bind_group,
+                                instances: b.instances,
+                                format,
+                            },
+                            pipeline: **pipeline,
+                            item: P::Item::default(),
+                            function: ViewDrawSet::<D::View, P>::draw::<D>,
+                        })),
                     MeshFormat::NonIndexed => {
                         view_draw_set
                             .0

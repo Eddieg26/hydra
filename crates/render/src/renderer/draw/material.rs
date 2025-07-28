@@ -114,6 +114,7 @@ impl<M: Material> RenderAsset for MaterialInstance<M> {
     );
 
     fn extract(
+        _: AssetId<Self::Source>,
         asset: Self::Source,
         (device, layout, arg, commands): &mut ecs::ArgItem<Self::Arg>,
     ) -> Result<Self, ExtractError<Self::Source>> {

@@ -1,5 +1,5 @@
 use crate::{RenderAsset, device::RenderDevice, surface::RenderSurface};
-use asset::Asset;
+use asset::{Asset, AssetId};
 use ecs::unlifetime::Read;
 use std::sync::Arc;
 
@@ -68,6 +68,7 @@ impl RenderAsset for RenderTarget {
     type Arg = (Read<RenderDevice>, Read<RenderSurface>);
 
     fn extract(
+        _: AssetId<Self::Source>,
         texture: Self::Source,
         (device, surface): &mut ecs::ArgItem<Self::Arg>,
     ) -> Result<Self, crate::ExtractError<Self::Source>> {

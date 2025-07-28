@@ -160,10 +160,7 @@ impl<T: ShaderType> StorageBufferArray<T> {
         self.is_dirty = false;
 
         let size = self.data.as_ref().len() as u64;
-        if size == 0 {
-            self.buffer.resize(device, self.alignment as u64);
-            Some(size)
-        } else if size != self.buffer.size() {
+        if size > self.buffer.size() {
             let size = size.max(self.alignment as u64);
             self.buffer.resize_with_data(device, self.data.as_ref());
             Some(size)

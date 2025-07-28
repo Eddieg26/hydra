@@ -1,3 +1,5 @@
+#import embedded://shaders/common.wgsl
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -25,7 +27,8 @@ struct Object {
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
-@group(1) @binding(0) var<storage, read> objects: array<Object>;
+@group(1) @binding(0) var<uniform> objects: array<Object, BATCH_SIZE>; // Adjust size as needed
+// @group(1) @binding(0) var<storage, read> objects: array<Object>;
 
 @vertex
 fn main(input: VertexInput) -> VertexOutput {

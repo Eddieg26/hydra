@@ -1,4 +1,8 @@
-use ecs::{Component, Entity, Query, Resource, unlifetime::Read};
+use ecs::{
+    Component, Entity, Resource,
+    system::Main,
+    unlifetime::{Read, SQuery},
+};
 use math::{Mat4, Size};
 use std::collections::HashMap;
 use transform::{GlobalTransform, LocalTransform};
@@ -39,7 +43,7 @@ impl<V: View> ViewSet<V> {
     pub(crate) fn extract(
         views: &mut Self,
         surface: &RenderSurface,
-        query: Query<(Entity, &GlobalTransform, &V::Transform, &V)>,
+        query: Main<SQuery<(Entity, &GlobalTransform, &V::Transform, &V)>>,
     ) {
         let screen_size = Size::new(surface.width() as f32, surface.height() as f32);
         let mut extracted = HashMap::new();
@@ -79,6 +83,10 @@ impl<V: View> ViewBuffer<V> {
         &self.bind_group
     }
 
+    pub fn reset(&mut self) {
+        self.buffer.reset();
+    }
+
     pub(crate) fn queue(views: &mut Self, extracted: &mut ViewSet<V>, device: &RenderDevice) {
         for view in extracted.0.values_mut() {
             view.offset = views.buffer.push(&view.data);
@@ -91,6 +99,10 @@ impl<V: View> ViewBuffer<V> {
 
             views.bind_group = bind_group
         }
+    }
+
+    pub(crate) fn reset_buffer(views: &mut Self) {
+        views.reset();
     }
 }
 

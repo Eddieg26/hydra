@@ -1,6 +1,6 @@
 use super::{Label, RenderAsset};
 use crate::device::RenderDevice;
-use asset::{ext::PathExt, importer::AssetImporter, Asset, Settings};
+use asset::{ext::PathExt, importer::AssetImporter, Asset, AssetId, Settings};
 use ecs::system::unlifetime::Read;
 use smol::io::AsyncAsSync;
 use std::{ops::Range, sync::Arc};
@@ -375,6 +375,7 @@ impl RenderAsset for GpuTexture {
     type Arg = Read<RenderDevice>;
 
     fn extract(
+        _: AssetId<Self::Source>,
         texture: Self::Source,
         device: &mut ecs::system::ArgItem<Self::Arg>,
     ) -> Result<Self, super::ExtractError<Self::Source>> {

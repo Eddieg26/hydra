@@ -634,23 +634,31 @@
 
 use asset::{Asset, AssetId, embed_asset, io::EmbeddedFs, plugin::AssetAppExt};
 use ecs::{App, Component, Init, Spawner};
-use math::Mat4;
+use math::{Mat4, Vec3};
 use render::{
-    AsBinding, Camera, Color, Drawable, Material, Mesh, MeshSettings, Projection, RenderPhase,
-    Renderer, Shader, ShaderSettings, ShaderType, Texture, View,
-    plugin::{RenderAppExt, ViewPlugin},
+    AsBinding, Camera, Color, Drawable, Material, Mesh, MeshFilter, MeshSettings, Projection,
+    RenderPhase, Renderer, Shader, ShaderSettings, ShaderType, Texture, View, plugin::RenderAppExt,
     wgpu::VertexFormat,
 };
 use transform::{GlobalTransform, Transform};
 
+const COMMON_SHADER: AssetId<Shader> = AssetId::from_u128(0x3e7c2a1b4f5e4c2e9d1a8b7e6c5d4f3a);
 const DRAW_MESH_SHADER: AssetId<Shader> = AssetId::from_u128(0xabcdef0123456789);
 const UNLIT_COLOR_SHADER: AssetId<Shader> =
     AssetId::from_u128(0x7fa18a3696e84df5848822a3b417e3f3u128);
 const UNLIT_TEX_SHADER: AssetId<Shader> = AssetId::from_u128(0x9e08450b1c394c8c88de79b6aa2c2589);
 const CUBE: AssetId<Mesh> = AssetId::from_u128(0x123456789abcdef0);
+const UNLIT_COLOR_MAT: AssetId<UnlitColor> = AssetId::from_u128(0x9876543210fedcba);
 
 fn main() {
     let embedded = EmbeddedFs::new();
+    embed_asset!(
+        embedded,
+        COMMON_SHADER,
+        "shaders/common.wgsl",
+        ShaderSettings::default()
+    );
+
     embed_asset!(
         embedded,
         DRAW_MESH_SHADER,
@@ -675,21 +683,28 @@ fn main() {
     embed_asset!(embedded, CUBE, "meshes/cube.obj", MeshSettings::default());
 
     App::new()
-        .add_plugins(ViewPlugin::<View3d>::new())
+        .add_drawable::<DrawMesh<UnlitColor>>()
         .add_source("embedded", embedded)
         .add_renderer::<Renderer3d>()
         .add_systems(Init, |mut spawner: Spawner| {
             spawner
                 .spawn()
-                .with_component(Camera {
-                    clear_color: Some(Color::blue()),
-                    ..Default::default()
-                })
+                .with_component(Camera::default())
                 .with_component(View3d::default())
-                .with_component(Transform::default())
+                .with_component(Transform::default().with_translation(Vec3::NEG_Z * 5.0))
                 .with_component(GlobalTransform::default())
                 .finish();
+
+            spawner
+                .spawn()
+                .with_component(Transform::default())
+                .with_component(GlobalTransform::default())
+                .with_component(MeshFilter::from(CUBE))
+                .with_component(DrawMesh::from(UNLIT_COLOR_MAT))
+                .finish();
         })
+        .load_asset::<Mesh>(CUBE)
+        .add_asset(UNLIT_COLOR_MAT, UnlitColor::from(Color::white()))
         .run();
 }
 
@@ -702,8 +717,8 @@ impl Default for View3d {
     fn default() -> Self {
         Self {
             projection: Projection::Perspective {
-                fov: 60.0,
-                near: 1.0,
+                fov: 60.0f32.to_radians(),
+                near: 0.1,
                 far: 1000.0,
             },
         }
@@ -760,6 +775,12 @@ pub struct Model3d {
 pub struct DrawMesh<M: Material> {
     material: AssetId<M>,
 }
+impl<M: Material> From<AssetId<M>> for DrawMesh<M> {
+    fn from(material: AssetId<M>) -> Self {
+        Self { material }
+    }
+}
+
 impl<M: Material> Clone for DrawMesh<M> {
     fn clone(&self) -> Self {
         Self {
@@ -832,6 +853,12 @@ impl Material for UnlitColor {
     }
 }
 
+impl From<Color> for UnlitColor {
+    fn from(color: Color) -> Self {
+        Self { color }
+    }
+}
+
 #[derive(Clone, Asset, AsBinding)]
 pub struct UnlitTexture {
     #[texture(0)]
@@ -852,7 +879,7 @@ pub struct Renderer3d;
 impl Renderer for Renderer3d {
     const NAME: render::Name = "Renderer3d";
 
-    const CLEAR_MODE: render::ClearMode = render::ClearMode::Clear(Color::red());
+    const CLEAR_MODE: render::ClearMode = render::ClearMode::Clear(Color::green());
 
     type Data = ();
 

@@ -233,6 +233,7 @@ impl RenderAsset for SubMesh {
     type Arg = ();
 
     fn extract(
+        _: AssetId<Self::Source>,
         asset: Self::Source,
         _arg: &mut ArgItem<Self::Arg>,
     ) -> Result<Self, ExtractError<Self::Source>> {
@@ -854,6 +855,7 @@ impl RenderAsset for RenderMesh {
     type Arg = ();
 
     fn extract(
+        _: AssetId<Self::Source>,
         mut asset: Self::Source,
         _: &mut ArgItem<Self::Arg>,
     ) -> Result<Self, ExtractError<Self::Source>> {

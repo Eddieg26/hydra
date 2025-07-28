@@ -41,6 +41,7 @@ pub trait RenderAsset: Sized + Send + Sync + 'static {
     type Arg: SystemArg;
 
     fn extract(
+        id: AssetId<Self::Source>,
         asset: Self::Source,
         arg: &mut ArgItem<Self::Arg>,
     ) -> Result<Self, ExtractError<Self::Source>>;
@@ -232,7 +233,7 @@ impl AssetExtractors {
         let extract = std::mem::take(&mut extract_info.extracted);
 
         for (id, asset) in extract {
-            match R::extract(asset, &mut arg) {
+            match R::extract(id, asset, &mut arg) {
                 Ok(render_asset) => {
                     assets.add(id.into(), render_asset);
                 }

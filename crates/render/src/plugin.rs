@@ -1,9 +1,11 @@
 use crate::{
-    CameraRenderTargets, CameraSubGraph, ExtractError, GlobalShaderConstant, GlobalShaderConstants,
-    GpuShader, GpuTexture, ObjImporter, ProcessAssets, QueueDraws, QueueViews, RenderDevice,
-    RenderGraphBuilder, RenderMesh, RenderTarget, ShaderData, SubMesh, Texture2dImporter,
+    Camera, CameraRenderTargets, CameraSubGraph, ExtractError, GlobalShaderConstant,
+    GlobalShaderConstants, GpuShader, GpuTexture, ObjImporter, ProcessAssets, QueueDraws,
+    QueueViews, RenderDevice, RenderGraphBuilder, RenderMesh, RenderPhase, RenderTarget,
+    ShaderData, SubMesh, Texture2dImporter,
     allocator::MeshAllocatorPlugin,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
+    constants::StorageBufferEnabled,
     cpu::UniformDataBuffer,
     draw::{
         material::{Material, MaterialLayout},
@@ -13,32 +15,23 @@ use crate::{
     gpu::{FrustumBuffer, GpuDrawResources, StorageDataBuffer},
     material::MaterialInstance,
     pass::{DrawPass, Renderer},
+    processor::{ShaderConstant, ShaderConstants},
     renderer::{GraphPass, RenderGraph, SubGraph},
     resources::{
         AssetExtractors, ExtractInfo, Fallbacks, Mesh, PipelineCache, RenderAsset, RenderAssets,
         RenderResource, ResourceExtractors, Shader,
     },
+    shader,
     surface::{RenderSurface, RenderSurfaceTexture},
     view::{ViewBuffer, ViewSet},
 };
 use asset::plugin::{AssetAppExt, AssetPlugin};
-use ecs::{AppBuilder, Extract, Init, Plugin, Run};
+use ecs::{
+    AppBuilder, Extract, Init, IntoSystemConfig, Plugin, Run, app::sync::SyncComponentPlugin,
+    system::Exists,
+};
 use transform::{GlobalTransform, plugin::TransformPlugin};
 use window::{Window, plugin::WindowPlugin};
-
-const MINIMUM_STORAGE_BUFFER_SIZE: u32 = 128 * 1024 * 1024;
-
-pub struct StorageBufferEnabled;
-impl GlobalShaderConstant for StorageBufferEnabled {
-    const NAME: &'static str = "STORAGE_BUFFER_ENABLED";
-
-    fn get(device: &RenderDevice) -> wgsl_macro::ShaderConstant {
-        let limits = device.limits();
-        let enabled = limits.max_storage_buffers_per_shader_stage > 0
-            && limits.max_storage_buffer_binding_size >= MINIMUM_STORAGE_BUFFER_SIZE;
-        wgsl_macro::ShaderConstant::Bool(enabled)
-    }
-}
 
 pub struct RenderPlugin;
 
@@ -81,7 +74,8 @@ impl Plugin for RenderPlugin {
             .add_importer::<ObjImporter>()
             .add_importer::<Texture2dImporter>()
             .add_loader::<SubMesh>()
-            .set_default_processor::<Mesh>();
+            .set_default_processor::<Mesh>()
+            .set_default_processor::<Shader>();
     }
 
     fn build(&mut self, app: &mut AppBuilder) {
@@ -96,10 +90,7 @@ impl Plugin for RenderPlugin {
         };
 
         let (surface, device) = smol::block_on(task);
-
-        let limits = device.limits();
-        let enabled = limits.max_storage_buffers_per_shader_stage > 0
-            && limits.max_storage_buffer_binding_size >= MINIMUM_STORAGE_BUFFER_SIZE;
+        let enabled = StorageBufferEnabled::get(&device);
 
         app.sub_app_mut(RenderApp)
             .add_resource(surface)
@@ -107,7 +98,7 @@ impl Plugin for RenderPlugin {
             .resource_mut::<GlobalShaderConstants>()
             .set(
                 StorageBufferEnabled::NAME,
-                wgsl_macro::ShaderConstant::Bool(enabled),
+                shader::processor::ShaderConstant::Bool(false),
             );
     }
 
@@ -135,7 +126,7 @@ impl Plugin for RenderPlugin {
 }
 
 pub trait RenderAppExt {
-    fn register_draw<D: Drawable>(&mut self) -> &mut Self;
+    fn add_drawable<D: Drawable>(&mut self) -> &mut Self;
     fn add_shader_constant<C: GlobalShaderConstant>(&mut self) -> &mut Self;
     fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self;
     fn add_sub_graph<S: SubGraph>(&mut self) -> &mut Self;
@@ -146,7 +137,7 @@ pub trait RenderAppExt {
 }
 
 impl RenderAppExt for AppBuilder {
-    fn register_draw<D: Drawable>(&mut self) -> &mut Self {
+    fn add_drawable<D: Drawable>(&mut self) -> &mut Self {
         self.add_plugins(DrawPlugin::<D>::new())
     }
 
@@ -329,11 +320,14 @@ impl RenderAppExt for AppBuilder {
 pub struct CameraPlugin;
 impl Plugin for CameraPlugin {
     fn setup(&mut self, app: &mut AppBuilder) {
-        app.add_plugins(RenderPlugin)
-            .sub_app_mut(RenderApp)
-            .add_resource(CameraRenderTargets::default())
-            .add_systems(PreRender, CameraRenderTargets::queue)
-            .add_systems(PostRender, CameraRenderTargets::cleanup);
+        app.add_plugins((
+            SyncComponentPlugin::<Camera, RenderApp>::new(),
+            RenderPlugin,
+        ))
+        .sub_app_mut(RenderApp)
+        .add_resource(CameraRenderTargets::default())
+        .add_systems(PreRender, CameraRenderTargets::queue)
+        .add_systems(PostRender, CameraRenderTargets::cleanup);
     }
 }
 
@@ -351,7 +345,8 @@ impl<V: View> Plugin for ViewPlugin<V> {
             .sub_app_mut(RenderApp)
             .add_resource(ViewSet::<V>::new())
             .add_systems(Extract, ViewSet::<V>::extract)
-            .add_systems(Queue, ViewBuffer::<V>::queue);
+            .add_systems(Queue, ViewBuffer::<V>::queue)
+            .add_systems(PostRender, ViewBuffer::<V>::reset_buffer);
     }
 
     fn finish(&mut self, _: &mut AppBuilder) {
@@ -390,7 +385,22 @@ impl<T: ShaderData> Plugin for ModelPlugin<T> {
         app.add_render_resource::<UniformDataBuffer<T>>()
             .sub_app_mut(RenderApp)
             .add_systems(PreRender, UniformDataBuffer::<T>::update_buffer)
-            .add_systems(PostRender, UniformDataBuffer::<T>::reset_buffer);
+            .add_systems(PostRender, UniformDataBuffer::<T>::clear_buffer);
+    }
+}
+
+pub struct RenderPhasePlugin<P: RenderPhase>(std::marker::PhantomData<P>);
+impl<P: RenderPhase> RenderPhasePlugin<P> {
+    pub fn new() -> Self {
+        Self(Default::default())
+    }
+}
+impl<P: RenderPhase> Plugin for RenderPhasePlugin<P> {
+    fn setup(&mut self, app: &mut AppBuilder) {
+        app.add_plugins(ViewPlugin::<P::View>::new())
+            .add_resource(ViewDrawSet::<P::View, P>::new())
+            .sub_app_mut(RenderApp)
+            .add_systems(PostRender, ViewDrawSet::<P::View, P>::clear_set);
     }
 }
 
@@ -402,7 +412,8 @@ impl<M: Material> MaterialPlugin<M> {
 }
 impl<M: Material> Plugin for MaterialPlugin<M> {
     fn setup(&mut self, app: &mut ecs::AppBuilder) {
-        app.register_asset::<M>()
+        app.add_plugins((RenderPlugin, RenderPhasePlugin::<M::Phase>::new()))
+            .register_asset::<M>()
             .register_resource::<MaterialLayout<M>>()
             .add_render_asset::<MaterialInstance<M>>();
     }
@@ -416,15 +427,15 @@ impl<D: Drawable> DrawPlugin<D> {
 }
 impl<D: Drawable> Plugin for DrawPlugin<D> {
     fn setup(&mut self, app: &mut ecs::AppBuilder) {
-        app.scoped_sub_app(RenderApp, |app| {
-            app.add_plugins((
-                ViewPlugin::<D::View>::new(),
-                ModelPlugin::<D::Model>::new(),
-                MaterialPlugin::<D::Material>::new(),
-            ))
-            .add_resource(DrawSet::<D>::new())
-            .add_resource(ViewDrawSet::<D::View, <D::Material as Material>::Phase>::new())
-            .add_systems(Extract, DrawSet::<D>::extract);
+        app.add_plugins((
+            ModelPlugin::<D::Model>::new(),
+            MaterialPlugin::<D::Material>::new(),
+        ))
+        .scoped_sub_app(RenderApp, |app| {
+            app.add_resource(DrawSet::<D>::new())
+                .add_resource(ViewDrawSet::<D::View, <D::Material as Material>::Phase>::new())
+                .add_systems(Extract, DrawSet::<D>::extract)
+                .add_systems(PostRender, DrawSet::<D>::clear_set);
         })
         .register::<D>()
         .add_render_resource::<DrawPipeline<D>>()
@@ -451,9 +462,18 @@ impl<D: Drawable> Plugin for DrawPlugin<D> {
         //     .add_systems(PreRender, UniformDataBuffer::<D::Model>::update_buffer);
         // }
 
+        let batch_size =
+            UniformDataBuffer::<D::Model>::get_object_count(app.resource::<RenderDevice>());
+        let mut constants = ShaderConstants::new();
+        constants.set("BATCH_SIZE", ShaderConstant::U32(batch_size));
+
+        app.resource_mut::<GlobalShaderConstants>()
+            .add_local(D::shader().into(), constants);
+
         app.add_systems(
             QueueDraws,
-            UniformDataBuffer::<D::Model>::queue::<D, <D::Material as Material>::Phase>,
+            UniformDataBuffer::<D::Model>::queue::<D, <D::Material as Material>::Phase>
+                .when::<Exists<DrawPipeline<D>>>(),
         );
     }
 }

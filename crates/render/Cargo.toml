@@ -19,7 +19,7 @@ thiserror = { workspace = true }
 downcast-rs = { workspace = true }
 wgpu = { workspace = true, features = ["spirv", "glsl", "serde"] }
 encase = { version = "0.10.0", features = ["glam"] }
-wgsl-macro = { version = "0.3.2", features = ["serde"] }
+# wgsl-macro = { version = "0.3.2", features = ["serde"] }
 tobj = "4.0.3"
 waker-fn = "1.2.0"
 image = "0.25.6"
