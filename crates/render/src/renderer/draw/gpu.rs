@@ -448,6 +448,7 @@ impl<T: ShaderData> GraphPass for CullRenderEntities<T> {
         builder: &mut crate::PassBuilder,
     ) -> impl Fn(&mut crate::RenderContext) -> Result<(), crate::RenderGraphError> + Send + Sync + 'static
     {
+        builder.name = ecs::ext::short_type_name::<Self>();
         builder.has_side_effect();
         |ctx| {
             let frustums = ctx.world().resource::<FrustumBuffer>();

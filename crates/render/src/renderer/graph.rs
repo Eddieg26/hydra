@@ -213,7 +213,7 @@ impl RenderGraphBuilder {
 
         let id = self.passes.len();
         let pass = PassBuilder::new(id, P::NAME, self).build(pass);
-        self.passes.insert(P::NAME, pass);
+        self.passes.insert(pass.name, pass);
 
         id
     }
@@ -393,7 +393,7 @@ impl RenderGraphBuilder {
 
 pub struct PassBuilder<'a> {
     id: NodeId,
-    name: Name,
+    pub name: Name,
     reads: HashSet<NodeId>,
     writes: HashSet<NodeId>,
     has_side_effect: bool,

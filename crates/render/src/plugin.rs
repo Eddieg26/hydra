@@ -345,16 +345,16 @@ impl<V: View> Plugin for ViewPlugin<V> {
             .add_systems(PostRender, ViewBuffer::<V>::reset_buffer);
     }
 
-    fn finish(&mut self, _: &mut AppBuilder) {
-        // if let Some(wgsl_macro::ShaderConstant::Bool(true)) = app
-        //     .sub_app_mut(RenderApp)
-        //     .resource::<GlobalShaderConstants>()
-        //     .get(StorageBufferEnabled::NAME)
-        // {
-        //     app.add_render_resource::<FrustumBuffer>()
-        //         .sub_app_mut(RenderApp)
-        //         .add_systems(Extract, FrustumBuffer::extract::<V>);
-        // }
+    fn finish(&mut self, app: &mut AppBuilder) {
+        if let Some(ShaderConstant::Bool(true)) = app
+            .sub_app_mut(RenderApp)
+            .resource::<GlobalShaderConstants>()
+            .get(StorageBufferEnabled::NAME)
+        {
+            app.add_render_resource::<FrustumBuffer>()
+                .sub_app_mut(RenderApp)
+                .add_systems(Extract, FrustumBuffer::extract::<V>);
+        }
     }
 }
 
@@ -368,20 +368,18 @@ impl<T: ShaderData> Plugin for ModelPlugin<T> {
     fn setup(&mut self, _: &mut ecs::AppBuilder) {}
 
     fn finish(&mut self, app: &mut AppBuilder) {
-        // if let Some(wgsl_macro::ShaderConstant::Bool(true)) = app
-        //     .sub_app_mut(RenderApp)
-        //     .resource::<GlobalShaderConstants>()
-        //     .get(StorageBufferEnabled::NAME)
-        // {
-        //     app.add_render_resource::<GpuDrawResources<T>>();
-        // } else {
-        //     app.add_render_resource::<UniformDataBuffer<T>>();
-        // }
-
-        app.add_render_resource::<UniformDataBuffer<T>>()
+        if let Some(ShaderConstant::Bool(true)) = app
             .sub_app_mut(RenderApp)
-            .add_systems(PreRender, UniformDataBuffer::<T>::update_buffer)
-            .add_systems(PostRender, UniformDataBuffer::<T>::clear_buffer);
+            .resource::<GlobalShaderConstants>()
+            .get(StorageBufferEnabled::NAME)
+        {
+            app.add_render_resource::<GpuDrawResources<T>>();
+        } else {
+            app.add_render_resource::<UniformDataBuffer<T>>()
+                .sub_app_mut(RenderApp)
+                .add_systems(PreRender, UniformDataBuffer::<T>::update_buffer)
+                .add_systems(PostRender, UniformDataBuffer::<T>::clear_buffer);
+        }
     }
 }
 
@@ -442,34 +440,29 @@ impl<D: Drawable> Plugin for DrawPlugin<D> {
     fn finish(&mut self, app: &mut AppBuilder) {
         let app = app.sub_app_mut(RenderApp);
 
-        // if let Some(wgsl_macro::ShaderConstant::Bool(true)) = app
-        //     .resource::<GlobalShaderConstants>()
-        //     .get(StorageBufferEnabled::NAME)
-        // {
-        //     app.add_systems(
-        //         QueueDraws,
-        //         StorageDataBuffer::queue::<D, <D::Material as Material>::Phase>,
-        //     );
-        // } else {
-        //     app.add_systems(
-        //         QueueDraws,
-        //         UniformDataBuffer::<D::Model>::queue::<D, <D::Material as Material>::Phase>,
-        //     )
-        //     .add_systems(PreRender, UniformDataBuffer::<D::Model>::update_buffer);
-        // }
+        if let Some(ShaderConstant::Bool(true)) = app
+            .resource::<GlobalShaderConstants>()
+            .get(StorageBufferEnabled::NAME)
+        {
+            app.add_systems(
+                QueueDraws,
+                StorageDataBuffer::queue::<D, <D::Material as Material>::Phase>
+                    .when::<Exists<DrawPipeline<D>>>(),
+            );
+        } else {
+            let batch_size =
+                UniformDataBuffer::<D::Model>::get_batch_size(app.resource::<RenderDevice>());
+            let mut constants = ShaderConstants::new();
+            constants.set("BATCH_SIZE", ShaderConstant::U32(batch_size));
 
-        let batch_size =
-            UniformDataBuffer::<D::Model>::get_batch_size(app.resource::<RenderDevice>());
-        let mut constants = ShaderConstants::new();
-        constants.set("BATCH_SIZE", ShaderConstant::U32(batch_size));
+            app.resource_mut::<GlobalShaderConstants>()
+                .add_local(D::shader().into(), constants);
 
-        app.resource_mut::<GlobalShaderConstants>()
-            .add_local(D::shader().into(), constants);
-
-        app.add_systems(
-            QueueDraws,
-            UniformDataBuffer::<D::Model>::queue::<D, <D::Material as Material>::Phase>
-                .when::<Exists<DrawPipeline<D>>>(),
-        );
+            app.add_systems(
+                QueueDraws,
+                UniformDataBuffer::<D::Model>::queue::<D, <D::Material as Material>::Phase>
+                    .when::<Exists<DrawPipeline<D>>>(),
+            );
+        }
     }
 }
