@@ -1,11 +1,11 @@
 use crate::{
     ExtractResource, FragmentState, GlobalShaderConstant, GlobalShaderConstants, Mesh, MeshFilter,
-    MeshKey, MeshLayout,  PipelineCache, PipelineId, RenderAssets, RenderPipelineDesc,
+    MeshKey, MeshLayout, PipelineCache, PipelineId, RenderAssets, RenderPipelineDesc,
     RenderResource, RenderState, RenderSurface, Shader, ShaderData, SubMesh, VertexState,
     allocator::MeshAllocator,
     constants::StorageBufferEnabled,
     cpu::UniformDataBuffer,
-    gpu::{DrawArgsBuffer, GpuDrawResources, StorageDataBuffer},
+    gpu::{DrawArgsBuffer, StorageDataBuffer},
     material::{DepthWrite, Material, MaterialInstance, MaterialLayout, RenderPhase},
     processor::ShaderConstant,
     view::{View, ViewBuffer, ViewInstance},
@@ -153,7 +153,7 @@ impl<D: Drawable> RenderResource for DrawPipeline<D> {
         Read<RenderSurface>,
         Read<GlobalShaderConstants>,
         Option<Read<UniformDataBuffer<D::Model>>>,
-        Option<Read<GpuDrawResources<D::Model>>>,
+        Option<Read<StorageDataBuffer<D::Model>>>,
         Option<Read<ViewBuffer<D::View>>>,
         Option<Write<MaterialLayout<D::Material>>>,
         SCommands,
@@ -169,7 +169,7 @@ impl<D: Drawable> RenderResource for DrawPipeline<D> {
 
         let model_layout =
             if let Some(ShaderConstant::Bool(true)) = constants.get(StorageBufferEnabled::NAME) {
-                gpu_model.map(|v| &v.layout)
+                gpu_model.map(|v| v.layout())
             } else {
                 cpu_model.map(|v| v.layout())
             };

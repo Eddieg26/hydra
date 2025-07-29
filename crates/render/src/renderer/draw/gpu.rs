@@ -98,22 +98,39 @@ pub struct RenderEntity {
 #[derive(Resource)]
 pub struct RenderEntityBuffer {
     entities: StorageBufferArray<RenderEntity>,
-    count: StorageBuffer<u32>,
+    count: UniformBuffer<u32>,
 }
 impl RenderEntityBuffer {
+    pub fn new(device: &RenderDevice) -> Self {
+        let entities = StorageBufferArray::with_alignment(
+            device,
+            RenderEntity::min_size().get() as u32,
+            None,
+            None,
+        );
+        let count = UniformBuffer::new(device, 0, None, None);
+
+        Self { entities, count }
+    }
+
     pub fn entities(&self) -> &StorageBufferArray<RenderEntity> {
         &self.entities
     }
 
-    pub fn count(&self) -> &StorageBuffer<u32> {
+    pub fn count(&self) -> &UniformBuffer<u32> {
         &self.count
     }
 
-    pub fn push(&mut self, entity: &RenderEntity) -> (usize, DynamicOffset) {
-        let offset = self.entities.push(entity);
-        let index = offset / self.entities.alignment();
+    pub fn push(&mut self, entity: &RenderEntity) {
+        self.entities.push(entity);
+    }
+}
 
-        (index as usize, offset)
+impl RenderResource for RenderEntityBuffer {
+    type Arg = Read<RenderDevice>;
+
+    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
+        Ok(Self::new(device))
     }
 }
 
@@ -173,6 +190,14 @@ impl DrawArgsBuffer {
     }
 }
 
+impl RenderResource for DrawArgsBuffer {
+    type Arg = Read<RenderDevice>;
+
+    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
+        Ok(Self::new(device))
+    }
+}
+
 #[derive(Resource)]
 pub struct StorageDataBuffer<T: ShaderData> {
     instances: StorageBufferArray<T>,
@@ -186,8 +211,12 @@ impl<T: ShaderData> StorageDataBuffer<T> {
         let instances =
             StorageBufferArray::with_alignment(device, T::min_size().get() as u32, None, None);
         let count = StorageBuffer::new(device, 0, None, None);
-        let layout = BindGroupLayoutBuilder::new().build(device);
-        let bind_group = BindGroupBuilder::new(&layout).build(device);
+        let layout = BindGroupLayoutBuilder::new()
+            .with_storage(0, ShaderStages::VERTEX, false, true, None, None)
+            .build(device);
+        let bind_group = BindGroupBuilder::new(&layout)
+            .with_storage(0, instances.as_ref(), 0, None)
+            .build(device);
 
         Self {
             instances,
@@ -225,7 +254,8 @@ impl<T: ShaderData> StorageDataBuffer<T> {
         meshes: &RenderAssets<RenderMesh>,
         sub_meshes: &RenderAssets<SubMesh>,
         view_draw_set: &mut ViewDrawSet<D::View, <D::Material as Material>::Phase>,
-        scene: &mut GpuScene,
+        entities: &mut RenderEntityBuffer,
+        draw_args: &mut DrawArgsBuffer,
         resources: &mut GpuDrawResources<D::Model>,
     ) where
         P: RenderPhase<View = D::View>,
@@ -262,13 +292,13 @@ impl<T: ShaderData> StorageDataBuffer<T> {
 
             let (batch, indexed, mode) = match mesh.format() {
                 MeshFormat::NonIndexed => {
-                    let (batch, offset) = scene.draw_args.push(mesh.vertex_count());
+                    let (batch, offset) = draw_args.push(mesh.vertex_count());
                     let mode = DrawMode::Indirect { offset };
 
                     (batch as u32, 0, mode)
                 }
                 MeshFormat::Indexed { count, format } => {
-                    let (batch, offset) = scene.draw_args.push_indexed(count);
+                    let (batch, offset) = draw_args.push_indexed(count);
                     let mode = DrawMode::IndexedIndirect { offset, format };
 
                     (batch as u32, 1, mode)
@@ -283,7 +313,7 @@ impl<T: ShaderData> StorageDataBuffer<T> {
             });
 
             for drawable in drawables {
-                scene.entities.push(&RenderEntity {
+                entities.push(&RenderEntity {
                     batch,
                     instance: resources.instances.push(&drawable.model()),
                     matrix: drawable.global.matrix(),
@@ -311,6 +341,14 @@ impl<T: ShaderData> StorageDataBuffer<T> {
     }
 }
 
+impl<T: ShaderData> RenderResource for StorageDataBuffer<T> {
+    type Arg = Read<RenderDevice>;
+
+    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
+        Ok(Self::new(device))
+    }
+}
+
 #[derive(Clone, Copy, ShaderType)]
 pub struct RenderBatch {
     bounds: Aabb,
@@ -319,14 +357,13 @@ pub struct RenderBatch {
     indexed: u32,
 }
 
-#[derive(Resource)]
 pub struct RenderBatchBuffer {
-    buffer: StorageBufferArray<RenderBatch>,
+    buffer: UniformBufferArray<RenderBatch>,
     batches: Vec<(DynamicOffset, u32)>,
 }
 impl RenderBatchBuffer {
     pub fn new(device: &RenderDevice) -> Self {
-        let buffer = StorageBufferArray::new(device, None, None);
+        let buffer = UniformBufferArray::new(device, None, None);
         Self {
             buffer,
             batches: Vec::new(),
@@ -344,35 +381,9 @@ impl RenderBatchBuffer {
     }
 }
 
-impl AsRef<StorageBufferArray<RenderBatch>> for RenderBatchBuffer {
-    fn as_ref(&self) -> &StorageBufferArray<RenderBatch> {
+impl AsRef<UniformBufferArray<RenderBatch>> for RenderBatchBuffer {
+    fn as_ref(&self) -> &UniformBufferArray<RenderBatch> {
         &self.buffer
-    }
-}
-
-#[derive(Resource)]
-pub struct GpuScene {
-    pub draw_args: DrawArgsBuffer,
-    pub entities: StorageBufferArray<RenderEntity>,
-    pub entity_count: UniformBuffer<u32>,
-}
-
-impl GpuScene {
-    pub fn new(device: &RenderDevice) -> Self {
-        let draw_args = DrawArgsBuffer::new(device);
-        let entities = StorageBufferArray::with_alignment(
-            device,
-            RenderEntity::min_size().get() as u32,
-            None,
-            None,
-        );
-        let entity_count = UniformBuffer::new(device, 0, None, None);
-
-        Self {
-            draw_args,
-            entities,
-            entity_count,
-        }
     }
 }
 
@@ -388,15 +399,21 @@ pub struct GpuDrawResources<T: ShaderData> {
 impl<T: ShaderData> RenderResource for GpuDrawResources<T> {
     type Arg = (
         Read<RenderDevice>,
-        Read<StorageDataBuffer<T>>,
-        Read<FrustumBuffer>,
-        Read<GpuScene>,
+        Option<Read<StorageDataBuffer<T>>>,
+        Option<Read<FrustumBuffer>>,
+        Option<Read<RenderEntityBuffer>>,
+        Option<Read<DrawArgsBuffer>>,
         Write<PipelineCache>,
     );
 
     fn extract(
-        (device, data, frustums, scene, cache): ecs::ArgItem<Self::Arg>,
+        (device, data, frustums, entities, draw_args, cache): ecs::ArgItem<Self::Arg>,
     ) -> Result<Self, crate::ExtractError<()>> {
+        let data = data.ok_or(crate::ExtractError::Retry(()))?;
+        let frustums = frustums.ok_or(crate::ExtractError::Retry(()))?;
+        let entities = entities.ok_or(crate::ExtractError::Retry(()))?;
+        let draw_args = draw_args.ok_or(crate::ExtractError::Retry(()))?;
+
         let batches = RenderBatchBuffer::new(device);
         let instances =
             StorageBufferArray::with_alignment(device, T::min_size().get() as u32, None, None);
@@ -414,12 +431,12 @@ impl<T: ShaderData> RenderResource for GpuDrawResources<T> {
         let bind_group = BindGroupBuilder::new(&layout)
             .with_uniform(0, frustums.buffer.as_ref(), 0, None)
             .with_uniform(1, batches.buffer.as_ref(), 0, None)
-            .with_uniform(2, scene.entity_count.as_ref(), 0, None)
+            .with_uniform(2, entities.count.as_ref(), 0, None)
             .with_storage(3, instances.as_ref(), 0, None)
-            .with_storage(4, scene.entities.as_ref(), 0, None)
+            .with_storage(4, entities.entities.as_ref(), 0, None)
             .with_storage(5, data.count.as_ref(), 0, None)
-            .with_storage(6, scene.draw_args.non_indexed.as_ref(), 0, None)
-            .with_storage(7, scene.draw_args.indexed.as_ref(), 0, None)
+            .with_storage(6, draw_args.non_indexed.as_ref(), 0, None)
+            .with_storage(7, draw_args.indexed.as_ref(), 0, None)
             .with_storage(8, data.instances.as_ref(), 0, None)
             .build(device);
         let pipeline = cache.queue_compute_pipeline(ComputePipelineDesc {

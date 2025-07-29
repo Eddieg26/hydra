@@ -1,7 +1,7 @@
 use crate::{
     ComputePipeline, PipelineCache, PipelineId, RenderDevice, RenderPipeline, RenderSurface,
 };
-use ecs::{Commands, Entity, IndexMap, Resource, World};
+use ecs::{Commands, Entity, IndexDag, IndexMap, Resource, World, core::ImmutableIndexDag};
 use smol::lock::RwLock;
 use std::{
     any::Any,
@@ -141,6 +141,7 @@ pub struct PassNode {
     pub name: Name,
     pub reads: Vec<NodeId>,
     pub writes: Vec<NodeId>,
+    pub dependencies: Vec<Name>,
     pub has_side_effect: bool,
     executor: Executor,
 }
@@ -290,6 +291,22 @@ impl RenderGraphBuilder {
             }
         }
 
+        struct PassInfo {
+            ref_count: u32,
+            dependencies: u32,
+            dependents: HashSet<usize>,
+        }
+
+        impl From<usize> for PassInfo {
+            fn from(value: usize) -> Self {
+                Self {
+                    ref_count: 0,
+                    dependencies: value as u32,
+                    dependents: HashSet::new(),
+                }
+            }
+        }
+
         let RenderGraphBuilder {
             passes,
             resources,
@@ -305,18 +322,26 @@ impl RenderGraphBuilder {
         let mut resource_refs = (0..resources.len())
             .map(ResourceInfo::from)
             .collect::<Vec<_>>();
-        let mut pass_refs = graphs
+        let mut pass_infos = graphs
             .iter()
-            .map(|(id, passes)| (*id, (0..passes.len()).map(|_| 0).collect::<Vec<_>>()))
+            .map(|(id, passes)| {
+                (
+                    *id,
+                    passes
+                        .values()
+                        .map(|p| PassInfo::from(p.dependencies.len()))
+                        .collect::<Vec<_>>(),
+                )
+            })
             .collect::<HashMap<_, _>>();
 
         for (graph, passes) in &graphs {
-            let pass_refs = pass_refs.get_mut(graph).unwrap();
+            let pass_infos = pass_infos.get_mut(graph).unwrap();
 
             for pass in passes.values() {
                 for id in &pass.reads {
                     resource_refs[*id].ref_count += 1;
-                    pass_refs[pass.id] = pass.writes.len() as u32;
+                    pass_infos[pass.id].ref_count = pass.writes.len() as u32;
                 }
 
                 for id in &pass.writes {
@@ -326,6 +351,14 @@ impl RenderGraphBuilder {
                             graph: *graph,
                         })
                     }
+                }
+
+                for dep in &pass.dependencies {
+                    let Some(index) = passes.get_index_of(dep) else {
+                        continue;
+                    };
+
+                    pass_infos[index].dependents.insert(pass.id);
                 }
             }
         }
@@ -347,11 +380,11 @@ impl RenderGraphBuilder {
                 continue;
             }
 
-            let pass_refs = pass_refs.get_mut(&pass.graph).unwrap();
+            let pass_refs = pass_infos.get_mut(&pass.graph).unwrap();
 
-            assert!(pass_refs[pass.id] >= 1);
-            pass_refs[pass.id] -= 1;
-            if pass_refs[pass.id] == 0 {
+            assert!(pass_refs[pass.id].ref_count >= 1);
+            pass_refs[pass.id].ref_count -= 1;
+            if pass_refs[pass.id].ref_count == 0 {
                 for id in passes[pass.id].reads.iter().copied() {
                     resource_refs[id].ref_count -= 1;
                     if resource_refs[id].ref_count == 0 {
@@ -363,13 +396,54 @@ impl RenderGraphBuilder {
 
         let mut sub_graphs = graphs
             .drain()
-            .map(|(graph, passes)| {
-                let pass_refs = pass_refs.get(&graph).unwrap();
+            .map(|(id, passes)| {
+                let pass_infos = pass_infos.get_mut(&id).unwrap();
+                let mut unreferenced = pass_infos
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, info)| (info.ref_count == 0).then_some(i))
+                    .collect::<Vec<_>>();
+
+                while let Some(id) = unreferenced.pop() {
+                    for dep in std::mem::take(&mut pass_infos[id].dependents) {
+                        pass_infos[dep].dependencies -= 1;
+                        if pass_infos[dep].dependencies == 0 && pass_infos[dep].ref_count == 0 {
+                            unreferenced.push(dep);
+                        }
+                    }
+                }
+
+                let mut graph = IndexDag::new();
+                let mut map = HashMap::new();
+
                 let passes = passes
                     .into_values()
-                    .filter_map(|p| (p.has_side_effect || pass_refs[p.id] > 0).then_some(p));
+                    .filter_map(|p| {
+                        if p.has_side_effect
+                            || pass_infos[p.id].ref_count > 0
+                            || pass_infos[p.id].dependencies > 0
+                        {
+                            let id = p.id;
+                            let node = graph.add_node(p);
+                            map.insert(id, node);
+                            Some((id, node))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
 
-                (graph, passes.collect::<Vec<_>>())
+                for (id, node) in passes {
+                    for dep in &pass_infos[id].dependents {
+                        let Some(dep) = map.get(dep) else {
+                            continue;
+                        };
+
+                        graph.add_dependency(node, *dep);
+                    }
+                }
+
+                (id, graph.build_immutable().unwrap())
             })
             .collect::<HashMap<_, _>>();
 
@@ -396,6 +470,7 @@ pub struct PassBuilder<'a> {
     pub name: Name,
     reads: HashSet<NodeId>,
     writes: HashSet<NodeId>,
+    dependencies: HashSet<Name>,
     has_side_effect: bool,
     builder: &'a mut RenderGraphBuilder,
 }
@@ -407,6 +482,7 @@ impl<'a> PassBuilder<'a> {
             name,
             reads: HashSet::new(),
             writes: HashSet::new(),
+            dependencies: HashSet::new(),
             has_side_effect: false,
             builder,
         }
@@ -432,6 +508,10 @@ impl<'a> PassBuilder<'a> {
         id
     }
 
+    pub fn dependency<P: GraphPass>(&mut self) {
+        self.dependencies.insert(P::NAME);
+    }
+
     pub fn has_side_effect(&mut self) {
         self.has_side_effect = true;
     }
@@ -455,6 +535,7 @@ impl<'a> PassBuilder<'a> {
             name: self.name,
             reads: self.reads.drain().collect(),
             writes: self.writes.drain().collect(),
+            dependencies: self.dependencies.drain().collect(),
             has_side_effect: self.has_side_effect,
             executor: Box::new(executor),
         }
@@ -555,7 +636,7 @@ impl<'a> RenderContext<'a> {
     pub(crate) fn run_sub_graph(&mut self, name: Name) -> Result<(), RenderGraphError> {
         let sub_graphs = self.graph.sub_graphs.read_arc_blocking();
         if let Some(passes) = sub_graphs.get(&GraphId::Sub(name)) {
-            for pass in passes {
+            for pass in passes.iter() {
                 pass.execute(self)?;
             }
         }
@@ -576,8 +657,8 @@ impl<'a> RenderContext<'a> {
 #[derive(Resource)]
 pub struct RenderGraph {
     resources: IndexMap<Name, ResourceNode>,
-    passes: Arc<RwLock<Vec<PassNode>>>,
-    sub_graphs: Arc<RwLock<HashMap<GraphId, Vec<PassNode>>>>,
+    passes: Arc<RwLock<ImmutableIndexDag<PassNode>>>,
+    sub_graphs: Arc<RwLock<HashMap<GraphId, ImmutableIndexDag<PassNode>>>>,
 }
 
 impl RenderGraph {

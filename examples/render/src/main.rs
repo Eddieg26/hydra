@@ -311,7 +311,7 @@ pub struct Renderer3d;
 impl Renderer for Renderer3d {
     const NAME: render::Name = "Renderer3d";
 
-    const CLEAR_MODE: render::ClearMode = render::ClearMode::Clear(Color::red());
+    const CLEAR_MODE: render::ClearMode = render::ClearMode::Clear(Color::black());
 
     type Data = ();
 

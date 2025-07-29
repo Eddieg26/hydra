@@ -12,7 +12,7 @@ use crate::{
         view::View,
     },
     drawable::{DrawPipeline, DrawSet, Drawable, ViewDrawSet},
-    gpu::{FrustumBuffer, GpuDrawResources, StorageDataBuffer},
+    gpu::{DrawArgsBuffer, FrustumBuffer, GpuDrawResources, RenderEntityBuffer, StorageDataBuffer},
     material::MaterialInstance,
     pass::{DrawPass, Renderer},
     processor::{ShaderConstant, ShaderConstants},
@@ -201,118 +201,6 @@ impl RenderAppExt for AppBuilder {
     }
 }
 
-// struct ViewPlugin<V: View>(std::marker::PhantomData<V>);
-// impl<V: View> ViewPlugin<V> {
-//     pub fn new() -> Self {
-//         Self(Default::default())
-//     }
-// }
-
-// impl<V: View> Plugin for ViewPlugin<V> {
-//     fn setup(&mut self, app: &mut AppBuilder) {
-//         app.add_plugins(CameraPlugin);
-//         app.scoped_sub_app(RenderApp, |render_app| {
-//             render_app
-//                 .add_systems(
-//                     Extract,
-//                     RenderViews::<V>::extract.when::<Exists<RenderViews<V>>>(),
-//                 )
-//                 .add_systems(Queue, RenderViews::<V>::queue);
-//         })
-//         .register::<V>()
-//         .add_render_resource::<RenderViews<V>>();
-//     }
-// }
-
-// struct ModelDataPlugin<M: ModelData>(std::marker::PhantomData<M>);
-// impl<M: ModelData> ModelDataPlugin<M> {
-//     pub fn new() -> Self {
-//         Self(Default::default())
-//     }
-// }
-
-// impl<M: ModelData> Plugin for ModelDataPlugin<M> {
-//     fn setup(&mut self, app: &mut AppBuilder) {
-//         app.scoped_sub_app(RenderApp, |render_app| {
-//             render_app
-//                 .add_systems(PreRender, update_model_data_buffers::<M>)
-//                 .add_systems(PostRender, clear_model_data_buffers::<M>);
-//         })
-//         .add_render_resource::<ModelDataBuffer<M>>()
-//         .add_render_resource::<BatchedModelDataBuffer<M>>();
-//     }
-// }
-
-// pub struct DrawPlugin<D: Draw>(std::marker::PhantomData<D>);
-// impl<D: Draw> DrawPlugin<D> {
-//     fn new() -> Self {
-//         Self(Default::default())
-//     }
-// }
-
-// pub struct SortViewPhasePlugin<V: View, R: RenderPhase>(std::marker::PhantomData<(V, R)>);
-// impl<V: View, R: RenderPhase> SortViewPhasePlugin<V, R> {
-//     fn new() -> Self {
-//         Self(Default::default())
-//     }
-// }
-// impl<V: View, R: RenderPhase> Plugin for SortViewPhasePlugin<V, R> {
-//     fn setup(&mut self, app: &mut AppBuilder) {
-//         app.add_plugins(ViewPlugin::<V>::new())
-//             .add_systems(PreRender, ViewDrawCalls::<V, R>::sort);
-//     }
-// }
-
-// impl<D: Draw> Plugin for DrawPlugin<D> {
-//     fn setup(&mut self, app: &mut AppBuilder) {
-//         app.add_plugins((
-//             RenderPlugin,
-//             CameraPlugin,
-//             MaterialPlugin::<D::Material>::new(),
-//             ViewPlugin::<DrawView<D>>::new(),
-//             ModelDataPlugin::<D::Model>::new(),
-//         ))
-//         .scoped_sub_app(RenderApp, |sub_app| {
-//             sub_app
-//                 .add_resource(DrawTree::<D>::new())
-//                 .add_resource(VisibleDraws::<D>::new())
-//                 .add_resource(ViewDrawCalls::<DrawView<D>, <D::Material as Material>::Phase>::new())
-//                 .add_systems(Extract, DrawTree::<D>::extract)
-//                 .add_systems(QueueViews, VisibleDraws::<D>::queue)
-//                 .add_systems(
-//                     QueueDraws,
-//                     ViewDrawCalls::<DrawView<D>, <D::Material as Material>::Phase>::queue::<
-//                         <D::Material as Material>::Lighting,
-//                         D::Material,
-//                         D,
-//                     >
-//                         .when::<Exists<DrawPipeline<D>>>(),
-//                 )
-//                 .add_systems(
-//                     PostRender,
-//                     ViewDrawCalls::<DrawView<D>, <D::Material as Material>::Phase>::clear,
-//                 );
-//         })
-//         .register::<D>()
-//         .register::<GlobalTransform>()
-//         .load_asset::<GpuShader>(D::shader().into())
-//         .load_asset::<GpuShader>(D::Material::shader().into())
-//         .add_render_resource::<LightingData<<D::Material as Material>::Lighting>>()
-//         .add_render_resource::<DrawPipeline<D>>();
-
-//         if <D::Material as Material>::Phase::SORT {
-//             app.add_plugins(SortViewPhasePlugin::<
-//                 DrawView<D>,
-//                 <D::Material as Material>::Phase,
-//             >::new());
-//         }
-
-//         if D::CULL {
-//             app.register::<DisableCulling>();
-//         }
-//     }
-// }
-
 pub struct CameraPlugin;
 impl Plugin for CameraPlugin {
     fn setup(&mut self, app: &mut AppBuilder) {
@@ -353,8 +241,20 @@ impl<V: View> Plugin for ViewPlugin<V> {
         {
             app.add_render_resource::<FrustumBuffer>()
                 .sub_app_mut(RenderApp)
-                .add_systems(Extract, FrustumBuffer::extract::<V>);
+                .add_systems(
+                    Extract,
+                    FrustumBuffer::extract::<V>.when::<Exists<FrustumBuffer>>(),
+                );
         }
+    }
+}
+
+struct GpuDrawPlugin;
+impl Plugin for GpuDrawPlugin {
+    fn setup(&mut self, app: &mut AppBuilder) {
+        app.add_render_resource::<FrustumBuffer>()
+            .add_render_resource::<RenderEntityBuffer>()
+            .add_render_resource::<DrawArgsBuffer>();
     }
 }
 
@@ -373,7 +273,9 @@ impl<T: ShaderData> Plugin for ModelPlugin<T> {
             .resource::<GlobalShaderConstants>()
             .get(StorageBufferEnabled::NAME)
         {
-            app.add_render_resource::<GpuDrawResources<T>>();
+            app.add_plugins(GpuDrawPlugin)
+                .add_render_resource::<StorageDataBuffer<T>>()
+                .add_render_resource::<GpuDrawResources<T>>();
         } else {
             app.add_render_resource::<UniformDataBuffer<T>>()
                 .sub_app_mut(RenderApp)
