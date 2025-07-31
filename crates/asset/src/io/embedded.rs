@@ -5,6 +5,7 @@ use crate::{
     io::BoxFuture,
     settings::{AssetSettings, Settings},
 };
+use ecs::{AppTag, Resource};
 use serde::Serialize;
 use smol::{
     io::{AsyncRead, AsyncSeek, AsyncWrite},
@@ -318,9 +319,38 @@ impl FileSystem for EmbeddedFs {
     }
 }
 
+#[derive(Resource)]
+pub struct AppAssets<A: AppTag>(EmbeddedFs, std::marker::PhantomData<A>);
+impl<A: AppTag> Default for AppAssets<A> {
+    fn default() -> Self {
+        Self(EmbeddedFs::new(), Default::default())
+    }
+}
+
+impl<A: AppTag> std::ops::Deref for AppAssets<A> {
+    type Target = EmbeddedFs;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<A: AppTag> std::ops::DerefMut for AppAssets<A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 #[macro_export]
 macro_rules! embed_asset {
     ($assets:expr, $id:expr, $path:expr, $settings:expr) => {
         $assets.embed($id, $path, include_bytes!($path), $settings)
+    };
+}
+
+#[macro_export]
+macro_rules! embed_asset_with_path {
+    ($assets:expr, $id:expr, $path:expr, $new_path:expr, $settings:expr) => {
+        $assets.embed($id, $new_path, include_bytes!($path), $settings)
     };
 }

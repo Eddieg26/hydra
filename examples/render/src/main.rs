@@ -15,7 +15,6 @@
 // const CUBE_ID: AssetId<Mesh> = AssetId::from_u128(0x9d3919f428f8429a80e195849b3b6c21u128);
 // const PLANE_ID: AssetId<Mesh> = AssetId::from_u128(0x2b3c4d5e6f708192a0b1c2d3e4f50607u128);
 // const SWORD_ID: AssetId<Mesh> = AssetId::from_u128(0x6d3d79f5c6764b43993ae8de7ed0219bu128);
-// const WIRE_SPHERE_ID: AssetId<Mesh> = AssetId::from_u128(0x5e769e37d0b44dcbcc7029eb5b68320);
 // const GENGAR_ID: AssetId<Texture> = AssetId::from_u128(0x43c5893d2b2f4a3bb2bb33eb1b362ff6u128);
 // // const UNLIT_TEX_ID: AssetId<UnlitTexture> =
 // //     AssetId::from_u128(0x1a2b3c4d5e6f708192a0b1c2d3e4f506u128);

@@ -167,13 +167,13 @@ impl GpuShader {
 
                 for (name, constant) in globals.iter() {
                     if !constants.contains(name) {
-                        constants.set(name.clone(), *constant);
+                        constants.set(name.clone(), constant.clone());
                     }
                 }
 
                 if let Some(local) = local {
                     for (name, constant) in local.iter() {
-                        constants.set(name.clone(), *constant);
+                        constants.set(name.clone(), constant.clone());
                     }
                 }
 
@@ -298,6 +298,12 @@ impl std::error::Error for ShaderImportError {}
 #[derive(Default, Settings, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ShaderSettings {
     constants: ShaderConstants,
+}
+
+impl From<ShaderConstants> for ShaderSettings {
+    fn from(constants: ShaderConstants) -> Self {
+        Self { constants }
+    }
 }
 
 impl AssetImporter for Shader {

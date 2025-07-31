@@ -1,8 +1,4 @@
-struct InstanceData {
-    _padding_0: vec4<f32>,
-    _padding_1: vec4<f32>,
-    _padding_2: vec4<f32>,
-}
+#slot INSTANCE_DATA
 
 struct Plane {
     normal: vec3<f32>,

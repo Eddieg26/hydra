@@ -68,16 +68,12 @@ impl RenderSurface {
         };
         let capabilities = surface.get_capabilities(&adapter);
         let format = capabilities.formats[0];
-        let present_mode = match capabilities.present_modes.contains(&PresentMode::Mailbox) {
-            true => PresentMode::Mailbox,
-            false => PresentMode::Fifo,
-        };
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width: size.width,
             height: size.height,
-            present_mode,
+            present_mode: PresentMode::Fifo,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![format.add_srgb_suffix()],
             desired_maximum_frame_latency: 2,

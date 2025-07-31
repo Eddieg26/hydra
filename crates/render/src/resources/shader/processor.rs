@@ -9,22 +9,38 @@ use std::{
 #[derive(Debug)]
 pub enum ShaderProcessorError<'a> {
     /// An `#import` path could not be found in the context.
-    MissingImport { path: &'a str },
+    MissingImport {
+        path: &'a str,
+    },
 
     /// A required constant was referenced but not defined.
-    UndefinedConstant { name: &'a str },
+    UndefinedConstant {
+        name: &'a str,
+    },
 
     /// Failed to parse or evaluate a constant expression.
-    InvalidCondition { expression: &'a str },
+    InvalidCondition {
+        expression: &'a str,
+    },
 
     /// An else block was encountered without a preceding `#if` or `#ifdef`.
-    UnmatchedElse { line: &'a str },
+    UnmatchedElse {
+        line: &'a str,
+    },
 
     /// A block opened (e.g., with `#if`) but never closed properly with `#end`.
-    UnclosedConditional { line: &'a str },
+    UnclosedConditional {
+        line: &'a str,
+    },
 
     /// A `#const` line couldn't be parsed correctly.
-    InvalidConstSyntax { line: &'a str },
+    InvalidConstSyntax {
+        line: &'a str,
+    },
+
+    InvalidSlotSyntax {
+        line: &'a str,
+    },
 
     /// Internal error due to malformed input or iterator exhaustion.
     UnexpectedEndOfInput,
@@ -41,6 +57,9 @@ impl<'a> Display for ShaderProcessorError<'a> {
             }
             ShaderProcessorError::UndefinedConstant { name } => {
                 write!(f, "Undefined constant: {}", name)
+            }
+            ShaderProcessorError::InvalidSlotSyntax { line } => {
+                write!(f, "Invalid slot syntax in line: {}", line)
             }
             ShaderProcessorError::InvalidCondition { expression } => {
                 write!(f, "Invalid condition expression: {}", expression)
@@ -71,12 +90,13 @@ impl<'a> From<&'a str> for ShaderProcessorError<'a> {
 }
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]
 pub enum ShaderConstant {
     Bool(bool),
     I32(i32),
     U32(u32),
+    Str(String),
 }
 
 impl ShaderConstant {
@@ -97,6 +117,7 @@ impl ShaderConstant {
                 .parse::<u32>()
                 .map(|u| *v == u)
                 .map_err(|_| ShaderProcessorError::InvalidCondition { expression: value }),
+            ShaderConstant::Str(v) => Ok(*v == value),
         }
     }
 
@@ -171,6 +192,7 @@ impl ToString for ShaderConstant {
             ShaderConstant::Bool(v) => v.to_string(),
             ShaderConstant::I32(v) => v.to_string(),
             ShaderConstant::U32(v) => v.to_string(),
+            ShaderConstant::Str(v) => v.clone(),
         }
     }
 }
@@ -187,7 +209,7 @@ impl ShaderConstants {
     }
 
     pub fn get(&self, name: &str) -> Option<ShaderConstant> {
-        self.0.get(name).copied()
+        self.0.get(name).cloned()
     }
 
     pub fn set(&mut self, name: impl ToString, value: ShaderConstant) {
@@ -221,6 +243,8 @@ pub enum Token<'a> {
     Import(&'a str),
     /// const LIGHT_COUNT: u32 = 50;
     Const(&'a str),
+    /// #slot LIGHT_DEF
+    Slot(&'a str),
     /// #if LIGHT_COUNT == 50
     If(&'a str),
     /// #ifdef LIGHT_COUNT
@@ -241,6 +265,7 @@ pub enum Token<'a> {
 impl Token<'_> {
     const IMPORT: &'static str = "#import";
     const CONST: &'static str = "const ";
+    const SLOT: &'static str = "#slot ";
     const IF: &'static str = "#if ";
     const IFDEF: &'static str = "#ifdef ";
     const IFNDEF: &'static str = "#ifndef ";
@@ -359,6 +384,8 @@ impl<'a> ShaderProcessor<'a> {
                 Token::Import(trimmed)
             } else if trimmed.starts_with(Token::CONST) {
                 Token::Const(line)
+            } else if trimmed.starts_with(Token::SLOT) {
+                Token::Slot(trimmed)
             } else if trimmed.starts_with(Token::IF) {
                 Token::If(trimmed)
             } else if trimmed.starts_with(Token::IFDEF) {
@@ -427,6 +454,18 @@ impl<'a> ShaderProcessor<'a> {
                         None => code.push_str(line),
                     }
                     code.push('\n');
+                }
+                Token::Slot(line) => {
+                    let slot_name = line
+                        .get(Token::SLOT.len()..)
+                        .ok_or(ShaderProcessorError::InvalidSlotSyntax { line })?
+                        .trim();
+
+                    if let Some(value) = constants.get(slot_name) {
+                        code.push_str(&format!("#define {slot_name} {}\n", value.to_string()));
+                    } else {
+                        code.push_str("");
+                    }
                 }
                 Token::If(line) => {
                     let condition = line

@@ -1,8 +1,10 @@
+use std::fmt::format;
+
 use crate::{
     Camera, CameraRenderTargets, CameraSubGraph, ExtractError, GlobalShaderConstant,
     GlobalShaderConstants, GpuShader, GpuTexture, ObjImporter, ProcessAssets, QueueDraws,
     QueueViews, RenderDevice, RenderGraphBuilder, RenderMesh, RenderPhase, RenderTarget,
-    ShaderData, SubMesh, Texture2dImporter,
+    ShaderData, ShaderSettings, SubMesh, Texture2dImporter,
     allocator::MeshAllocatorPlugin,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     constants::StorageBufferEnabled,
@@ -12,7 +14,10 @@ use crate::{
         view::View,
     },
     drawable::{DrawPipeline, DrawSet, Drawable, ViewDrawSet},
-    gpu::{DrawArgsBuffer, FrustumBuffer, GpuDrawResources, RenderEntityBuffer, StorageDataBuffer},
+    gpu::{
+        CULLING_SHADER, DrawArgsBuffer, FrustumBuffer, GpuDrawResources, RenderEntityBuffer,
+        StorageDataBuffer,
+    },
     material::MaterialInstance,
     pass::{DrawPass, Renderer},
     processor::{ShaderConstant, ShaderConstants},
@@ -24,7 +29,11 @@ use crate::{
     surface::{RenderSurface, RenderSurfaceTexture},
     view::{ViewBuffer, ViewSet},
 };
-use asset::plugin::{AssetAppExt, AssetPlugin};
+use asset::{
+    AssetId, embed_asset_with_path,
+    io::AppAssets,
+    plugin::{AssetAppExt, AssetPlugin},
+};
 use ecs::{
     AppBuilder, Extract, Init, IntoSystemConfig, Plugin, Run, app::sync::SyncComponentPlugin,
     system::Exists,
@@ -276,6 +285,25 @@ impl<T: ShaderData> Plugin for ModelPlugin<T> {
             app.add_plugins(GpuDrawPlugin)
                 .add_render_resource::<StorageDataBuffer<T>>()
                 .add_render_resource::<GpuDrawResources<T>>();
+
+            let assets = app.get_or_insert_resource(|| AppAssets::<RenderApp>::default());
+            let name = ecs::ext::short_type_name::<T>();
+            let id = CULLING_SHADER.with_namespace(name.as_bytes());
+            let path = format!("embedded/shaders/culling.{}.wgsl", name);
+            let def = ShaderConstant::Str(generate_padded_struct(
+                "InstanceData",
+                std::mem::size_of::<T>(),
+            ));
+            let mut constants = ShaderConstants::new();
+            constants.set("INSTANCE_DATA", def);
+
+            embed_asset_with_path!(
+                assets,
+                id,
+                "embedded/shaders/culling.wgsl",
+                &path,
+                ShaderSettings::from(constants)
+            );
         } else {
             app.add_render_resource::<UniformDataBuffer<T>>()
                 .sub_app_mut(RenderApp)
@@ -367,4 +395,18 @@ impl<D: Drawable> Plugin for DrawPlugin<D> {
             );
         }
     }
+}
+
+fn generate_padded_struct(name: &str, size_in_bytes: usize) -> String {
+    let padded_size = (size_in_bytes + 15) & !15; // round up to nearest multiple of 16
+    let full_chunks = padded_size / 16;
+
+    let mut struct_def = format!("struct {name} {{\n",);
+
+    for i in 0..full_chunks {
+        struct_def.push_str(&format!("    data{}: vec4<u32>;\n", i));
+    }
+
+    struct_def.push_str("};");
+    struct_def
 }

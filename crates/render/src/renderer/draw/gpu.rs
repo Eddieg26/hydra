@@ -1,7 +1,7 @@
 use crate::{
     Aabb, ArrayBuffer, BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder,
     ComputePipelineDesc, Frustum, GraphPass, MeshFormat, PipelineCache, PipelineId, RenderAssets,
-    RenderDevice, RenderMesh, RenderResource, RenderSurface, ShaderData, SubMesh,
+    RenderDevice, RenderMesh, RenderResource, RenderSurface, Shader, ShaderData, SubMesh,
     drawable::{DrawCall, DrawMode, DrawPipeline, DrawSet, Drawable, ViewDrawSet},
     material::{Material, RenderPhase},
     storage::{StorageBuffer, StorageBufferArray},
@@ -21,6 +21,8 @@ use wgpu::{
     BufferUsages, DynamicOffset, ShaderStages,
     wgt::{DrawIndexedIndirectArgs, DrawIndirectArgs},
 };
+
+pub const CULLING_SHADER: AssetId<Shader> = AssetId::from_u128(0x5e769e37d0b44dcbcc7029eb5b68320);
 
 #[derive(Resource)]
 pub struct FrustumBuffer {
