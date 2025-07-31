@@ -1,23 +1,17 @@
-use std::fmt::format;
-
 use crate::{
     Camera, CameraRenderTargets, CameraSubGraph, ExtractError, GlobalShaderConstant,
-    GlobalShaderConstants, GpuShader, GpuTexture, ObjImporter, ProcessAssets, QueueDraws,
-    QueueViews, RenderDevice, RenderGraphBuilder, RenderMesh, RenderPhase, RenderTarget,
-    ShaderData, ShaderSettings, SubMesh, Texture2dImporter,
+    GlobalShaderConstants, GpuShader, GpuTexture, ModelTransform, ObjImporter, ProcessAssets,
+    QueueDraws, QueueViews, RenderDevice, RenderGraphBuilder, RenderMesh, RenderPhase,
+    RenderTarget, SubMesh, Texture2dImporter,
     allocator::MeshAllocatorPlugin,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     constants::StorageBufferEnabled,
-    cpu::UniformDataBuffer,
+    cpu::{BatchedUniformBuffer, ModelUnifomBuffer},
     draw::{
         material::{Material, MaterialLayout},
         view::View,
     },
-    drawable::{DrawPipeline, DrawSet, Drawable, ViewDrawSet},
-    gpu::{
-        CULLING_SHADER, DrawArgsBuffer, FrustumBuffer, GpuDrawResources, RenderEntityBuffer,
-        StorageDataBuffer,
-    },
+    drawable::{DrawPipeline, DrawSet, Drawable, PhaseDrawCalls},
     material::MaterialInstance,
     pass::{DrawPass, Renderer},
     processor::{ShaderConstant, ShaderConstants},
@@ -29,11 +23,7 @@ use crate::{
     surface::{RenderSurface, RenderSurfaceTexture},
     view::{ViewBuffer, ViewSet},
 };
-use asset::{
-    AssetId, embed_asset_with_path,
-    io::AppAssets,
-    plugin::{AssetAppExt, AssetPlugin},
-};
+use asset::plugin::{AssetAppExt, AssetPlugin};
 use ecs::{
     AppBuilder, Extract, Init, IntoSystemConfig, Plugin, Run, app::sync::SyncComponentPlugin,
     system::Exists,
@@ -241,75 +231,17 @@ impl<V: View> Plugin for ViewPlugin<V> {
             .add_systems(Queue, ViewBuffer::<V>::queue)
             .add_systems(PostRender, ViewBuffer::<V>::reset_buffer);
     }
-
-    fn finish(&mut self, app: &mut AppBuilder) {
-        if let Some(ShaderConstant::Bool(true)) = app
-            .sub_app_mut(RenderApp)
-            .resource::<GlobalShaderConstants>()
-            .get(StorageBufferEnabled::NAME)
-        {
-            app.add_render_resource::<FrustumBuffer>()
-                .sub_app_mut(RenderApp)
-                .add_systems(
-                    Extract,
-                    FrustumBuffer::extract::<V>.when::<Exists<FrustumBuffer>>(),
-                );
-        }
-    }
 }
 
-struct GpuDrawPlugin;
-impl Plugin for GpuDrawPlugin {
-    fn setup(&mut self, app: &mut AppBuilder) {
-        app.add_render_resource::<FrustumBuffer>()
-            .add_render_resource::<RenderEntityBuffer>()
-            .add_render_resource::<DrawArgsBuffer>();
-    }
-}
-
-pub struct ModelPlugin<T: ShaderData>(std::marker::PhantomData<T>);
-impl<T: ShaderData> ModelPlugin<T> {
-    pub fn new() -> Self {
-        Self(Default::default())
-    }
-}
-impl<T: ShaderData> Plugin for ModelPlugin<T> {
+pub struct ModelTransformPlugin;
+impl Plugin for ModelTransformPlugin {
     fn setup(&mut self, _: &mut ecs::AppBuilder) {}
 
     fn finish(&mut self, app: &mut AppBuilder) {
-        if let Some(ShaderConstant::Bool(true)) = app
+        app.add_render_resource::<ModelUnifomBuffer>()
             .sub_app_mut(RenderApp)
-            .resource::<GlobalShaderConstants>()
-            .get(StorageBufferEnabled::NAME)
-        {
-            app.add_plugins(GpuDrawPlugin)
-                .add_render_resource::<StorageDataBuffer<T>>()
-                .add_render_resource::<GpuDrawResources<T>>();
-
-            let assets = app.get_or_insert_resource(|| AppAssets::<RenderApp>::default());
-            let name = ecs::ext::short_type_name::<T>();
-            let id = CULLING_SHADER.with_namespace(name.as_bytes());
-            let path = format!("embedded/shaders/culling.{}.wgsl", name);
-            let def = ShaderConstant::Str(generate_padded_struct(
-                "InstanceData",
-                std::mem::size_of::<T>(),
-            ));
-            let mut constants = ShaderConstants::new();
-            constants.set("INSTANCE_DATA", def);
-
-            embed_asset_with_path!(
-                assets,
-                id,
-                "embedded/shaders/culling.wgsl",
-                &path,
-                ShaderSettings::from(constants)
-            );
-        } else {
-            app.add_render_resource::<UniformDataBuffer<T>>()
-                .sub_app_mut(RenderApp)
-                .add_systems(PreRender, UniformDataBuffer::<T>::update_buffer)
-                .add_systems(PostRender, UniformDataBuffer::<T>::clear_buffer);
-        }
+            .add_systems(PreRender, ModelUnifomBuffer::update_buffer)
+            .add_systems(PostRender, ModelUnifomBuffer::reset_buffer);
     }
 }
 
@@ -322,9 +254,9 @@ impl<P: RenderPhase> RenderPhasePlugin<P> {
 impl<P: RenderPhase> Plugin for RenderPhasePlugin<P> {
     fn setup(&mut self, app: &mut AppBuilder) {
         app.add_plugins(ViewPlugin::<P::View>::new())
-            .add_resource(ViewDrawSet::<P::View, P>::new())
+            .add_resource(PhaseDrawCalls::<P>::new())
             .sub_app_mut(RenderApp)
-            .add_systems(PostRender, ViewDrawSet::<P::View, P>::clear_set);
+            .add_systems(PostRender, PhaseDrawCalls::<P>::clear_set);
     }
 }
 
@@ -351,62 +283,34 @@ impl<D: Drawable> DrawPlugin<D> {
 }
 impl<D: Drawable> Plugin for DrawPlugin<D> {
     fn setup(&mut self, app: &mut ecs::AppBuilder) {
-        app.add_plugins((
-            ModelPlugin::<D::Model>::new(),
-            MaterialPlugin::<D::Material>::new(),
-        ))
-        .scoped_sub_app(RenderApp, |app| {
-            app.add_resource(DrawSet::<D>::new())
-                .add_resource(ViewDrawSet::<D::View, <D::Material as Material>::Phase>::new())
-                .add_systems(Extract, DrawSet::<D>::extract)
-                .add_systems(PostRender, DrawSet::<D>::clear_set);
-        })
-        .register::<D>()
-        .add_render_resource::<DrawPipeline<D>>()
-        .load_asset::<GpuShader>(D::shader().into())
-        .load_asset::<GpuShader>(D::Material::shader().into());
+        app.add_plugins((ModelTransformPlugin, MaterialPlugin::<D::Material>::new()))
+            .scoped_sub_app(RenderApp, |app| {
+                app.add_resource(DrawSet::<D>::new())
+                    .add_resource(PhaseDrawCalls::<<D::Material as Material>::Phase>::new())
+                    .add_systems(Extract, DrawSet::<D>::extract)
+                    .add_systems(PostRender, DrawSet::<D>::clear_set);
+            })
+            .register::<D>()
+            .add_render_resource::<DrawPipeline<D>>()
+            .load_asset::<GpuShader>(D::shader().into())
+            .load_asset::<GpuShader>(D::Material::shader().into());
     }
 
     fn finish(&mut self, app: &mut AppBuilder) {
         let app = app.sub_app_mut(RenderApp);
 
-        if let Some(ShaderConstant::Bool(true)) = app
-            .resource::<GlobalShaderConstants>()
-            .get(StorageBufferEnabled::NAME)
-        {
-            app.add_systems(
-                QueueDraws,
-                StorageDataBuffer::queue::<D, <D::Material as Material>::Phase>
-                    .when::<Exists<DrawPipeline<D>>>(),
-            );
-        } else {
-            let batch_size =
-                UniformDataBuffer::<D::Model>::get_batch_size(app.resource::<RenderDevice>());
-            let mut constants = ShaderConstants::new();
-            constants.set("BATCH_SIZE", ShaderConstant::U32(batch_size));
+        let batch_size =
+            BatchedUniformBuffer::<ModelTransform>::get_batch_size(app.resource::<RenderDevice>());
+        let mut constants = ShaderConstants::new();
+        constants.set("BATCH_SIZE", ShaderConstant::U32(batch_size));
 
-            app.resource_mut::<GlobalShaderConstants>()
-                .add_local(D::shader().into(), constants);
+        app.resource_mut::<GlobalShaderConstants>()
+            .add_local(D::shader().into(), constants);
 
-            app.add_systems(
-                QueueDraws,
-                UniformDataBuffer::<D::Model>::queue::<D, <D::Material as Material>::Phase>
-                    .when::<Exists<DrawPipeline<D>>>(),
-            );
-        }
+        app.add_systems(
+            QueueDraws,
+            ModelUnifomBuffer::queue::<D, <D::Material as Material>::Phase>
+                .when::<Exists<DrawPipeline<D>>>(),
+        );
     }
-}
-
-fn generate_padded_struct(name: &str, size_in_bytes: usize) -> String {
-    let padded_size = (size_in_bytes + 15) & !15; // round up to nearest multiple of 16
-    let full_chunks = padded_size / 16;
-
-    let mut struct_def = format!("struct {name} {{\n",);
-
-    for i in 0..full_chunks {
-        struct_def.push_str(&format!("    data{}: vec4<u32>;\n", i));
-    }
-
-    struct_def.push_str("};");
-    struct_def
 }

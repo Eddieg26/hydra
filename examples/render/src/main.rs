@@ -151,33 +151,8 @@ impl Default for View3d {
     }
 }
 
-#[derive(Clone, Copy, ShaderType)]
-pub struct View3dData {
-    pub world: Mat4,
-    pub view: Mat4,
-    pub projection: Mat4,
-}
-
 impl View for View3d {
-    type Data = View3dData;
-
     type Transform = Transform;
-
-    fn data(&self, transform: &GlobalTransform, projection: Mat4) -> Self::Data {
-        let world = transform.matrix();
-        let (_, rotation, translation) = world.to_scale_rotation_translation();
-        let view = Mat4::look_at_rh(
-            translation,
-            translation + rotation * Vec3::Z,
-            rotation * Vec3::Y,
-        );
-
-        View3dData {
-            world,
-            view,
-            projection,
-        }
-    }
 
     fn projection(&self, screen_size: math::Size) -> Mat4 {
         let aspect_ratio = screen_size.width / screen_size.height;
@@ -226,18 +201,10 @@ where
 {
     type View = View3d;
 
-    type Model = Model3d;
-
     type Material = M;
 
     fn material(&self) -> AssetId<Self::Material> {
         self.material
-    }
-
-    fn model(&self, transform: &GlobalTransform) -> Self::Model {
-        Model3d {
-            world: transform.matrix(),
-        }
     }
 
     fn format() -> &'static [VertexFormat] {

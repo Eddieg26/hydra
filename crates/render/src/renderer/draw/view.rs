@@ -3,7 +3,8 @@ use ecs::{
     system::Main,
     unlifetime::{Read, SQuery},
 };
-use math::{Mat4, Size};
+use encase::ShaderType;
+use math::{Mat4, Size, Vec3};
 use std::collections::HashMap;
 use transform::{GlobalTransform, LocalTransform};
 use wgpu::{DynamicOffset, ShaderStages};
@@ -14,22 +15,24 @@ use crate::{
 };
 
 pub trait View: Clone + Component {
-    type Data: super::ShaderData;
-
     type Transform: LocalTransform;
-
-    fn data(&self, transform: &GlobalTransform, projection: Mat4) -> Self::Data;
 
     fn projection(&self, screen_size: Size) -> Mat4;
 
     fn far(&self) -> f32;
 }
 
+#[derive(Clone, Copy, ShaderType)]
+pub struct ViewUniform {
+    world: Mat4,
+    view: Mat4,
+    projection: Mat4,
+}
+
 pub struct ViewInstance<V: View> {
     pub view: V,
-    pub data: V::Data,
     pub local: V::Transform,
-    pub global: GlobalTransform,
+    pub data: ViewUniform,
     pub offset: DynamicOffset,
 }
 
@@ -48,14 +51,24 @@ impl<V: View> ViewSet<V> {
         let screen_size = Size::new(surface.width() as f32, surface.height() as f32);
         let mut extracted = HashMap::new();
         for (entity, global, local, view) in query.iter() {
-            let projection = view.projection(screen_size);
+            let world = global.matrix();
+            let (_, rotation, translation) = world.to_scale_rotation_translation();
+            let data = ViewUniform {
+                world,
+                view: Mat4::look_at_rh(
+                    translation,
+                    translation + rotation * Vec3::Z,
+                    rotation * Vec3::Y,
+                ),
+                projection: view.projection(screen_size),
+            };
+
             extracted.insert(
                 entity,
                 ViewInstance {
                     view: view.clone(),
-                    data: view.data(global, projection),
                     local: *local,
-                    global: *global,
+                    data,
                     offset: 0,
                 },
             );
@@ -67,9 +80,10 @@ impl<V: View> ViewSet<V> {
 
 #[derive(Resource)]
 pub struct ViewBuffer<V: View> {
-    buffer: UniformBufferArray<V::Data>,
+    buffer: UniformBufferArray<ViewUniform>,
     bind_group: BindGroup,
     layout: BindGroupLayout,
+    _marker: std::marker::PhantomData<V>,
 }
 
 impl<V: View> ViewBuffer<V> {
@@ -106,8 +120,8 @@ impl<V: View> ViewBuffer<V> {
     }
 }
 
-impl<V: View> AsRef<UniformBufferArray<V::Data>> for ViewBuffer<V> {
-    fn as_ref(&self) -> &UniformBufferArray<V::Data> {
+impl<V: View> AsRef<UniformBufferArray<ViewUniform>> for ViewBuffer<V> {
+    fn as_ref(&self) -> &UniformBufferArray<ViewUniform> {
         &self.buffer
     }
 }
@@ -129,6 +143,7 @@ impl<V: View> RenderResource for ViewBuffer<V> {
             buffer,
             bind_group,
             layout,
+            _marker: Default::default(),
         })
     }
 }

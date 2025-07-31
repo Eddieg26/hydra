@@ -192,6 +192,20 @@ impl GpuShader {
             module: Arc::new(module),
         })
     }
+
+    pub fn generate_padded_struct(name: &str, size_in_bytes: usize) -> String {
+        let padded_size = (size_in_bytes + 15) & !15; // round up to nearest multiple of 16
+        let full_chunks = padded_size / 16;
+
+        let mut struct_def = format!("struct {name} {{\n",);
+
+        for i in 0..full_chunks {
+            struct_def.push_str(&format!("    data{}: vec4<u32>;\n", i));
+        }
+
+        struct_def.push_str("};");
+        struct_def
+    }
 }
 
 impl<'de> serde::Deserialize<'de> for GpuShader {

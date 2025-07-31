@@ -1,6 +1,6 @@
 use crate::{
     CameraRenderTargets, Color, GraphPass, Name, PassBuilder, RenderContext, RenderGraphError,
-    RenderState, drawable::ViewDrawSet, material::RenderPhase, view::ViewSet,
+    RenderState, drawable::PhaseDrawCalls, material::RenderPhase, view::ViewSet,
 };
 use ecs::Entity;
 
@@ -20,8 +20,8 @@ impl RenderPhases {
                     return;
                 };
 
-                let draw_calls = ctx.world().resource::<ViewDrawSet<P::View, P>>();
-                let Some(calls) = draw_calls.0.get(&entity) else {
+                let draw_calls = ctx.world().resource::<PhaseDrawCalls<P>>();
+                let Some(calls) = draw_calls.views.get(&entity) else {
                     return;
                 };
 

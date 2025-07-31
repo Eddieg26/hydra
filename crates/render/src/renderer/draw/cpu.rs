@@ -1,7 +1,7 @@
 use crate::{
     BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, Buffer, MeshFormat,
-    RenderAssets, RenderDevice, RenderMesh, RenderResource, ShaderData, SubMesh,
-    drawable::{DrawCall, DrawMode, DrawPipeline, DrawSet, Drawable, ViewDrawSet},
+    ModelTransform, RenderAssets, RenderDevice, RenderMesh, RenderResource, ShaderData, SubMesh,
+    drawable::{DrawCall, DrawMode, DrawPipeline, DrawSet, Drawable, PhaseDrawCalls},
     material::{Material, RenderPhase},
     view::ViewSet,
 };
@@ -18,8 +18,7 @@ pub struct BatchIndex {
     pub instances: Range<u32>,
 }
 
-#[derive(Resource)]
-pub struct UniformDataBuffer<T: ShaderData> {
+pub struct BatchedUniformBuffer<T: ShaderData> {
     buffer: Buffer,
     data: DynamicUniformBuffer<Vec<u8>>,
     batch_size: u32,
@@ -30,7 +29,7 @@ pub struct UniformDataBuffer<T: ShaderData> {
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<T: ShaderData> UniformDataBuffer<T> {
+impl<T: ShaderData> BatchedUniformBuffer<T> {
     pub fn get_batch_size(device: &RenderDevice) -> u32 {
         (device.limits().max_uniform_buffer_binding_size / std::mem::size_of::<T>() as u32)
             .min(MAX_OBJECT_COUNT)
@@ -149,14 +148,17 @@ impl<T: ShaderData> UniformDataBuffer<T> {
 
         self.bind_groups = bind_groups;
     }
+}
 
-    pub(crate) fn update_buffer(device: &RenderDevice, data: &mut Self) {
-        data.update(device);
+#[derive(Resource)]
+pub struct ModelUnifomBuffer(BatchedUniformBuffer<ModelTransform>);
+impl ModelUnifomBuffer {
+    pub fn layout(&self) -> &BindGroupLayout {
+        &self.0.layout
     }
 
-    pub(crate) fn clear_buffer(data: &mut Self) {
-        data.data.as_mut().clear();
-        data.data.set_offset(0);
+    pub fn bind_groups(&self) -> &[BindGroup] {
+        &self.0.bind_groups
     }
 
     pub(crate) fn queue<D, P>(
@@ -165,11 +167,11 @@ impl<T: ShaderData> UniformDataBuffer<T> {
         pipeline: &DrawPipeline<D>,
         meshes: &RenderAssets<RenderMesh>,
         sub_meshes: &RenderAssets<SubMesh>,
-        view_draw_set: &mut ViewDrawSet<D::View, P>,
+        draw_calls: &mut PhaseDrawCalls<P>,
         instances: &mut Self,
     ) where
-        P: RenderPhase<View = D::View>,
-        D: Drawable<Model = T>,
+        P: RenderPhase,
+        D: Drawable<View = P::View>,
         D::Material: Material<Phase = P>,
     {
         for view in views.0.keys() {
@@ -200,12 +202,12 @@ impl<T: ShaderData> UniformDataBuffer<T> {
                     continue;
                 };
 
-                let data = drawables.iter().map(|d| d.model()).collect::<Vec<_>>();
-                let mut batches = instances.push(&data);
+                let data = drawables.iter().map(|d| d.model).collect::<Vec<_>>();
+                let mut batches = instances.0.push(&data);
 
                 match mesh.format() {
-                    MeshFormat::Indexed { format, .. } => view_draw_set
-                        .0
+                    MeshFormat::Indexed { format, .. } => draw_calls
+                        .views
                         .entry(*view)
                         .or_default()
                         .extend(batches.drain(..).map(|b| DrawCall {
@@ -219,11 +221,11 @@ impl<T: ShaderData> UniformDataBuffer<T> {
                             },
                             pipeline: **pipeline,
                             item: P::Item::default(),
-                            function: ViewDrawSet::<D::View, P>::draw::<D>,
+                            function: PhaseDrawCalls::<P>::draw::<D>,
                         })),
                     MeshFormat::NonIndexed => {
-                        view_draw_set
-                            .0
+                        draw_calls
+                            .views
                             .entry(*view)
                             .or_default()
                             .extend(batches.drain(..).map(|b| DrawCall {
@@ -236,25 +238,33 @@ impl<T: ShaderData> UniformDataBuffer<T> {
                                 },
                                 pipeline: **pipeline,
                                 item: P::Item::default(),
-                                function: ViewDrawSet::<D::View, P>::draw::<D>,
+                                function: PhaseDrawCalls::<P>::draw::<D>,
                             }))
                     }
                 };
             }
         }
     }
-}
 
-impl<T: ShaderData> RenderResource for UniformDataBuffer<T> {
-    type Arg = Read<RenderDevice>;
+    pub(crate) fn update_buffer(device: &RenderDevice, data: &mut Self) {
+        data.0.update(device);
+    }
 
-    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
-        Ok(UniformDataBuffer::new(device))
+    pub(crate) fn reset_buffer(data: &mut Self) {
+        data.0.data.set_offset(0);
     }
 }
 
-impl<T: ShaderData> AsRef<Buffer> for UniformDataBuffer<T> {
+impl RenderResource for ModelUnifomBuffer {
+    type Arg = Read<RenderDevice>;
+
+    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
+        Ok(Self(BatchedUniformBuffer::new(device)))
+    }
+}
+
+impl AsRef<Buffer> for ModelUnifomBuffer {
     fn as_ref(&self) -> &Buffer {
-        &self.buffer
+        &self.0.buffer
     }
 }
