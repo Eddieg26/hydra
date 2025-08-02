@@ -1,5 +1,7 @@
 use crate::{
-    draw::{PhaseDrawCalls, View, ViewBuffer}, BindGroup, BindGroupLayout, GraphPass, PassBuilder, RenderContext, RenderGraphError, RenderState, SubGraph
+    BindGroup, BindGroupLayout, GraphPass, PassBuilder, RenderContext, RenderGraphError,
+    RenderState, SubGraph,
+    draw::{PhaseDrawCalls, View, ViewBuffer},
 };
 use ecs::Entity;
 
@@ -172,6 +174,7 @@ impl<M: ShaderModel> GraphPass for DrawPass<M> {
         let name: &'static str = ecs::ext::short_type_name::<Self>();
         let data = M::setup(builder, &mut phases);
         builder.name = name;
+        builder.dependency::<ClearPass>();
 
         move |ctx: &mut RenderContext| {
             let view = ctx.view().ok_or(RenderGraphError::MissingView)?;
