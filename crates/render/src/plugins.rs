@@ -1,5 +1,5 @@
 use crate::{
-    Camera, CameraRenderTargets, CameraSubGraph, ExtractError, GlobalShaderConstant,
+    Camera, CameraAttachments, CameraSortOrder, CameraSubGraph, ExtractError, GlobalShaderConstant,
     GlobalShaderConstants, GpuShader, GpuTexture, MeshFilter, ObjImporter, ProcessAssets,
     QueueDraws, QueueViews, RenderDevice, RenderGraphBuilder, RenderMesh, RenderTarget, SubMesh,
     Texture2dImporter,
@@ -10,6 +10,7 @@ use crate::{
         BatchedUniformBuffer, ClearPass, DrawModel, DrawPass, DrawPipeline, Drawable, MainDrawPass,
         Material, MaterialInstance, MaterialLayout, ModelData, ModelUniformData, View, ViewBuffer,
     },
+    processor::ShaderConstant,
     renderer::{GraphPass, RenderGraph, SubGraph},
     resources::{
         AssetExtractors, ExtractInfo, Fallbacks, Mesh, PipelineCache, RenderAsset, RenderAssets,
@@ -80,7 +81,8 @@ impl Plugin for RenderPlugin {
         };
 
         let (surface, device) = smol::block_on(task);
-        let enabled = StorageBufferEnabled::get(&device);
+        // TODO: let enabled = StorageBufferEnabled::get(&device);
+        let enabled = ShaderConstant::Bool(false);
 
         app.sub_app_mut(RenderApp)
             .add_resource(surface)
@@ -197,10 +199,12 @@ impl Plugin for CameraPlugin {
             SyncComponentPlugin::<Camera, RenderApp>::new(),
             RenderPlugin,
         ))
+        .add_sub_graph::<CameraSubGraph>()
         .sub_app_mut(RenderApp)
-        .add_resource(CameraRenderTargets::default())
-        .add_systems(PreRender, CameraRenderTargets::queue)
-        .add_systems(PostRender, CameraRenderTargets::cleanup);
+        .register::<CameraAttachments>()
+        .add_resource(CameraSortOrder::default())
+        .add_systems(PreRender, CameraAttachments::queue)
+        .add_systems(PostRender, CameraAttachments::cleanup);
     }
 }
 
@@ -216,7 +220,7 @@ impl<V: View> Plugin for ViewPlugin<V> {
             SyncComponentPlugin::<V, RenderApp>::new(),
             SyncComponentPlugin::<V::Transform, RenderApp>::new(),
             SyncComponentPlugin::<GlobalTransform, RenderApp>::new(),
-            RenderPlugin,
+            CameraPlugin,
         ))
         .add_render_resource::<ViewBuffer<V>>()
         .sub_app_mut(RenderApp)
@@ -267,7 +271,7 @@ impl<D: Drawable> Plugin for DrawPlugin<D> {
         ))
         .add_render_resource::<DrawPipeline<D>>()
         .add_nested_sub_graph::<CameraSubGraph, MainDrawPass>()
-        .add_sub_graph_pass::<MainDrawPass, ClearPass>(ClearPass)
+        .add_sub_graph_pass::<MainDrawPass, ClearPass>(ClearPass::default())
         .add_sub_graph_pass::<MainDrawPass, DrawPass<DrawModel<D>>>(DrawPass::new())
         .add_systems(QueueDraws, BatchedUniformBuffer::<ModelData>::queue::<D>);
     }

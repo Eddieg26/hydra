@@ -1,16 +1,33 @@
-use std::collections::HashSet;
-
 use crate::{
-    RenderAssets, RenderDevice, RenderGraphError, RenderSurface, RenderSurfaceTexture,
-    RenderTarget,
+    RenderAssets, RenderContext, RenderDevice, RenderGraphError, RenderSurface,
+    RenderSurfaceTexture, RenderTarget,
     primitives::{Color, Viewport},
     renderer::graph::SubGraph,
     resources::RenderTexture,
 };
 use asset::AssetId;
-use ecs::{Component, Entity, IndexMap, Query, Resource, app::sync::MainEntity};
+use ecs::{AddComponent, Commands, Component, Entity, Query, Resource, query::Without};
 use encase::ShaderType;
 use math::{Mat4, Size, Vec3, Vec3A, Vec4, bounds::Bounds, sphere::Sphere};
+
+#[derive(Debug, Clone, Component, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Camera {
+    pub viewport: Viewport,
+    pub order: i32,
+    pub clear_color: Option<Color>,
+    pub target: Option<AssetId<RenderTexture>>,
+}
+
+impl Default for Camera {
+    fn default() -> Self {
+        Self {
+            viewport: Viewport::new(0.0, 0.0, 1.0, 1.0, 0.0..1.0),
+            order: Default::default(),
+            clear_color: Default::default(),
+            target: Default::default(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Projection {
@@ -90,171 +107,97 @@ impl Projection {
     }
 }
 
-#[derive(Debug, Clone, Component, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Camera {
-    pub viewport: Viewport,
-    pub order: u32,
-    pub clear_color: Option<Color>,
-    pub target: Option<AssetId<RenderTexture>>,
-}
-
-impl Default for Camera {
-    fn default() -> Self {
-        Self {
-            viewport: Viewport::new(0.0, 0.0, 1.0, 1.0, 0.0..1.0),
-            order: Default::default(),
-            clear_color: Default::default(),
-            target: Default::default(),
-        }
-    }
-}
-
-pub struct CameraRenderTarget {
+#[derive(Component)]
+pub struct CameraAttachments {
     pub size: Size<u32>,
+    pub clear: Option<Color>,
     pub color: Option<wgpu::TextureView>,
     pub depth: wgpu::TextureView,
-    pub clear: Option<Color>,
     pub target: Option<AssetId<RenderTexture>>,
-    pub order: u32,
+    pub viewport: Viewport,
 }
 
-#[derive(Default, Resource)]
-pub struct CameraRenderTargets {
-    targets: IndexMap<Entity, CameraRenderTarget>,
-}
-
-impl CameraRenderTargets {
-    pub fn get(&self, entity: &Entity) -> Option<&CameraRenderTarget> {
-        self.targets.get(entity)
-    }
-
-    pub fn contains(&self, entity: &Entity) -> bool {
-        self.targets.contains_key(entity)
-    }
-
+impl CameraAttachments {
     pub(crate) fn queue(
-        targets: &mut Self,
-        cameras: Query<(&MainEntity, &Camera)>,
+        cameras: Query<(Entity, &Camera), Without<CameraAttachments>>,
+        attachments: Query<(Entity, &Camera, &mut CameraAttachments)>,
+        targets: &RenderAssets<RenderTarget>,
         device: &RenderDevice,
-        surface: &RenderSurface,
-        surface_texture: &RenderSurfaceTexture,
-        render_targets: &RenderAssets<RenderTarget>,
+        surface: &RenderSurfaceTexture,
+        sort_order: &mut CameraSortOrder,
+        mut commands: Commands,
     ) {
-        let mut set = HashSet::new();
+        sort_order.clear();
+
         for (entity, camera) in cameras.iter() {
-            let remove = if let Some(id) = camera.target {
-                Self::add_render_target(
-                    targets,
-                    device,
-                    &entity.0,
-                    camera,
-                    surface,
-                    id,
-                    render_targets,
-                )
-            } else {
-                Self::add_surface_target(
-                    targets,
-                    device,
-                    &entity.0,
-                    camera,
-                    surface,
-                    surface_texture,
-                )
+            let target = match camera.target {
+                Some(id) => targets.get(&id).map(|t| (t.size(), t.view().clone())),
+                None => surface.get().map(|s| {
+                    (
+                        Size::new(s.texture.width(), s.texture.height()),
+                        s.texture.create_view(&Default::default()),
+                    )
+                }),
             };
 
-            set.insert(entity.0);
-            remove.then_some(|| targets.targets.shift_remove(&entity.0));
-        }
+            let Some((size, color)) = target else {
+                continue;
+            };
 
-        targets.targets.retain(|e, _| set.contains(e));
-        targets.targets.sort_by(|_, a, _, b| a.order.cmp(&b.order));
-    }
-
-    /// Remove old surface render targets to avoid accessing destroyed textures.
-    /// This is necessary because the surface texture is recreated every frame.
-    /// If the render target uses a surface texture, we remove the target from the list.
-    pub(crate) fn cleanup(targets: &mut Self) {
-        targets.targets.values_mut().for_each(|t| {
-            if t.target.is_none() {
-                t.color = None;
-            }
-        });
-    }
-
-    #[inline]
-    fn add_surface_target(
-        targets: &mut Self,
-        device: &RenderDevice,
-        entity: &Entity,
-        camera: &Camera,
-        surface: &RenderSurface,
-        surface_texture: &RenderSurfaceTexture,
-    ) -> bool {
-        let Some(texture) = surface_texture.get() else {
-            return true;
-        };
-
-        match targets.targets.get_mut(entity) {
-            Some(target) if target.size == surface.size() && target.target.is_some() => {
-                target.color = Some(texture.texture.create_view(&Default::default()))
-            }
-            _ => {
-                let color = Some(texture.texture.create_view(&Default::default()));
-                let depth =
-                    Self::create_depth_texture(device, surface.size(), surface.depth_format());
-
-                let target = CameraRenderTarget {
-                    size: surface.size(),
-                    color,
-                    depth: depth.create_view(&Default::default()),
-                    clear: camera.clear_color,
-                    target: camera.target,
-                    order: camera.order,
-                };
-
-                targets.targets.insert(*entity, target);
-            }
-        }
-
-        false
-    }
-
-    #[inline]
-    fn add_render_target(
-        targets: &mut Self,
-        device: &RenderDevice,
-        entity: &Entity,
-        camera: &Camera,
-        surface: &RenderSurface,
-        target: AssetId<RenderTexture>,
-        render_targets: &RenderAssets<RenderTarget>,
-    ) -> bool {
-        let Some(target) = render_targets.get(&target.into()) else {
-            return true;
-        };
-
-        if !targets
-            .get(entity)
-            .is_some_and(|t| t.target == camera.target)
-        {
-            let size = Size::new(target.width(), target.height());
-            let color = Some(target.texture().create_view(&Default::default()));
-            let depth = Self::create_depth_texture(device, size, surface.depth_format());
-
-            let target = CameraRenderTarget {
+            let viewport = camera.viewport.scale(size.width as f32, size.height as f32);
+            let depth = Self::create_depth_texture(device, size, RenderSurface::DEPTH_FORMAT);
+            let attachments = CameraAttachments {
                 size,
-                color,
-                depth: depth.create_view(&Default::default()),
                 clear: camera.clear_color,
+                color: Some(color),
+                depth: depth.create_view(&Default::default()),
                 target: camera.target,
-                order: camera.order,
+                viewport,
             };
 
-            targets.targets.insert(*entity, target);
+            sort_order.push((entity, camera.order));
+            commands.add(AddComponent::new(entity, attachments));
         }
 
-        false
+        for (entity, camera, attachments) in attachments.iter() {
+            let target = match camera.target {
+                Some(id) => targets.get(&id).map(|t| (t.size(), t.view().clone())),
+                None => surface.get().map(|s| {
+                    (
+                        Size::new(s.texture.width(), s.texture.height()),
+                        s.texture.create_view(&Default::default()),
+                    )
+                }),
+            };
+
+            let Some((size, color)) = target else {
+                attachments.color = None;
+                continue;
+            };
+
+            attachments.color = Some(color);
+            attachments.clear = camera.clear_color;
+            attachments.viewport = camera.viewport.scale(size.width as f32, size.height as f32);
+
+            if camera.target != attachments.target || size != attachments.size {
+                let depth = Self::create_depth_texture(device, size, RenderSurface::DEPTH_FORMAT);
+                attachments.depth = depth.create_view(&Default::default());
+                attachments.size = size;
+                attachments.target = camera.target;
+            }
+
+            sort_order.push((entity, camera.order));
+        }
+
+        sort_order.sort_by(|a, b| a.1.cmp(&b.1));
+    }
+
+    pub(crate) fn cleanup(cameras: Query<&mut CameraAttachments>) {
+        for attachments in cameras.iter() {
+            if attachments.target.is_none() {
+                attachments.color = None;
+            }
+        }
     }
 
     fn create_depth_texture(
@@ -281,15 +224,78 @@ impl CameraRenderTargets {
     }
 }
 
+#[derive(Default, Resource)]
+pub struct CameraSortOrder(Vec<(Entity, i32)>);
+impl std::ops::Deref for CameraSortOrder {
+    type Target = Vec<(Entity, i32)>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for CameraSortOrder {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 pub struct CameraSubGraph;
+
+impl CameraSubGraph {
+    fn clear_screen<'a>(
+        ctx: &mut RenderContext<'a>,
+        attachments: &'a CameraAttachments,
+    ) -> Option<()> {
+        let color = attachments.color.as_ref()?;
+        let color_attachments = vec![Some(wgpu::RenderPassColorAttachment {
+            view: color,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: attachments
+                    .clear
+                    .map(|c| wgpu::LoadOp::Clear(c.into()))
+                    .unwrap_or(wgpu::LoadOp::Load),
+                store: wgpu::StoreOp::Store,
+            },
+        })];
+
+        let depth_stencil_attachment = wgpu::RenderPassDepthStencilAttachment {
+            view: &attachments.depth,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(0f32),
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        };
+
+        let mut encoder = ctx.encoder();
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("ClearPass"),
+            color_attachments: &color_attachments,
+            depth_stencil_attachment: Some(depth_stencil_attachment),
+            timestamp_writes: Default::default(),
+            occlusion_query_set: Default::default(),
+        });
+
+        Some(ctx.submit(encoder.finish()))
+    }
+}
 
 impl SubGraph for CameraSubGraph {
     const NAME: super::graph::Name = "CameraSubGraph";
 
     fn run(ctx: &mut super::graph::RenderContext) -> Result<(), RenderGraphError> {
-        let cameras = ctx.world().resource::<CameraRenderTargets>();
-        for entity in cameras.targets.keys() {
-            ctx.set_view(*entity);
+        let order = ctx.world().resource::<CameraSortOrder>();
+        for (entity, _) in order.iter() {
+            let Some(attachments) = ctx.world().get_component::<CameraAttachments>(*entity) else {
+                continue;
+            };
+
+            Self::clear_screen(ctx, attachments);
+
+            ctx.set_view(*entity, attachments);
+
             let _ = ctx.run_sub_graph(Self::NAME);
         }
 

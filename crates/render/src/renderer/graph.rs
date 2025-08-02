@@ -1,6 +1,6 @@
 use crate::{
-    CameraRenderTarget, CameraRenderTargets, ComputePipeline, PipelineCache, PipelineId,
-    RenderDevice, RenderPipeline, RenderSurface,
+    CameraAttachments, ComputePipeline, PipelineCache, PipelineId, RenderDevice, RenderPipeline,
+    RenderSurface, RenderSurfaceTexture,
 };
 use ecs::{
     Commands, Entity, EventReader, IndexDag, IndexMap, Resource, World, core::ImmutableIndexDag,
@@ -30,6 +30,8 @@ pub enum RenderGraphError {
     Build,
     #[error("Missing Render View")]
     MissingView,
+    #[error("Missing Pipeline: {:?}", id)]
+    MissingPipeline { id: PipelineId },
     #[error("Missing Resource: {resource} for pass {pass}")]
     MissingResource { pass: Name, resource: NodeId },
     #[error("Missing Render target for camera: {entity}")]
@@ -603,7 +605,7 @@ impl<R: GraphResource> GraphPass for CreateResourcePass<R> {
 
 pub struct RenderView<'a> {
     pub entity: Entity,
-    pub target: &'a CameraRenderTarget,
+    pub attachments: &'a CameraAttachments,
 }
 
 pub struct RenderContext<'a> {
@@ -612,6 +614,7 @@ pub struct RenderContext<'a> {
     world: &'a World,
     device: &'a RenderDevice,
     surface: &'a RenderSurface,
+    surface_texture: &'a wgpu::TextureView,
     pipelines: &'a PipelineCache,
     buffers: Vec<wgpu::CommandBuffer>,
 }
@@ -622,6 +625,7 @@ impl<'a> RenderContext<'a> {
         world: &'a World,
         device: &'a RenderDevice,
         surface: &'a RenderSurface,
+        surface_texture: &'a wgpu::TextureView,
     ) -> Self {
         Self {
             view: None,
@@ -629,6 +633,7 @@ impl<'a> RenderContext<'a> {
             world,
             device,
             surface,
+            surface_texture,
             pipelines: world.resource::<PipelineCache>(),
             buffers: Vec::new(),
         }
@@ -650,15 +655,19 @@ impl<'a> RenderContext<'a> {
         self.surface
     }
 
+    pub fn surface_texture(&self) -> &'a wgpu::TextureView {
+        self.surface_texture
+    }
+
     pub fn get<R: GraphResource>(&self, id: GraphResourceId<R>) -> Option<&R> {
         self.graph.get::<R>(id)
     }
 
-    pub fn get_render_pipeline(&self, id: &PipelineId) -> Option<&RenderPipeline> {
+    pub fn get_render_pipeline(&self, id: &PipelineId) -> Option<&'a RenderPipeline> {
         self.pipelines.get_render_pipeline(id)
     }
 
-    pub fn get_compute_pipeline(&self, id: &PipelineId) -> Option<&ComputePipeline> {
+    pub fn get_compute_pipeline(&self, id: &PipelineId) -> Option<&'a ComputePipeline> {
         self.pipelines.get_compute_pipeline(id)
     }
 
@@ -670,17 +679,11 @@ impl<'a> RenderContext<'a> {
         self.buffers.push(buffer);
     }
 
-    pub(crate) fn set_view(&mut self, view: Entity) {
-        let view = self
-            .world
-            .resource::<CameraRenderTargets>()
-            .get(&view)
-            .map(|target| RenderView {
-                entity: view,
-                target,
-            });
-
-        self.view = view;
+    pub(crate) fn set_view(&mut self, view: Entity, attachments: &'a CameraAttachments) {
+        self.view = Some(RenderView {
+            entity: view,
+            attachments,
+        });
     }
 
     pub(crate) fn run_sub_graph(&mut self, name: Name) -> Result<(), RenderGraphError> {
@@ -726,8 +729,23 @@ impl RenderGraph {
         }
     }
 
-    pub fn run(&mut self, world: &World, device: &RenderDevice, surface: &RenderSurface) {
-        if let Ok(buffers) = RenderContext::new(self, world, device, surface).run() {
+    pub fn run(
+        &mut self,
+        world: &World,
+        device: &RenderDevice,
+        surface: &RenderSurface,
+        surface_texture: &RenderSurfaceTexture,
+    ) {
+        let Some(surface_texture) = surface_texture
+            .get()
+            .map(|v| v.texture.create_view(&Default::default()))
+        else {
+            return;
+        };
+
+        if let Ok(buffers) =
+            RenderContext::new(self, world, device, surface, &surface_texture).run()
+        {
             device.queue.submit(buffers);
         }
     }
@@ -737,8 +755,9 @@ impl RenderGraph {
         world: &World,
         device: &RenderDevice,
         surface: &RenderSurface,
+        surface_texture: &RenderSurfaceTexture,
     ) {
-        graph.run(world, device, surface);
+        graph.run(world, device, surface, surface_texture);
     }
 
     pub(crate) fn invalidate(

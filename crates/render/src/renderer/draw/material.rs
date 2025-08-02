@@ -24,9 +24,9 @@ pub enum DepthWrite {
 pub trait Material: Asset + AsBinding + Clone {
     type View: View;
 
-    type Model: ShaderModel<View = Self::View>;
+    type Model: ShaderModel;
 
-    type Phase: ShaderPhase;
+    type Phase: ShaderPhase<View = Self::View>;
 
     fn depth_write() -> DepthWrite {
         DepthWrite::Auto

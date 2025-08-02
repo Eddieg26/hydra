@@ -37,9 +37,16 @@
 //     math::Vec2::new(0.0, 0.0), // Top-left
 // ];
 
-use asset::{AssetId, embed_asset, io::EmbeddedFs, plugin::AssetAppExt};
-use ecs::{App};
-use render::{Mesh, MeshSettings, Shader, ShaderSettings};
+use asset::{
+    Asset, AssetId, database::AssetDatabaseError, embed_asset, io::EmbeddedFs, plugin::AssetAppExt,
+};
+use ecs::{App, Component, EventReader, Init, Spawner, Update};
+use render::{
+    AsBinding, Camera, Color, Mesh, MeshSettings, Projection, Shader, ShaderSettings,
+    draw::{BlendMode, Drawable, Material, ShaderModel, ShaderPhase, Unlit, View},
+    plugins::ViewPlugin,
+};
+use transform::{GlobalTransform, Transform};
 
 const COMMON_SHADER: AssetId<Shader> = AssetId::from_u128(0x3e7c2a1b4f5e4c2e9d1a8b7e6c5d4f3a);
 const DRAW_MESH_SHADER: AssetId<Shader> = AssetId::from_u128(0xabcdef0123456789);
@@ -83,8 +90,147 @@ fn main() {
     embed_asset!(embedded, PLANE, "meshes/plane.obj", MeshSettings::default());
 
     App::new()
+        .add_plugins(ViewPlugin::<View3d>::new())
         .add_source("embedded", embedded)
         .load_asset::<Mesh>(CUBE)
         .load_asset::<Mesh>(PLANE)
+        .add_systems(Update, |errors: EventReader<AssetDatabaseError>| {
+            for error in errors {
+                println!("{error}");
+            }
+        })
+        .add_systems(Init, |mut spawner: Spawner| {
+            spawner
+                .spawn()
+                .with_component(Camera {
+                    clear_color: Some(Color::blue()),
+                    ..Default::default()
+                })
+                .with_component(Transform::default())
+                .with_component(GlobalTransform::default())
+                .with_component(View3d::default())
+                .finish();
+        })
         .run();
+}
+
+#[derive(Default, Clone, Copy, PartialEq, PartialOrd)]
+pub struct ZDistance(f32);
+
+#[derive(Clone, Component)]
+pub struct View3d {
+    projection: Projection,
+}
+
+impl Default for View3d {
+    fn default() -> Self {
+        Self {
+            projection: Projection::Perspective {
+                fov: 60.0f32.to_radians(),
+                near: 0.1,
+                far: 1000.0,
+            },
+        }
+    }
+}
+
+impl View for View3d {
+    type Transform = Transform;
+
+    type Item = ZDistance;
+
+    fn projection(&self, width: f32, height: f32) -> math::Mat4 {
+        let aspect_ratio = width / height;
+        match self.projection {
+            Projection::Orthographic { near, far, size } => {
+                let width = size * aspect_ratio;
+                math::Mat4::orthographic_rh(-width, width, -size, size, near, far)
+            }
+            Projection::Perspective { fov, near, .. } => {
+                math::Mat4::perspective_infinite_reverse_rh(fov, aspect_ratio, near)
+            }
+        }
+    }
+
+    fn far(&self) -> f32 {
+        self.projection.far()
+    }
+}
+
+#[derive(Component)]
+pub struct DrawMesh<M: Material> {
+    material: AssetId<M>,
+}
+
+impl<M: Material> Clone for DrawMesh<M> {
+    fn clone(&self) -> Self {
+        Self {
+            material: self.material,
+        }
+    }
+}
+
+impl<M: Material<View = View3d>> Drawable for DrawMesh<M> {
+    type View = View3d;
+
+    type Material = M;
+
+    fn material(&self) -> AssetId<Self::Material> {
+        self.material
+    }
+
+    fn vertex() -> &'static [render::wgpu::VertexFormat] {
+        &[
+            render::wgpu::VertexFormat::Float32x3,
+            render::wgpu::VertexFormat::Float32x3,
+            render::wgpu::VertexFormat::Float32x2,
+            render::wgpu::VertexFormat::Float32x4,
+        ]
+    }
+
+    fn shader() -> impl Into<AssetId<Shader>> {
+        DRAW_MESH_SHADER
+    }
+}
+
+pub struct Opaque3d;
+
+impl ShaderPhase for Opaque3d {
+    type View = View3d;
+
+    fn mode() -> BlendMode {
+        BlendMode::Opaque
+    }
+}
+
+#[derive(Clone, Copy, Asset, AsBinding)]
+pub struct UnlitColor {
+    #[uniform(0)]
+    color: Color,
+}
+
+impl Material for UnlitColor {
+    type View = View3d;
+
+    type Model = Unlit;
+
+    type Phase = Opaque3d;
+
+    fn shader() -> impl Into<AssetId<Shader>> {
+        UNLIT_COLOR_SHADER
+    }
+}
+
+pub struct ShaderModel3d;
+impl ShaderModel for ShaderModel3d {
+    type Base = Self;
+
+    type Data = ();
+
+    fn setup(
+        _: &mut render::PassBuilder,
+        phases: &mut render::draw::ShaderPhases<Self>,
+    ) -> Self::Data {
+        phases.add_phase::<Opaque3d>();
+    }
 }

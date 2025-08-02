@@ -89,9 +89,7 @@ impl<'a> From<&'a str> for ShaderProcessorError<'a> {
     }
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub enum ShaderConstant {
     Bool(bool),
     I32(i32),
@@ -432,28 +430,42 @@ impl<'a> ShaderProcessor<'a> {
                 Token::Const(line) => {
                     let start = line.split_whitespace().next().unwrap_or("");
                     let trimmed = line.trim_start();
-                    let name_end = trimmed
-                        .find(":")
-                        .ok_or(ShaderProcessorError::InvalidConstSyntax { line })?;
-                    let name = trimmed
-                        .get(Token::CONST.len()..name_end)
-                        .ok_or(ShaderProcessorError::InvalidConstSyntax { line })?
-                        .trim();
-                    let ty = trimmed
-                        .get(name_end + 1..)
-                        .ok_or(ShaderProcessorError::InvalidConstSyntax { line })?
-                        .split("=")
-                        .next()
-                        .ok_or(ShaderProcessorError::InvalidConstSyntax { line })?
-                        .trim();
 
-                    match constants.get(name) {
-                        Some(value) => {
-                            code.push_str(&format!("{start} {name}: {ty} = {};", value.to_string()))
+                    if let Some(colon_pos) = trimmed.find(':') {
+                        let name = trimmed
+                            .get(Token::CONST.len()..colon_pos)
+                            .ok_or(ShaderProcessorError::InvalidConstSyntax { line })?
+                            .trim();
+                        let ty = trimmed
+                            .get(colon_pos + 1..)
+                            .ok_or(ShaderProcessorError::InvalidConstSyntax { line })?
+                            .split("=")
+                            .next()
+                            .ok_or(ShaderProcessorError::InvalidConstSyntax { line })?
+                            .trim();
+
+                        match constants.get(name) {
+                            Some(value) => code.push_str(&format!(
+                                "{start} {name}: {ty} = {};",
+                                value.to_string()
+                            )),
+                            None => code.push_str(line),
                         }
-                        None => code.push_str(line),
+                    } else if let Some(equals_pos) = trimmed.find('=') {
+                        let name = trimmed
+                            .get(Token::CONST.len()..equals_pos)
+                            .ok_or(ShaderProcessorError::InvalidConstSyntax { line })?
+                            .trim();
+
+                        match constants.get(name) {
+                            Some(value) => {
+                                code.push_str(&format!("{start} {name} = {};", value.to_string()))
+                            }
+                            None => code.push_str(line),
+                        }
+                    } else {
+                        return Err(ShaderProcessorError::InvalidConstSyntax { line });
                     }
-                    code.push('\n');
                 }
                 Token::Slot(line) => {
                     let slot_name = line

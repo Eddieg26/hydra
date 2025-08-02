@@ -1,6 +1,6 @@
 use crate::{
     AppTag, Commands, Component, Despawn, Despawned, Entity, EventReader, Extract, Plugin,
-    system::{Main, Removed},
+    system::{Added, Main, Modified, Or, Removed},
     unlifetime::SQuery,
 };
 use derive_ecs::Resource;
@@ -54,7 +54,10 @@ impl<C: Component + Clone, A: AppTag + Default + Clone> SyncComponentPlugin<C, A
         Self(Default::default())
     }
 
-    fn sync_component(query: Main<SQuery<(Entity, &C)>>, mut commands: Commands) {
+    fn sync_component(
+        query: Main<SQuery<(Entity, &C), Or<(Added<C>, Modified<C>)>>>,
+        mut commands: Commands,
+    ) {
         for (entity, component) in query.iter() {
             let component = component.clone();
             commands.add(move |world: &mut crate::World| {
@@ -63,7 +66,7 @@ impl<C: Component + Clone, A: AppTag + Default + Clone> SyncComponentPlugin<C, A
                     let map = world.get_mut().resource_mut::<EntityWorldMap>();
                     *map.0.entry(entity).or_insert_with(|| {
                         let entity = world.get_mut().spawn();
-                        world.get_mut().add_components(entity, MainEntity(entity));
+                        world.get_mut().add_component(entity, MainEntity(entity));
                         entity
                     })
                 };

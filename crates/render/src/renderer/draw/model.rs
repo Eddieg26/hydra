@@ -1,5 +1,5 @@
 use crate::{
-    BindGroup, BindGroupLayout, GraphPass, PassBuilder, RenderContext, RenderGraphError,
+    BindGroup, BindGroupLayout, Color, GraphPass, PassBuilder, RenderContext, RenderGraphError,
     RenderState, SubGraph,
     draw::{PhaseDrawCalls, View, ViewBuffer},
 };
@@ -21,6 +21,8 @@ impl Into<wgpu::BlendState> for BlendMode {
 }
 
 pub trait ShaderPhase: Send + Sync + 'static {
+    type View: View;
+
     fn mode() -> BlendMode;
 }
 
@@ -35,7 +37,7 @@ impl<M: ShaderModel> ShaderPhases<M> {
 
     pub fn add_phase<P: ShaderPhase>(&mut self) {
         let f: ShaderPhaseFn = |entity, ctx, state| {
-            let views = ctx.world().resource::<ViewBuffer<M::View>>();
+            let views = ctx.world().resource::<ViewBuffer<P::View>>();
             let Some(view) = views.instance(&entity) else {
                 return;
             };
@@ -58,9 +60,7 @@ impl<M: ShaderModel> ShaderPhases<M> {
     }
 }
 
-pub trait ShaderModel: Sized + 'static {
-    type View: View;
-
+pub trait ShaderModel: Send + Sync + Sized + 'static {
     type Base: ShaderModel;
 
     type Data: Send + Sync + 'static;
@@ -83,10 +83,18 @@ pub trait ShaderModel: Sized + 'static {
     }
 }
 
-pub struct Unlit<M: ShaderModel>(std::marker::PhantomData<M>);
-impl<M: ShaderModel> ShaderModel for Unlit<M> {
-    type View = M::View;
+impl ShaderModel for () {
+    type Base = ();
 
+    type Data = ();
+
+    fn setup(_: &mut PassBuilder, _: &mut ShaderPhases<Self>) -> Self::Data {
+        ()
+    }
+}
+
+pub struct Unlit<M: ShaderModel = ()>(std::marker::PhantomData<M>);
+impl<M: ShaderModel> ShaderModel for Unlit<M> {
     type Base = M;
 
     type Data = ();
@@ -103,7 +111,17 @@ impl<M: ShaderModel> ShaderModel for Unlit<M> {
     }
 }
 
-pub struct ClearPass;
+#[derive(Debug, Default)]
+pub struct ClearPass {
+    pub color: Color,
+}
+
+impl From<Color> for ClearPass {
+    fn from(color: Color) -> Self {
+        Self { color }
+    }
+}
+
 impl GraphPass for ClearPass {
     const NAME: crate::Name = "Clear";
 
@@ -113,38 +131,21 @@ impl GraphPass for ClearPass {
     ) -> impl Fn(&mut RenderContext) -> Result<(), RenderGraphError> + Send + Sync + 'static {
         builder.has_side_effect();
 
-        |ctx| {
-            let view = ctx.view().ok_or(RenderGraphError::MissingView)?;
-            let color = view.target.color.as_ref();
-            let color_attachments = vec![Some(wgpu::RenderPassColorAttachment {
-                view: color
-                    .as_ref()
-                    .ok_or(RenderGraphError::MissingRenderTarget {
-                        entity: view.entity,
-                    })?,
+        move |ctx| {
+            let color = wgpu::RenderPassColorAttachment {
+                view: ctx.surface_texture(),
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(
-                        view.target.clear.map_or(wgpu::Color::BLACK, |c| c.into()),
-                    ),
+                    load: wgpu::LoadOp::Clear(wgpu::Color::from(self.color)),
                     store: wgpu::StoreOp::Store,
                 },
-            })];
-
-            let depth_stencil_attachment = wgpu::RenderPassDepthStencilAttachment {
-                view: &view.target.depth,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(0f32),
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
             };
 
             let mut encoder = ctx.encoder();
             encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("ClearPass"),
-                color_attachments: &color_attachments,
-                depth_stencil_attachment: Some(depth_stencil_attachment),
+                color_attachments: &vec![Some(color)],
+                depth_stencil_attachment: None,
                 timestamp_writes: Default::default(),
                 occlusion_query_set: Default::default(),
             });
@@ -174,11 +175,12 @@ impl<M: ShaderModel> GraphPass for DrawPass<M> {
         let name: &'static str = ecs::ext::short_type_name::<Self>();
         let data = M::setup(builder, &mut phases);
         builder.name = name;
+        builder.has_side_effect();
         builder.dependency::<ClearPass>();
 
         move |ctx: &mut RenderContext| {
             let view = ctx.view().ok_or(RenderGraphError::MissingView)?;
-            let color = view.target.color.as_ref();
+            let color = view.attachments.color.as_ref();
             let mut encoder = ctx.encoder();
             let mut color_attachments = vec![Some(wgpu::RenderPassColorAttachment {
                 view: color
@@ -195,7 +197,7 @@ impl<M: ShaderModel> GraphPass for DrawPass<M> {
 
             color_attachments.extend(M::attachments(ctx, &data));
             let depth_stencil_attachment = wgpu::RenderPassDepthStencilAttachment {
-                view: &view.target.depth,
+                view: &view.attachments.depth,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,

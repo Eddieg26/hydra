@@ -30,7 +30,7 @@ pub trait ModelUniformData: ShaderType + WriteInto + Send + Sync + 'static {}
 impl<T: ShaderType + WriteInto + Send + Sync + 'static> ModelUniformData for T {}
 
 pub type DrawPhase<D> = <<D as Drawable>::Material as Material>::Phase;
-pub type DrawModel<D> = <<D as Drawable>::Material as Material>::Model;
+pub type DrawModel<D> = <<<D as Drawable>::Material as Material>::Model as ShaderModel>::Base;
 
 #[derive(Default, Clone, Copy, ShaderType)]
 pub struct ModelData {
@@ -452,8 +452,8 @@ impl<V: View> DrawCall<V> {
 
 #[derive(Resource)]
 pub struct PhaseDrawCalls<P: ShaderPhase, M: ShaderModel>(
-    pub(crate) HashMap<Entity, Vec<DrawCall<M::View>>>,
-    std::marker::PhantomData<P>,
+    pub(crate) HashMap<Entity, Vec<DrawCall<P::View>>>,
+    std::marker::PhantomData<M>,
 );
 
 impl<P: ShaderPhase, M: ShaderModel> PhaseDrawCalls<P, M> {
@@ -463,13 +463,14 @@ impl<P: ShaderPhase, M: ShaderModel> PhaseDrawCalls<P, M> {
 
     pub(super) fn draw<D>(
         state: &mut RenderState<'_>,
-        view: ViewInstance<D::View>,
-        call: &DrawCall<D::View>,
+        view: ViewInstance<P::View>,
+        call: &DrawCall<P::View>,
         world: &World,
     ) -> Result<(), DrawError>
     where
-        D: Drawable,
-        D::Material: Material<Phase = P, Model = M>,
+        D: Drawable<View = P::View>,
+        D::Material: Material<Phase = P>,
+        <D::Material as Material>::Model: ShaderModel<Base = M>,
     {
         const VIEW: u32 = 0;
         const INSTANCES: u32 = 1;

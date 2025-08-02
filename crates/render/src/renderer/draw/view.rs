@@ -12,7 +12,7 @@ use wgpu::{DynamicOffset, ShaderStages};
 pub trait View: Clone + Component {
     type Transform: LocalTransform;
 
-    type Item: Default + Copy + Ord + Eq + Send + Sync + 'static;
+    type Item: Default + Copy + PartialOrd + PartialEq + Send + Sync + 'static;
 
     fn item(&self, _local: &Self::Transform, _global: &GlobalTransform) -> Self::Item {
         Self::Item::default()

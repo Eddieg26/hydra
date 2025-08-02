@@ -47,7 +47,7 @@ pub struct RenderSurface {
 
 impl RenderSurface {
     pub const DEFAULT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
-    pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+    pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth16Unorm;
 
     pub async fn new(window: &Window) -> Result<(Self, wgpu::Adapter), RenderSurfaceError> {
         let instance = wgpu::Instance::default();

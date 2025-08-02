@@ -1,6 +1,7 @@
 use crate::{RenderAsset, device::RenderDevice, surface::RenderSurface};
 use asset::{Asset, AssetId};
 use ecs::unlifetime::Read;
+use math::Size;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Asset, serde::Serialize, serde::Deserialize)]
@@ -37,20 +38,24 @@ impl RenderTexture {
     }
 }
 
+#[derive(Asset)]
 pub struct RenderTarget {
-    width: u32,
-    height: u32,
+    size: Size<u32>,
     texture: Arc<wgpu::Texture>,
     view: wgpu::TextureView,
 }
 
 impl RenderTarget {
+    pub fn size(&self) -> Size<u32> {
+        self.size
+    }
+
     pub fn width(&self) -> u32 {
-        self.width
+        self.size.width
     }
 
     pub fn height(&self) -> u32 {
-        self.height
+        self.size.height
     }
 
     pub fn texture(&self) -> &wgpu::Texture {
@@ -93,8 +98,7 @@ impl RenderAsset for RenderTarget {
         let view = texture.create_view(&Default::default());
 
         Ok(Self {
-            width: texture.width(),
-            height: texture.height(),
+            size: Size::new(texture.width(), texture.height()),
             texture: Arc::new(texture),
             view,
         })

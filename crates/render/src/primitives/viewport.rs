@@ -20,4 +20,16 @@ impl Viewport {
             depth,
         }
     }
+
+    /// Scales the viewport dimensions by the given width and height.
+    /// This is useful for adjusting the viewport based on the size of the rendering surface.
+    pub fn scale(&self, width: f32, height: f32) -> Self {        
+        Self {
+            x: self.x * width,
+            y: self.y * height,
+            width: self.width * width,
+            height: self.height * height,
+            depth: self.depth.clone(),
+        }
+    }
 }

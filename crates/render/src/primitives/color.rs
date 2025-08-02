@@ -61,17 +61,6 @@ impl Default for Color {
     }
 }
 
-impl Into<wgpu::Color> for Color {
-    fn into(self) -> wgpu::Color {
-        wgpu::Color {
-            r: self.r as f64,
-            g: self.g as f64,
-            b: self.b as f64,
-            a: self.a as f64,
-        }
-    }
-}
-
 impl From<wgpu::Color> for Color {
     fn from(color: wgpu::Color) -> Self {
         Self {
@@ -79,6 +68,17 @@ impl From<wgpu::Color> for Color {
             g: color.g as f32,
             b: color.b as f32,
             a: color.a as f32,
+        }
+    }
+}
+
+impl From<Color> for wgpu::Color {
+    fn from(color: Color) -> Self {
+        Self {
+            r: color.r as f64,
+            g: color.g as f64,
+            b: color.b as f64,
+            a: color.a as f64,
         }
     }
 }

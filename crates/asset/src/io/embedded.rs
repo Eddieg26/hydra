@@ -5,7 +5,6 @@ use crate::{
     io::BoxFuture,
     settings::{AssetSettings, Settings},
 };
-use ecs::{AppTag, Resource};
 use serde::Serialize;
 use smol::{
     io::{AsyncRead, AsyncSeek, AsyncWrite},
@@ -316,28 +315,6 @@ impl FileSystem for EmbeddedFs {
     async fn exists(&self, path: &Path) -> Result<bool, AsyncIoError> {
         let fs = self.fs.read().await;
         Ok(fs.entries.contains_key(path))
-    }
-}
-
-#[derive(Resource)]
-pub struct AppAssets<A: AppTag>(EmbeddedFs, std::marker::PhantomData<A>);
-impl<A: AppTag> Default for AppAssets<A> {
-    fn default() -> Self {
-        Self(EmbeddedFs::new(), Default::default())
-    }
-}
-
-impl<A: AppTag> std::ops::Deref for AppAssets<A> {
-    type Target = EmbeddedFs;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<A: AppTag> std::ops::DerefMut for AppAssets<A> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 
