@@ -140,8 +140,8 @@ impl RenderSurface {
 
     pub(crate) fn resize_surface(
         window: Main<&Window>,
-        surface: &mut RenderSurface,
         device: &RenderDevice,
+        surface: &mut RenderSurface,
     ) {
         let size = window.size();
         if size.width != surface.width() || size.height != surface.height() {

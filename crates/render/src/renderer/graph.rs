@@ -1,7 +1,11 @@
 use crate::{
-    ComputePipeline, PipelineCache, PipelineId, RenderDevice, RenderPipeline, RenderSurface,
+    CameraRenderTarget, CameraRenderTargets, ComputePipeline, PipelineCache, PipelineId,
+    RenderDevice, RenderPipeline, RenderSurface,
 };
-use ecs::{Commands, Entity, IndexDag, IndexMap, Resource, World, core::ImmutableIndexDag};
+use ecs::{
+    Commands, Entity, EventReader, IndexDag, IndexMap, Resource, World, core::ImmutableIndexDag,
+    system::Main,
+};
 use smol::lock::RwLock;
 use std::{
     any::Any,
@@ -9,6 +13,7 @@ use std::{
     error::Error,
     sync::Arc,
 };
+use window::events::WindowResized;
 
 pub type Name = &'static str;
 pub type NodeId = usize;
@@ -188,6 +193,10 @@ impl ResourceNode {
         let object = (self.creator)(world, device, surface, &self.desc)?;
         self.object = Some(object);
         Ok(())
+    }
+
+    fn destroy(&mut self) {
+        self.object = None;
     }
 }
 
@@ -524,6 +533,7 @@ impl<'a> PassBuilder<'a> {
             let resource = ResourceNode::new::<R>(id, ResourceType::Imported, R::Desc::default());
             self.builder.add_pass(CreateResourcePass::<R>::new());
             self.builder.resources.insert(R::NAME, resource);
+            self.dependencies.insert(R::NAME);
             GraphResourceId::from(id)
         }
     }
@@ -561,12 +571,24 @@ impl<R: GraphResource> GraphPass for CreateResourcePass<R> {
         let id = builder.builder.resources.len();
         builder.writes.insert(id);
 
-        move |ctx| ctx.graph.resources[id].create(ctx.world, ctx.device, ctx.surface)
+        move |ctx| {
+            let resource = &mut ctx.graph.resources[id];
+            if resource.object.is_none() {
+                resource.create(ctx.world, ctx.device, ctx.surface)
+            } else {
+                Ok(())
+            }
+        }
     }
 }
 
+pub struct RenderView<'a> {
+    pub entity: Entity,
+    pub target: &'a CameraRenderTarget,
+}
+
 pub struct RenderContext<'a> {
-    view: Option<Entity>,
+    view: Option<RenderView<'a>>,
     graph: &'a mut RenderGraph,
     world: &'a World,
     device: &'a RenderDevice,
@@ -593,8 +615,8 @@ impl<'a> RenderContext<'a> {
         }
     }
 
-    pub fn view(&self) -> Option<Entity> {
-        self.view
+    pub fn view(&self) -> Option<&RenderView<'a>> {
+        self.view.as_ref()
     }
 
     pub fn world(&self) -> &'a World {
@@ -630,7 +652,16 @@ impl<'a> RenderContext<'a> {
     }
 
     pub(crate) fn set_view(&mut self, view: Entity) {
-        self.view = Some(view);
+        let view = self
+            .world
+            .resource::<CameraRenderTargets>()
+            .get(&view)
+            .map(|target| RenderView {
+                entity: view,
+                target,
+            });
+
+        self.view = view;
     }
 
     pub(crate) fn run_sub_graph(&mut self, name: Name) -> Result<(), RenderGraphError> {
@@ -689,6 +720,17 @@ impl RenderGraph {
         surface: &RenderSurface,
     ) {
         graph.run(world, device, surface);
+    }
+
+    pub(crate) fn invalidate(
+        mut events: Main<EventReader<WindowResized>>,
+        graph: &mut RenderGraph,
+    ) {
+        if events.next().is_some() {
+            for resource in graph.resources.values_mut() {
+                resource.destroy();
+            }
+        }
     }
 
     pub(crate) fn create_graph(mut commands: Commands) {

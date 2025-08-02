@@ -5,6 +5,10 @@ use crate::{
     allocator::MeshAllocatorPlugin,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     constants::StorageBufferEnabled,
+    draw::{
+        BatchedUniformBuffer, DrawPipeline, Drawable, Material, MaterialInstance, MaterialLayout,
+        ModelData, ModelUniformData, View, ViewBuffer, ViewSet,
+    },
     renderer::{GraphPass, RenderGraph, SubGraph},
     resources::{
         AssetExtractors, ExtractInfo, Fallbacks, Mesh, PipelineCache, RenderAsset, RenderAssets,
@@ -37,6 +41,7 @@ impl Plugin for RenderPlugin {
             .add_systems(Init, RenderGraph::create_graph)
             .add_systems(Init, GlobalShaderConstants::init)
             .add_systems(Extract, RenderSurface::resize_surface)
+            .add_systems(Extract, RenderGraph::invalidate)
             .add_systems(Queue, RenderSurface::queue_surface)
             .add_systems(Render, RenderGraph::run_graph)
             .add_systems(Present, RenderSurface::present_surface)
@@ -181,5 +186,66 @@ impl Plugin for CameraPlugin {
         .add_resource(CameraRenderTargets::default())
         .add_systems(PreRender, CameraRenderTargets::queue)
         .add_systems(PostRender, CameraRenderTargets::cleanup);
+    }
+}
+
+pub struct ViewPlugin<V: View>(std::marker::PhantomData<V>);
+impl<V: View> ViewPlugin<V> {
+    pub fn new() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+impl<V: View> Plugin for ViewPlugin<V> {
+    fn setup(&mut self, app: &mut AppBuilder) {
+        app.add_plugins(RenderPlugin)
+            .add_render_resource::<ViewBuffer<V>>()
+            .sub_app_mut(RenderApp)
+            .add_resource(ViewSet::<V>::new())
+            .add_systems(Extract, ViewSet::<V>::extract)
+            .add_systems(QueueViews, ViewBuffer::<V>::queue);
+    }
+}
+
+pub struct ModelDataPlugin<T: ModelUniformData>(std::marker::PhantomData<T>);
+impl<T: ModelUniformData> ModelDataPlugin<T> {
+    pub fn new() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+impl<T: ModelUniformData> Plugin for ModelDataPlugin<T> {
+    fn setup(&mut self, app: &mut AppBuilder) {
+        app.add_plugins(RenderPlugin)
+            .add_render_resource::<BatchedUniformBuffer<T>>()
+            .sub_app_mut(RenderApp)
+            .add_systems(PreRender, BatchedUniformBuffer::<T>::update_buffer)
+            .add_systems(PostRender, BatchedUniformBuffer::<T>::reset_buffer);
+    }
+}
+
+pub struct MaterialPlugin<M: Material>(std::marker::PhantomData<M>);
+impl<M: Material> MaterialPlugin<M> {
+    pub fn new() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+impl<M: Material> Plugin for MaterialPlugin<M> {
+    fn setup(&mut self, app: &mut AppBuilder) {
+        app.add_plugins(RenderPlugin)
+            .register_asset::<M>()
+            .add_render_asset::<MaterialInstance<M>>()
+            .add_render_resource::<MaterialLayout<M>>();
+    }
+}
+
+pub struct DrawPlugin<D: Drawable>(std::marker::PhantomData<D>);
+impl<D: Drawable> Plugin for DrawPlugin<D> {
+    fn setup(&mut self, app: &mut AppBuilder) {
+        app.add_plugins((
+            ViewPlugin::<D::View>::new(),
+            ModelDataPlugin::<ModelData>::new(),
+            MaterialPlugin::<D::Material>::new(),
+        ))
+        .add_render_resource::<DrawPipeline<D>>()
+        .add_systems(QueueDraws, BatchedUniformBuffer::<ModelData>::queue::<D>);
     }
 }

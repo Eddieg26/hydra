@@ -1,7 +1,7 @@
 pub mod app;
 pub mod constants;
 pub mod device;
-pub mod plugin;
+pub mod plugins;
 pub mod primitives;
 pub mod renderer;
 pub mod resources;
