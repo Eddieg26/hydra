@@ -257,6 +257,25 @@ impl RenderGraphBuilder {
         id
     }
 
+    pub fn add_nested_sub_graph<S: SubGraph, Nested: SubGraph>(&mut self) {
+        if self
+            .sub_graphs
+            .get(Nested::NAME)
+            .is_some_and(|g| g.contains_key(Nested::NAME))
+        {
+            return;
+        }
+
+        self.add_sub_graph::<S>();
+
+        let id = self.sub_graphs.get(S::NAME).unwrap().len();
+        let pass = PassBuilder::new(id, Nested::NAME, self).build(SubGraphPass::new::<S>());
+        self.sub_graphs
+            .get_mut(S::NAME)
+            .unwrap()
+            .insert(Nested::NAME, pass);
+    }
+
     pub fn import<R: GraphResource>(&mut self, desc: R::Desc) -> GraphResourceId<R> {
         if let Some(id) = self.get_resource_id::<R>() {
             let resource = &mut self.resources[id.0];

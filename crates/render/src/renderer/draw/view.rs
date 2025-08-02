@@ -2,11 +2,7 @@ use crate::{
     BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, RenderDevice,
     RenderResource, RenderSurface, uniform::UniformBufferArray,
 };
-use ecs::{
-    Component, Entity, Resource,
-    system::Main,
-    unlifetime::{Read, SQuery},
-};
+use ecs::{Component, Entity, Query, Resource, unlifetime::Read};
 use encase::ShaderType;
 use math::{Mat4, Size, Vec3};
 use std::collections::HashMap;
@@ -52,48 +48,23 @@ impl ViewData {
 }
 
 pub struct ViewInstance<V: View> {
-    pub view: V,
-    pub data: ViewData,
     pub offset: DynamicOffset,
+    _marker: std::marker::PhantomData<V>,
 }
 
-#[derive(Resource)]
-pub struct ViewSet<V: View>(pub(crate) HashMap<Entity, ViewInstance<V>>);
-impl<V: View> ViewSet<V> {
-    pub fn new() -> Self {
-        Self(HashMap::new())
-    }
-
-    pub fn get(&self, entity: &Entity) -> Option<&ViewInstance<V>> {
-        self.0.get(entity)
-    }
-
-    pub fn extract(
-        set: &mut Self,
-        surface: &RenderSurface,
-        views: Main<SQuery<(Entity, &GlobalTransform, &V)>>,
-    ) {
-        let Size { width, height } = surface.size();
-        let mut instances = HashMap::new();
-        for (entity, transform, view) in views.iter() {
-            let projection = view.projection(width as f32, height as f32);
-            let data = ViewData::new(transform.matrix(), projection);
-            instances.insert(
-                entity,
-                ViewInstance {
-                    view: view.clone(),
-                    data,
-                    offset: 0,
-                },
-            );
+impl<V: View> Copy for ViewInstance<V> {}
+impl<V: View> Clone for ViewInstance<V> {
+    fn clone(&self) -> Self {
+        Self {
+            offset: self.offset.clone(),
+            _marker: self._marker.clone(),
         }
-
-        set.0 = instances;
     }
 }
 
 #[derive(Resource)]
 pub struct ViewBuffer<V: View> {
+    instances: HashMap<Entity, ViewInstance<V>>,
     buffer: UniformBufferArray<ViewData>,
     layout: BindGroupLayout,
     bind_group: BindGroup,
@@ -101,6 +72,10 @@ pub struct ViewBuffer<V: View> {
 }
 
 impl<V: View> ViewBuffer<V> {
+    pub fn instance(&self, view: &Entity) -> Option<ViewInstance<V>> {
+        self.instances.get(view).copied()
+    }
+
     pub fn layout(&self) -> &BindGroupLayout {
         &self.layout
     }
@@ -109,11 +84,24 @@ impl<V: View> ViewBuffer<V> {
         &self.bind_group
     }
 
-    pub fn queue(views: &mut Self, set: &mut ViewSet<V>, device: &RenderDevice) {
+    pub fn queue(
+        views: &mut Self,
+        query: Query<(Entity, &GlobalTransform, &V)>,
+        surface: &RenderSurface,
+        device: &RenderDevice,
+    ) {
         views.buffer.reset();
-        
-        for view in set.0.values_mut() {
-            view.offset = views.buffer.push(&view.data);
+        views.instances.clear();
+
+        let Size { width, height } = surface.size();
+        for (entity, transform, view) in query.iter() {
+            let projection = view.projection(width as f32, height as f32);
+            let data = ViewData::new(transform.matrix(), projection);
+            let offset = ViewInstance {
+                offset: views.buffer.push(&data),
+                _marker: std::marker::PhantomData,
+            };
+            views.instances.insert(entity, offset);
         }
 
         if let Some(buffer) = views.buffer.update(device).map(|_| views.buffer.as_ref()) {
@@ -147,6 +135,7 @@ impl<V: View> RenderResource for ViewBuffer<V> {
             .build(device);
 
         Ok(Self {
+            instances: HashMap::new(),
             buffer,
             layout,
             bind_group: binding,

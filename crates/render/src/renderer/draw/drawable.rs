@@ -6,12 +6,13 @@ use crate::{
     allocator::MeshAllocator,
     draw::{
         BlendMode, DepthWrite, Material, MaterialId, MaterialInstance, MaterialLayout, ShaderModel,
-        ShaderPhase, View, ViewBuffer, ViewInstance, ViewSet,
+        ShaderPhase, View, ViewBuffer, ViewInstance,
     },
 };
 use asset::AssetId;
 use ecs::{
     Component, Entity, Query, Resource, World,
+    query::With,
     unlifetime::{Read, SCommands, Write},
 };
 use encase::{DynamicUniformBuffer, ShaderType, internal::WriteInto};
@@ -47,14 +48,6 @@ pub struct BatchKey {
     pub material: MaterialId,
     pub mesh: AssetId<Mesh>,
     pub sub_mesh: Option<AssetId<SubMesh>>,
-}
-
-pub struct DrawInstance<D: Drawable> {
-    pub entity: Entity,
-    pub key: BatchKey,
-    pub draw: D,
-    pub transform: <D::View as View>::Transform,
-    pub model: ModelData,
 }
 
 #[derive(Resource)]
@@ -200,7 +193,7 @@ impl<T: ModelUniformData> BatchedUniformBuffer<T> {
 
 impl BatchedUniformBuffer<ModelData> {
     pub fn queue<D>(
-        views: &ViewSet<D::View>,
+        views: Query<Entity, With<D::View>>,
         drawables: Query<(&D, &GlobalTransform, &MeshFilter)>,
         pipeline: &DrawPipeline<D>,
         meshes: &RenderAssets<RenderMesh>,
@@ -210,7 +203,7 @@ impl BatchedUniformBuffer<ModelData> {
     ) where
         D: Drawable,
     {
-        for view in views.0.keys() {
+        for view in views.iter() {
             let mut batches = HashMap::new();
 
             for (draw, transform, filter) in drawables.iter() {
@@ -250,7 +243,7 @@ impl BatchedUniformBuffer<ModelData> {
                 match mesh.format() {
                     MeshFormat::Indexed { format, .. } => draw_calls
                         .0
-                        .entry(*view)
+                        .entry(view)
                         .or_default()
                         .extend(batches.drain(..).map(|b| DrawCall {
                             material: key.material,
@@ -268,7 +261,7 @@ impl BatchedUniformBuffer<ModelData> {
                     MeshFormat::NonIndexed => {
                         draw_calls
                             .0
-                            .entry(*view)
+                            .entry(view)
                             .or_default()
                             .extend(batches.drain(..).map(|b| DrawCall {
                                 material: key.material,
@@ -434,7 +427,7 @@ pub enum DrawError {
 }
 
 pub type Draw<V> =
-    fn(&mut RenderState<'_>, &ViewInstance<V>, &DrawCall<V>, &World) -> Result<(), DrawError>;
+    fn(&mut RenderState<'_>, ViewInstance<V>, &DrawCall<V>, &World) -> Result<(), DrawError>;
 
 pub struct DrawCall<V: View> {
     pub material: MaterialId,
@@ -450,7 +443,7 @@ impl<V: View> DrawCall<V> {
     pub fn draw(
         &self,
         state: &mut RenderState<'_>,
-        view: &ViewInstance<V>,
+        view: ViewInstance<V>,
         world: &World,
     ) -> Result<(), DrawError> {
         (self.function)(state, view, self, world)
@@ -470,7 +463,7 @@ impl<P: ShaderPhase, M: ShaderModel> PhaseDrawCalls<P, M> {
 
     pub(super) fn draw<D>(
         state: &mut RenderState<'_>,
-        view: &ViewInstance<D::View>,
+        view: ViewInstance<D::View>,
         call: &DrawCall<D::View>,
         world: &World,
     ) -> Result<(), DrawError>

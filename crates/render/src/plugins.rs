@@ -1,13 +1,14 @@
 use crate::{
-    Camera, CameraRenderTargets, ExtractError, GlobalShaderConstant, GlobalShaderConstants,
-    GpuShader, GpuTexture, ObjImporter, ProcessAssets, QueueDraws, QueueViews, RenderDevice,
-    RenderGraphBuilder, RenderMesh, RenderTarget, SubMesh, Texture2dImporter,
+    Camera, CameraRenderTargets, CameraSubGraph, ExtractError, GlobalShaderConstant,
+    GlobalShaderConstants, GpuShader, GpuTexture, MeshFilter, ObjImporter, ProcessAssets,
+    QueueDraws, QueueViews, RenderDevice, RenderGraphBuilder, RenderMesh, RenderTarget, SubMesh,
+    Texture2dImporter,
     allocator::MeshAllocatorPlugin,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     constants::StorageBufferEnabled,
     draw::{
-        BatchedUniformBuffer, DrawPipeline, Drawable, Material, MaterialInstance, MaterialLayout,
-        ModelData, ModelUniformData, View, ViewBuffer, ViewSet,
+        BatchedUniformBuffer, ClearPass, DrawModel, DrawPass, DrawPipeline, Drawable, MainDrawPass,
+        Material, MaterialInstance, MaterialLayout, ModelData, ModelUniformData, View, ViewBuffer,
     },
     renderer::{GraphPass, RenderGraph, SubGraph},
     resources::{
@@ -112,15 +113,21 @@ impl Plugin for RenderPlugin {
 }
 
 pub trait RenderAppExt {
+    fn add_drawable<D: Drawable>(&mut self) -> &mut Self;
     fn add_shader_constant<C: GlobalShaderConstant>(&mut self) -> &mut Self;
     fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self;
     fn add_sub_graph<S: SubGraph>(&mut self) -> &mut Self;
     fn add_sub_graph_pass<S: SubGraph, P: GraphPass>(&mut self, pass: P) -> &mut Self;
+    fn add_nested_sub_graph<S: SubGraph, Nested: SubGraph>(&mut self) -> &mut Self;
     fn add_render_asset<R: RenderAsset>(&mut self) -> &mut Self;
     fn add_render_resource<R: RenderResource>(&mut self) -> &mut Self;
 }
 
 impl RenderAppExt for AppBuilder {
+    fn add_drawable<D: Drawable>(&mut self) -> &mut Self {
+        self
+    }
+
     fn add_shader_constant<C: GlobalShaderConstant>(&mut self) -> &mut Self {
         self.get_or_insert_resource(|| GlobalShaderConstants::new())
             .register::<C>();
@@ -148,6 +155,14 @@ impl RenderAppExt for AppBuilder {
             render_app
                 .get_or_insert_resource(RenderGraphBuilder::new)
                 .add_sub_graph_pass::<S, P>(pass);
+        })
+    }
+
+    fn add_nested_sub_graph<S: SubGraph, Nested: SubGraph>(&mut self) -> &mut Self {
+        self.scoped_sub_app(RenderApp, |render_app| {
+            render_app
+                .get_or_insert_resource(RenderGraphBuilder::new)
+                .add_nested_sub_graph::<S, Nested>();
         })
     }
 
@@ -197,12 +212,15 @@ impl<V: View> ViewPlugin<V> {
 }
 impl<V: View> Plugin for ViewPlugin<V> {
     fn setup(&mut self, app: &mut AppBuilder) {
-        app.add_plugins(RenderPlugin)
-            .add_render_resource::<ViewBuffer<V>>()
-            .sub_app_mut(RenderApp)
-            .add_resource(ViewSet::<V>::new())
-            .add_systems(Extract, ViewSet::<V>::extract)
-            .add_systems(QueueViews, ViewBuffer::<V>::queue);
+        app.add_plugins((
+            SyncComponentPlugin::<V, RenderApp>::new(),
+            SyncComponentPlugin::<V::Transform, RenderApp>::new(),
+            SyncComponentPlugin::<GlobalTransform, RenderApp>::new(),
+            RenderPlugin,
+        ))
+        .add_render_resource::<ViewBuffer<V>>()
+        .sub_app_mut(RenderApp)
+        .add_systems(QueueViews, ViewBuffer::<V>::queue);
     }
 }
 
@@ -244,8 +262,13 @@ impl<D: Drawable> Plugin for DrawPlugin<D> {
             ViewPlugin::<D::View>::new(),
             ModelDataPlugin::<ModelData>::new(),
             MaterialPlugin::<D::Material>::new(),
+            SyncComponentPlugin::<D, RenderApp>::new(),
+            SyncComponentPlugin::<MeshFilter, RenderApp>::new(),
         ))
         .add_render_resource::<DrawPipeline<D>>()
+        .add_nested_sub_graph::<CameraSubGraph, MainDrawPass>()
+        .add_sub_graph_pass::<MainDrawPass, ClearPass>(ClearPass)
+        .add_sub_graph_pass::<MainDrawPass, DrawPass<DrawModel<D>>>(DrawPass::new())
         .add_systems(QueueDraws, BatchedUniformBuffer::<ModelData>::queue::<D>);
     }
 }

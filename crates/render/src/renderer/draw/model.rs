@@ -1,7 +1,5 @@
 use crate::{
-    BindGroup, BindGroupLayout, GraphPass, PassBuilder, RenderContext, RenderGraphError,
-    RenderState, SubGraph,
-    draw::{PhaseDrawCalls, View, ViewSet},
+    draw::{PhaseDrawCalls, View, ViewBuffer}, BindGroup, BindGroupLayout, GraphPass, PassBuilder, RenderContext, RenderGraphError, RenderState, SubGraph
 };
 use ecs::Entity;
 
@@ -35,8 +33,8 @@ impl<M: ShaderModel> ShaderPhases<M> {
 
     pub fn add_phase<P: ShaderPhase>(&mut self) {
         let f: ShaderPhaseFn = |entity, ctx, state| {
-            let views = ctx.world().resource::<ViewSet<M::View>>();
-            let Some(view) = views.0.get(&entity) else {
+            let views = ctx.world().resource::<ViewBuffer<M::View>>();
+            let Some(view) = views.instance(&entity) else {
                 return;
             };
 
