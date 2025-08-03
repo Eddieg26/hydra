@@ -4,6 +4,7 @@ use crate::{
     RenderAssets, RenderDevice, RenderMesh, RenderPipelineDesc, RenderResource, RenderState,
     RenderSurface, Shader, SubMesh, VertexState,
     allocator::MeshAllocator,
+    constants::MAX_BATCH_SIZE,
     draw::{
         BlendMode, DepthWrite, Material, MaterialId, MaterialInstance, MaterialLayout, ShaderModel,
         ShaderPhase, View, ViewBuffer, ViewInstance,
@@ -23,8 +24,6 @@ use wgpu::{
     BufferUsages, ColorTargetState, IndexFormat, PrimitiveState, ShaderStages, VertexFormat,
     VertexStepMode,
 };
-
-pub const MAX_OBJECT_COUNT: u32 = 512;
 
 pub trait ModelUniformData: ShaderType + WriteInto + Send + Sync + 'static {}
 impl<T: ShaderType + WriteInto + Send + Sync + 'static> ModelUniformData for T {}
@@ -65,7 +64,7 @@ pub struct BatchedUniformBuffer<T: ModelUniformData> {
 impl<T: ModelUniformData> BatchedUniformBuffer<T> {
     pub fn get_batch_size(device: &RenderDevice) -> u32 {
         (device.limits().max_uniform_buffer_binding_size / std::mem::size_of::<T>() as u32)
-            .min(MAX_OBJECT_COUNT)
+            .min(MAX_BATCH_SIZE)
     }
 
     pub fn new(device: &RenderDevice) -> Self {
@@ -188,6 +187,7 @@ impl<T: ModelUniformData> BatchedUniformBuffer<T> {
 
     pub fn reset_buffer(data: &mut Self) {
         data.data.set_offset(0);
+        data.data.as_mut().clear();
     }
 }
 
@@ -527,5 +527,9 @@ impl<P: ShaderPhase, M: ShaderModel> PhaseDrawCalls<P, M> {
                 Ok(state.draw_indexed(indices, base_vertex, instances.clone()))
             }
         }
+    }
+
+    pub(crate) fn clear(calls: &mut Self) {
+        calls.0.clear();
     }
 }

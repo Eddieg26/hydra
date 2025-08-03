@@ -37,12 +37,11 @@
 //     math::Vec2::new(0.0, 0.0), // Top-left
 // ];
 
-use asset::{
-    Asset, AssetId, database::AssetDatabaseError, embed_asset, io::EmbeddedFs, plugin::AssetAppExt,
-};
-use ecs::{App, Component, EventReader, Init, Spawner, Update};
+use asset::{Asset, AssetId, embed_asset, io::EmbeddedFs, plugin::AssetAppExt};
+use ecs::{App, Component, Init, Spawner};
+use math::Vec3;
 use render::{
-    AsBinding, Camera, Color, Mesh, MeshSettings, Projection, Shader, ShaderSettings,
+    AsBinding, Camera, Color, Mesh, MeshFilter, MeshSettings, Projection, Shader, ShaderSettings,
     draw::{BlendMode, Drawable, Material, ShaderModel, ShaderPhase, Unlit, View},
     plugins::RenderAppExt,
 };
@@ -55,6 +54,8 @@ const UNLIT_COLOR_SHADER: AssetId<Shader> =
 const UNLIT_TEX_SHADER: AssetId<Shader> = AssetId::from_u128(0x9e08450b1c394c8c88de79b6aa2c2589);
 const CUBE: AssetId<Mesh> = AssetId::from_u128(0x123456789abcdef0);
 const PLANE: AssetId<Mesh> = AssetId::from_u128(0xfca61c1a76b14268b25058d36dbc6389);
+const UNLIT_COLOR_MAT: AssetId<UnlitColor> =
+    AssetId::from_u128(0xa0cc79971c2d4206874539cb5ac54fe2u128);
 
 fn main() {
     let embedded = EmbeddedFs::new();
@@ -94,11 +95,7 @@ fn main() {
         .add_source("embedded", embedded)
         .load_asset::<Mesh>(CUBE)
         .load_asset::<Mesh>(PLANE)
-        .add_systems(Update, |errors: EventReader<AssetDatabaseError>| {
-            for error in errors {
-                println!("{error}");
-            }
-        })
+        .add_asset(UNLIT_COLOR_MAT, UnlitColor::from(Color::red()))
         .add_systems(Init, |mut spawner: Spawner| {
             spawner
                 .spawn()
@@ -106,9 +103,17 @@ fn main() {
                     clear_color: Some(Color::blue()),
                     ..Default::default()
                 })
-                .with_component(Transform::default())
+                .with_component(Transform::default().with_translation(Vec3::NEG_Z * 5.0))
                 .with_component(GlobalTransform::default())
                 .with_component(View3d::default())
+                .finish();
+
+            spawner
+                .spawn()
+                .with_component(Transform::default())
+                .with_component(GlobalTransform::default())
+                .with_component(MeshFilter::from(CUBE))
+                .with_component(DrawMesh::from(UNLIT_COLOR_MAT))
                 .finish();
         })
         .run();
@@ -161,6 +166,11 @@ impl View for View3d {
 pub struct DrawMesh<M: Material> {
     material: AssetId<M>,
 }
+impl<M: Material> From<AssetId<M>> for DrawMesh<M> {
+    fn from(material: AssetId<M>) -> Self {
+        DrawMesh { material }
+    }
+}
 
 impl<M: Material> Clone for DrawMesh<M> {
     fn clone(&self) -> Self {
@@ -209,10 +219,16 @@ pub struct UnlitColor {
     color: Color,
 }
 
+impl From<Color> for UnlitColor {
+    fn from(color: Color) -> Self {
+        Self { color }
+    }
+}
+
 impl Material for UnlitColor {
     type View = View3d;
 
-    type Model = Unlit;
+    type Model = Unlit<ShaderModel3d>;
 
     type Phase = Opaque3d;
 

@@ -94,6 +94,7 @@ impl<C: Component + Clone, A: AppTag + Default + Clone> SyncComponentPlugin<C, A
 impl<C: Component + Clone, A: AppTag + Default + Clone> Plugin for SyncComponentPlugin<C, A> {
     fn setup(&mut self, app: &mut super::AppBuilder) {
         app.add_plugins(SyncAppPlugin::<A>::new())
+            .register::<C>()
             .sub_app_mut(A::default())
             .register::<C>()
             .register::<MainEntity>()

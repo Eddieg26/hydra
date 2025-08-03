@@ -586,16 +586,12 @@ impl<'a> ShaderProcessor<'a> {
         constants: &'a ShaderConstants,
     ) -> Result<String, ShaderProcessorError<'a>> {
         for block in blocks {
-            let Some(result) = block.eval.map(|f| f(block.line, constants)) else {
-                continue;
-            };
-
-            match result {
-                Ok(false) => continue,
-                Ok(true) => {
+            match block.eval.map(|f| f(block.line, constants)) {
+                Some(Ok(true)) | None => {
                     return self.process_tokens(&mut block.tokens.into_iter(), constants);
                 }
-                Err(err) => return Err(err),
+                Some(Ok(false)) => continue,
+                Some(Err(err)) => return Err(err),
             }
         }
 

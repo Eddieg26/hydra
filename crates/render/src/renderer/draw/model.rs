@@ -51,9 +51,9 @@ impl<M: ShaderModel> ShaderPhases<M> {
                 return;
             };
 
-            let _ = calls
-                .iter()
-                .filter_map(|c| c.draw(state, view, ctx.world()).ok());
+            for call in calls.iter() {
+                let _ = call.draw(state, view, ctx.world());
+            }
         };
 
         self.0.push(f)
