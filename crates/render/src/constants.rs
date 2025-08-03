@@ -18,14 +18,16 @@ impl GlobalShaderConstant for StorageBufferEnabled {
 }
 
 pub struct UniformBatchSize<T: ShaderType + 'static>(std::marker::PhantomData<T>);
+impl<T: ShaderType + 'static> UniformBatchSize<T> {
+    pub fn size(device: &RenderDevice, max: u32) -> u32 {
+        (device.limits().max_uniform_buffer_binding_size / T::min_size().get() as u32).min(max)
+    }
+}
+
 impl<T: ShaderType + 'static> GlobalShaderConstant for UniformBatchSize<T> {
     const NAME: &'static str = "BATCH_SIZE";
 
     fn get(device: &RenderDevice) -> ShaderConstant {
-        let batch_size = (device.limits().max_uniform_buffer_binding_size
-            / T::min_size().get() as u32)
-            .min(MAX_BATCH_SIZE);
-
-        ShaderConstant::U32(batch_size)
+        ShaderConstant::U32(Self::size(device, MAX_BATCH_SIZE))
     }
 }

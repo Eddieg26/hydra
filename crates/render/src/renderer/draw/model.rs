@@ -1,9 +1,9 @@
 use crate::{
-    BindGroup, BindGroupLayout, Color, GraphPass, PassBuilder, RenderContext, RenderDevice,
+    BindGroup, BindGroupLayout, Color, ExtractError, GraphPass, PassBuilder, RenderContext,
     RenderGraphError, RenderResource, RenderState, SubGraph,
     draw::{PhaseDrawCalls, View, ViewBuffer},
 };
-use ecs::{Entity, Resource, unlifetime::Read};
+use ecs::{ArgItem, Entity, ReadOnly, Resource, SystemArg};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum BlendMode {
@@ -65,7 +65,9 @@ pub trait ShaderModel: Send + Sync + Sized + 'static {
 
     type Data: Send + Sync + 'static;
 
-    fn new(device: &RenderDevice) -> Self;
+    type Arg: SystemArg + ReadOnly;
+
+    fn create(arg: ArgItem<Self::Arg>) -> Result<Self, ExtractError<()>>;
 
     fn bind_group(&self) -> Option<&BindGroup> {
         None
@@ -102,10 +104,10 @@ impl<M: ShaderModel> std::ops::DerefMut for ShaderModelData<M> {
 }
 
 impl<M: ShaderModel> RenderResource for ShaderModelData<M> {
-    type Arg = Read<RenderDevice>;
+    type Arg = M::Arg;
 
-    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
-        Ok(Self(M::new(device)))
+    fn extract(arg: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
+        M::create(arg).map(Self)
     }
 }
 
@@ -114,8 +116,10 @@ impl ShaderModel for () {
 
     type Data = ();
 
-    fn new(_: &RenderDevice) -> Self {
-        ()
+    type Arg = ();
+
+    fn create(_: ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
+        Ok(())
     }
 
     fn setup(_: &mut PassBuilder, _: &mut ShaderPhases<Self>) -> Self::Data {
@@ -129,8 +133,10 @@ impl<M: ShaderModel> ShaderModel for Unlit<M> {
 
     type Data = ();
 
-    fn new(_: &RenderDevice) -> Self {
-        Self(std::marker::PhantomData)
+    type Arg = ();
+
+    fn create(_: ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
+        Ok(Self(std::marker::PhantomData))
     }
 
     fn setup(_: &mut PassBuilder, _: &mut ShaderPhases<Self>) -> Self::Data {

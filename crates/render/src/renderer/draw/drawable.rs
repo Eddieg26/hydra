@@ -4,7 +4,7 @@ use crate::{
     RenderAssets, RenderDevice, RenderMesh, RenderPipelineDesc, RenderResource, RenderState,
     RenderSurface, Shader, SubMesh, VertexState,
     allocator::MeshAllocator,
-    constants::MAX_BATCH_SIZE,
+    constants::{MAX_BATCH_SIZE, UniformBatchSize},
     draw::{
         BlendMode, DepthWrite, Material, MaterialId, MaterialInstance, MaterialLayout, ShaderModel,
         ShaderModelData, ShaderPhase, View, ViewBuffer, ViewInstance,
@@ -62,14 +62,9 @@ pub struct BatchedUniformBuffer<T: ModelUniformData> {
 }
 
 impl<T: ModelUniformData> BatchedUniformBuffer<T> {
-    pub fn get_batch_size(device: &RenderDevice) -> u32 {
-        (device.limits().max_uniform_buffer_binding_size / std::mem::size_of::<T>() as u32)
-            .min(MAX_BATCH_SIZE)
-    }
-
     pub fn new(device: &RenderDevice) -> Self {
         let item_size = std::mem::size_of::<T>() as u32;
-        let batch_size = Self::get_batch_size(device);
+        let batch_size = UniformBatchSize::<T>::size(device, MAX_BATCH_SIZE);
 
         let buffer = Buffer::new(
             device,
@@ -327,15 +322,6 @@ impl<D: Drawable> RenderResource for DrawPipeline<D> {
     fn extract(arg: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
         let (cache, surface, cpu_model, views, layout, shader_model, mut commands) = arg;
 
-        let view_layout = match views {
-            Some(views) => views.layout(),
-            None => return Err(crate::resources::ExtractError::Retry(())),
-        };
-
-        let Some(model_layout) = cpu_model.map(|v| v.layout()) else {
-            return Err(crate::resources::ExtractError::Retry(()));
-        };
-
         let material_layout = match layout {
             Some(layout) => layout,
             None => {
@@ -344,9 +330,17 @@ impl<D: Drawable> RenderResource for DrawPipeline<D> {
             }
         };
 
-        let Some(shader_model_layout) = shader_model.map(|s| s.bind_group_layout()) else {
-            return Err(crate::resources::ExtractError::Retry(()));
-        };
+        let view_layout = views
+            .map(|v| v.layout())
+            .ok_or(crate::resources::ExtractError::Retry(()))?;
+
+        let model_layout = cpu_model
+            .map(|v| v.layout())
+            .ok_or(crate::resources::ExtractError::Retry(()))?;
+
+        let shader_layout = shader_model
+            .map(|s| s.bind_group_layout())
+            .ok_or(crate::resources::ExtractError::Retry(()))?;
 
         let vertex_shader: AssetId<Shader> = D::shader().into();
         let fragment_shader: AssetId<Shader> = D::Material::shader().into();
@@ -368,7 +362,7 @@ impl<D: Drawable> RenderResource for DrawPipeline<D> {
             material_layout.as_ref().clone(),
         ];
 
-        if let Some(layout) = shader_model_layout {
+        if let Some(layout) = shader_layout {
             layouts.push(layout.clone());
         }
 
@@ -484,10 +478,15 @@ impl<P: ShaderPhase, M: ShaderModel> PhaseDrawCalls<P, M> {
         const VIEW: u32 = 0;
         const INSTANCES: u32 = 1;
         const MATERIAL: u32 = 2;
+        const MODEL: u32 = 3;
 
         let pipeline = world
             .resource::<PipelineCache>()
             .get_render_pipeline(&call.pipeline)
+            .ok_or(DrawError::Skip)?;
+
+        let model = world
+            .try_resource::<ShaderModelData<DrawModel<D>>>()
             .ok_or(DrawError::Skip)?;
 
         let views = world.resource::<ViewBuffer<D::View>>();
@@ -515,6 +514,10 @@ impl<P: ShaderPhase, M: ShaderModel> PhaseDrawCalls<P, M> {
                 state.set_bind_group(VIEW, views.bind_group(), &[view.offset]);
                 state.set_bind_group(INSTANCES, bind_group, &[]);
                 state.set_bind_group(MATERIAL, &material, &[]);
+                model
+                    .bind_group()
+                    .map(|b| state.set_bind_group(MODEL, b, &[]));
+
                 Ok(state.draw(vertices, instances.clone()))
             }
             DrawMode::IndexedDirect {
@@ -533,6 +536,10 @@ impl<P: ShaderPhase, M: ShaderModel> PhaseDrawCalls<P, M> {
                 state.set_bind_group(VIEW, views.bind_group(), &[view.offset]);
                 state.set_bind_group(INSTANCES, bind_group, &[]);
                 state.set_bind_group(MATERIAL, &material, &[]);
+                model
+                    .bind_group()
+                    .map(|b| state.set_bind_group(MODEL, b, &[]));
+
                 Ok(state.draw_indexed(indices, base_vertex, instances.clone()))
             }
         }

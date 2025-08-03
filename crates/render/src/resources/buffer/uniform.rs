@@ -1,3 +1,5 @@
+use std::num::NonZero;
+
 use super::Buffer;
 use crate::{device::RenderDevice, resources::Label};
 use encase::{
@@ -102,7 +104,13 @@ impl<T: ShaderType> UniformBufferArray<T> {
             .min_uniform_buffer_offset_alignment
             .max(T::min_size().get() as u32);
 
-        Self::with_alignment(device, alignment, usages, label)
+        Self::with_size(
+            device,
+            NonZero::new(alignment as u64),
+            alignment,
+            usages,
+            label,
+        )
     }
 
     pub fn with_alignment(
@@ -111,11 +119,29 @@ impl<T: ShaderType> UniformBufferArray<T> {
         usages: Option<BufferUsages>,
         label: Label,
     ) -> Self {
+        Self::with_size(
+            device,
+            NonZero::new(alignment as u64),
+            alignment,
+            usages,
+            label,
+        )
+    }
+
+    pub fn with_size(
+        device: &RenderDevice,
+        size: Option<NonZero<u64>>,
+        alignment: u32,
+        usages: Option<BufferUsages>,
+        label: Label,
+    ) -> Self {
         let usages = usages.unwrap_or(BufferUsages::empty())
             | BufferUsages::UNIFORM
             | BufferUsages::COPY_DST;
 
-        let buffer = Buffer::new(device, alignment as u64, usages, label);
+        let size = size.map(|s| s.get()).unwrap_or(T::min_size().get());
+
+        let buffer = Buffer::new(device, size, usages, label);
 
         Self {
             data: EncaseDynamicUniformBuffer::new(Vec::new()),
@@ -146,6 +172,8 @@ impl<T: ShaderType> UniformBufferArray<T> {
         self.alignment
     }
 
+    /// Returns the number of elements in the buffer.
+    /// The size is calculated based on the alignment.
     pub fn len(&self) -> usize {
         self.data.as_ref().len() / self.alignment as usize
     }
@@ -191,6 +219,15 @@ impl<T: ShaderType + WriteInto> UniformBufferArray<T> {
         self.data.set_offset(self.data.as_ref().len() as u64);
 
         offsets
+    }
+
+    pub fn resize(&mut self, new_size: usize) -> bool {
+        if new_size > self.data.as_ref().len() {
+            self.data.as_mut().resize(new_size, 0);
+            true
+        } else {
+            false
+        }
     }
 
     pub fn reset(&mut self) {

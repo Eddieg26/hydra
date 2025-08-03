@@ -1,11 +1,15 @@
 use asset::{Asset, AssetId, embed_asset, io::EmbeddedFs, plugin::AssetAppExt};
-use ecs::{Component, Plugin};
+use ecs::{Component, Plugin, Resource, unlifetime::Read};
 use math::Vec3;
 use render::{
-    AsBinding, Color, Mesh, MeshSettings, Projection, Shader, ShaderSettings, ShaderType,
-    draw::{BlendMode, Drawable, Material, ShaderModel, ShaderPhase, Unlit, View},
+    AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, Color, Mesh,
+    MeshSettings, Projection, RenderDevice, RenderResource, Shader, ShaderSettings, ShaderType,
+    draw::{BlendMode, Drawable, Material, ShaderModel, ShaderModelData, ShaderPhase, Unlit, View},
     plugins::RenderAppExt,
+    uniform::{UniformBuffer, UniformBufferArray},
+    wgpu::ShaderStages,
 };
+use std::num::NonZero;
 use transform::Transform;
 
 pub const COMMON_SHADER: AssetId<Shader> = AssetId::from_u128(0x3e7c2a1b4f5e4c2e9d1a8b7e6c5d4f3a);
@@ -59,7 +63,8 @@ impl Plugin for ExamplePlugin {
             .add_source("embedded", embedded)
             .load_asset::<Mesh>(CUBE)
             .load_asset::<Mesh>(PLANE)
-            .add_asset(UNLIT_COLOR_MAT, UnlitColor::from(Color::red()));
+            .add_asset(UNLIT_COLOR_MAT, UnlitColor::from(Color::red()))
+            .add_render_resource::<Lights>();
     }
 }
 
@@ -181,14 +186,40 @@ impl Material for UnlitColor {
     }
 }
 
-pub struct ShaderModel3d;
+pub struct ShaderModel3d {
+    layout: BindGroupLayout,
+    bind_group: BindGroup,
+}
+
 impl ShaderModel for ShaderModel3d {
     type Base = Self;
 
     type Data = ();
 
-    fn new(_device: &render::RenderDevice) -> Self {
-        Self
+    type Arg = (Read<RenderDevice>, Option<Read<Lights>>);
+
+    fn create((device, lights): ecs::ArgItem<Self::Arg>) -> Result<Self, render::ExtractError<()>> {
+        let lights = lights.ok_or(render::ExtractError::Retry(()))?;
+
+        let layout = BindGroupLayoutBuilder::new()
+            .with_uniform(0, ShaderStages::FRAGMENT, false, None, None)
+            .with_uniform(1, ShaderStages::FRAGMENT, false, None, None)
+            .build(device);
+
+        let bind_group = BindGroupBuilder::new(&layout)
+            .with_uniform(0, lights.buffer.as_ref(), 0, None)
+            .with_uniform(1, lights.count.as_ref(), 0, None)
+            .build(device);
+
+        Ok(Self { layout, bind_group })
+    }
+
+    fn bind_group(&self) -> Option<&BindGroup> {
+        Some(&self.bind_group)
+    }
+
+    fn bind_group_layout(&self) -> Option<&BindGroupLayout> {
+        Some(&self.layout)
     }
 
     fn setup(
@@ -196,6 +227,17 @@ impl ShaderModel for ShaderModel3d {
         phases: &mut render::draw::ShaderPhases<Self>,
     ) -> Self::Data {
         phases.add_phase::<Opaque3d>();
+    }
+}
+
+impl ShaderModel3d {
+    pub fn update(model: &mut ShaderModelData<Self>, lights: &mut Lights, device: &RenderDevice) {
+        if let Some(_) = lights.update(device) {
+            model.bind_group = BindGroupBuilder::new(&model.layout)
+                .with_uniform(0, lights.buffer.as_ref(), 0, Some(lights.max_size))
+                .with_uniform(1, lights.count.as_ref(), 0, None)
+                .build(device);
+        }
     }
 }
 
@@ -208,10 +250,58 @@ pub struct Light {
 
 #[derive(Clone, Copy, ShaderType)]
 pub struct LightData {
-    pub color: Color,
     pub position: Vec3,
-    pub intensity: f32,
     pub range: f32,
+    /// Alpha value for the light, used for attenuation.
+    pub color: Color,
+}
+
+#[derive(Resource)]
+pub struct Lights {
+    buffer: UniformBufferArray<LightData>,
+    count: UniformBuffer<u32>,
+    max_size: NonZero<u64>,
+}
+
+impl Lights {
+    pub const MAX_LIGHTS: u32 = 2048;
+
+    pub fn count(&self) -> &UniformBuffer<u32> {
+        &self.count
+    }
+
+    pub fn push(&mut self, light: &LightData) {
+        self.buffer.push(light);
+    }
+
+    fn update(&mut self, device: &RenderDevice) -> Option<u64> {
+        self.count.set(self.buffer.len() as u32);
+        self.count.update(device);
+
+        self.buffer.update(device)
+    }
+}
+
+impl RenderResource for Lights {
+    type Arg = Read<RenderDevice>;
+
+    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, render::ExtractError<()>> {
+        let size = NonZero::new(Self::MAX_LIGHTS as u64 * LightData::min_size().get());
+        let count = UniformBuffer::new(device, 0, None, None);
+        let buffer = UniformBufferArray::with_size(
+            device,
+            size,
+            LightData::min_size().get() as u32,
+            None,
+            None,
+        );
+
+        Ok(Self {
+            buffer,
+            count,
+            max_size: size.unwrap(),
+        })
+    }
 }
 
 // const UNLIT_BLUE: AssetId<UnlitColor> = AssetId::from_u128(0x87654321fedcba98);
