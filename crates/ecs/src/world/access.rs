@@ -216,41 +216,13 @@ impl FixedBitSetExt for FixedBitSet {
     }
 }
 
-pub struct WorldAccess {
-    pub(crate) archetypes: Vec<ArchetypeAccess>,
-    pub(crate) components: Access<ComponentId>,
-    pub(crate) resources: Access<ResourceId>,
+pub struct AppAccess {
+    pub archetypes: Vec<ArchetypeAccess>,
+    pub components: Access<ComponentId>,
+    pub resources: Access<ResourceId>,
 }
 
-impl WorldAccess {
-    pub fn new() -> Self {
-        Self {
-            archetypes: Vec::new(),
-            components: Access::new(),
-            resources: Access::new(),
-        }
-    }
-
-    pub fn add_archetype(&mut self, archetype: ArchetypeAccess) {
-        self.archetypes.push(archetype);
-    }
-
-    pub fn components(&self) -> &Access<ComponentId> {
-        &self.components
-    }
-
-    pub fn components_mut(&mut self) -> &mut Access<ComponentId> {
-        &mut self.components
-    }
-
-    pub fn resources(&self) -> &Access<ResourceId> {
-        &self.resources
-    }
-
-    pub fn resources_mut(&mut self) -> &mut Access<ResourceId> {
-        &mut self.resources
-    }
-
+impl AppAccess {
     pub fn validate(&self) -> Result<(), AccessError> {
         if let Err(conflict) = self.resources.validate() {
             return Err(AccessError::from(ResourceId::from_usize(conflict)));
@@ -300,6 +272,56 @@ impl WorldAccess {
     }
 }
 
+impl Default for AppAccess {
+    fn default() -> Self {
+        Self {
+            archetypes: Vec::new(),
+            components: Access::new(),
+            resources: Access::new(),
+        }
+    }
+}
+
+pub struct WorldAccess {
+    pub(crate) current: AppAccess,
+}
+
+impl WorldAccess {
+    pub fn new() -> Self {
+        Self {
+            current: AppAccess::default(),
+        }
+    }
+
+    pub fn add_archetype(&mut self, archetype: ArchetypeAccess) {
+        self.current.archetypes.push(archetype);
+    }
+
+    pub fn components(&self) -> &Access<ComponentId> {
+        &self.current.components
+    }
+
+    pub fn components_mut(&mut self) -> &mut Access<ComponentId> {
+        &mut self.current.components
+    }
+
+    pub fn resources(&self) -> &Access<ResourceId> {
+        &self.current.resources
+    }
+
+    pub fn resources_mut(&mut self) -> &mut Access<ResourceId> {
+        &mut self.current.resources
+    }
+
+    pub fn validate(&self) -> Result<(), AccessError> {
+        self.current.validate()
+    }
+
+    pub fn conflicts(&self, other: &Self) -> Result<(), AccessError> {
+        self.current.conflicts(&other.current)
+    }
+}
+
 #[allow(unused_imports, dead_code)]
 mod test {
     use super::WorldAccess;
@@ -324,13 +346,13 @@ mod test {
         let mut access = WorldAccess::new();
         let mut other = WorldAccess::new();
 
-        access.components.read(ComponentId(0));
-        access.components.write(ComponentId(1));
-        access.resources.read(ResourceId(0));
+        access.current.components.read(ComponentId(0));
+        access.current.components.write(ComponentId(1));
+        access.current.resources.read(ResourceId(0));
 
-        other.components.read(ComponentId(0));
-        other.components.write(ComponentId(2));
-        other.resources.write(ResourceId(1));
+        other.current.components.read(ComponentId(0));
+        other.current.components.write(ComponentId(2));
+        other.current.resources.write(ResourceId(1));
 
         assert_eq!(access.conflicts(&other), Ok(()));
     }
@@ -338,9 +360,9 @@ mod test {
     #[test]
     fn world_access_validate() {
         let mut valid = WorldAccess::new();
-        valid.components.read(ComponentId(0));
-        valid.components.write(ComponentId(1));
-        valid.resources.read(ResourceId(0));
+        valid.current.components.read(ComponentId(0));
+        valid.current.components.write(ComponentId(1));
+        valid.current.resources.read(ResourceId(0));
 
         assert_eq!(valid.validate(), Ok(()));
 
@@ -348,7 +370,7 @@ mod test {
         archetype.write(ComponentId(0));
 
         let mut invalid = WorldAccess::new();
-        invalid.components.read(ComponentId(0));
+        invalid.current.components.read(ComponentId(0));
         invalid.add_archetype(archetype);
 
         assert_ne!(invalid.validate(), Ok(()));

@@ -296,9 +296,9 @@ impl<F: Fn() + Send + Sync + 'static> IntoSystemConfig<()> for F {
 
 impl From<SystemNode> for System {
     fn from(value: SystemNode) -> Self {
-        let resources = value.access.resources.collect();
-        let mut components = value.access.components.collect();
-        for archetype in value.access.archetypes {
+        let resources = value.access.current.resources.collect();
+        let mut components = value.access.current.components.collect();
+        for archetype in value.access.current.archetypes {
             components.union_with(archetype.access().get_read());
             components.union_with(archetype.access().get_write());
         }
