@@ -42,9 +42,7 @@ use asset::{
 };
 use ecs::{App, Component, EventReader, Init, Spawner, Update};
 use render::{
-    AsBinding, Camera, Color, Mesh, MeshSettings, Projection, Shader, ShaderSettings,
-    draw::{BlendMode, Drawable, Material, ShaderModel, ShaderPhase, Unlit, View},
-    plugins::ViewPlugin,
+    draw::{BlendMode, Drawable, Material, ShaderModel, ShaderPhase, Unlit, View}, plugins::{DrawPlugin, RenderAppExt, ViewPlugin}, AsBinding, Camera, Color, Mesh, MeshSettings, Projection, Shader, ShaderSettings
 };
 use transform::{GlobalTransform, Transform};
 
@@ -90,7 +88,7 @@ fn main() {
     embed_asset!(embedded, PLANE, "meshes/plane.obj", MeshSettings::default());
 
     App::new()
-        .add_plugins(ViewPlugin::<View3d>::new())
+        .add_drawable::<DrawMesh<UnlitColor>>()
         .add_source("embedded", embedded)
         .load_asset::<Mesh>(CUBE)
         .load_asset::<Mesh>(PLANE)

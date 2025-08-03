@@ -127,7 +127,7 @@ pub trait RenderAppExt {
 
 impl RenderAppExt for AppBuilder {
     fn add_drawable<D: Drawable>(&mut self) -> &mut Self {
-        self
+        self.add_plugins(DrawPlugin::<D>::new())
     }
 
     fn add_shader_constant<C: GlobalShaderConstant>(&mut self) -> &mut Self {
@@ -260,6 +260,12 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
 }
 
 pub struct DrawPlugin<D: Drawable>(std::marker::PhantomData<D>);
+impl<D: Drawable>  DrawPlugin<D> {
+    pub fn new() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
 impl<D: Drawable> Plugin for DrawPlugin<D> {
     fn setup(&mut self, app: &mut AppBuilder) {
         app.add_plugins((
