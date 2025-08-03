@@ -457,8 +457,13 @@ unsafe impl<S: SystemArg> SystemArg for Main<'_, '_, S> {
     type State = S::State;
 
     fn init(world: &mut World, access: &mut crate::WorldAccess) -> Self::State {
+        let mut main_access = WorldAccess::from(std::mem::take(access.main_mut()));
         let main = world.resource_mut::<MainWorld>();
-        S::init(main, access)
+        let state = S::init(main, &mut main_access);
+
+        access.main = main_access.current;
+
+        state
     }
 
     unsafe fn get<'world, 'state>(

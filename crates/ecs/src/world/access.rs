@@ -284,12 +284,14 @@ impl Default for AppAccess {
 
 pub struct WorldAccess {
     pub(crate) current: AppAccess,
+    pub(crate) main: AppAccess,
 }
 
 impl WorldAccess {
     pub fn new() -> Self {
         Self {
             current: AppAccess::default(),
+            main: AppAccess::default(),
         }
     }
 
@@ -313,12 +315,27 @@ impl WorldAccess {
         &mut self.current.resources
     }
 
+    pub fn main_mut(&mut self) -> &mut AppAccess {
+        &mut self.main
+    }
+
     pub fn validate(&self) -> Result<(), AccessError> {
-        self.current.validate()
+        self.current.validate()?;
+        self.main.validate()
     }
 
     pub fn conflicts(&self, other: &Self) -> Result<(), AccessError> {
-        self.current.conflicts(&other.current)
+        self.current.conflicts(&other.current)?;
+        self.main.conflicts(&other.main)
+    }
+}
+
+impl From<AppAccess> for WorldAccess {
+    fn from(value: AppAccess) -> Self {
+        Self {
+            current: value,
+            main: AppAccess::default(),
+        }
     }
 }
 

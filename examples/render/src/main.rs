@@ -42,7 +42,9 @@ use asset::{
 };
 use ecs::{App, Component, EventReader, Init, Spawner, Update};
 use render::{
-    draw::{BlendMode, Drawable, Material, ShaderModel, ShaderPhase, Unlit, View}, plugins::{DrawPlugin, RenderAppExt, ViewPlugin}, AsBinding, Camera, Color, Mesh, MeshSettings, Projection, Shader, ShaderSettings
+    AsBinding, Camera, Color, Mesh, MeshSettings, Projection, Shader, ShaderSettings,
+    draw::{BlendMode, Drawable, Material, ShaderModel, ShaderPhase, Unlit, View},
+    plugins::RenderAppExt,
 };
 use transform::{GlobalTransform, Transform};
 

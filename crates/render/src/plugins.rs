@@ -7,8 +7,8 @@ use crate::{
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     constants::StorageBufferEnabled,
     draw::{
-        BatchedUniformBuffer, ClearPass, DrawModel, DrawPass, DrawPipeline, Drawable, MainDrawPass,
-        Material, MaterialInstance, MaterialLayout, ModelData, ModelUniformData, View, ViewBuffer,
+        BatchedUniformBuffer, DrawModel, DrawPass, DrawPipeline, Drawable, MainDrawPass, Material,
+        MaterialInstance, MaterialLayout, ModelData, ModelUniformData, View, ViewBuffer,
     },
     processor::ShaderConstant,
     renderer::{GraphPass, RenderGraph, SubGraph},
@@ -260,7 +260,7 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
 }
 
 pub struct DrawPlugin<D: Drawable>(std::marker::PhantomData<D>);
-impl<D: Drawable>  DrawPlugin<D> {
+impl<D: Drawable> DrawPlugin<D> {
     pub fn new() -> Self {
         Self(std::marker::PhantomData)
     }
@@ -277,7 +277,6 @@ impl<D: Drawable> Plugin for DrawPlugin<D> {
         ))
         .add_render_resource::<DrawPipeline<D>>()
         .add_nested_sub_graph::<CameraSubGraph, MainDrawPass>()
-        .add_sub_graph_pass::<MainDrawPass, ClearPass>(ClearPass::default())
         .add_sub_graph_pass::<MainDrawPass, DrawPass<DrawModel<D>>>(DrawPass::new())
         .add_systems(QueueDraws, BatchedUniformBuffer::<ModelData>::queue::<D>);
     }
