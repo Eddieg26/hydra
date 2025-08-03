@@ -1,16 +1,20 @@
 use asset::{Asset, AssetId, embed_asset, io::EmbeddedFs, plugin::AssetAppExt};
-use ecs::{Component, Plugin, Resource, unlifetime::Read};
+use ecs::{
+    Component, IntoSystemConfig, Phase, Plugin, Query, Resource, app::sync::SyncComponentPlugin,
+    system::Exists, unlifetime::Read,
+};
 use math::Vec3;
 use render::{
     AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, Color, Mesh,
-    MeshSettings, Projection, RenderDevice, RenderResource, Shader, ShaderSettings, ShaderType,
+    MeshSettings, PostRender, PreRender, Projection, Queue, RenderApp, RenderDevice,
+    RenderResource, Shader, ShaderSettings, ShaderType,
     draw::{BlendMode, Drawable, Material, ShaderModel, ShaderModelData, ShaderPhase, Unlit, View},
     plugins::RenderAppExt,
     uniform::{UniformBuffer, UniformBufferArray},
     wgpu::ShaderStages,
 };
 use std::num::NonZero;
-use transform::Transform;
+use transform::{GlobalTransform, Transform};
 
 pub const COMMON_SHADER: AssetId<Shader> = AssetId::from_u128(0x3e7c2a1b4f5e4c2e9d1a8b7e6c5d4f3a);
 pub const DRAW_MESH_SHADER: AssetId<Shader> = AssetId::from_u128(0xabcdef0123456789);
@@ -18,11 +22,12 @@ pub const UNLIT_COLOR_SHADER: AssetId<Shader> =
     AssetId::from_u128(0x7fa18a3696e84df5848822a3b417e3f3u128);
 pub const UNLIT_TEX_SHADER: AssetId<Shader> =
     AssetId::from_u128(0x9e08450b1c394c8c88de79b6aa2c2589);
+pub const LIT_COLOR_SHADER: AssetId<Shader> = AssetId::from_u128(0x87654321fedcba98);
 pub const CUBE: AssetId<Mesh> = AssetId::from_u128(0x123456789abcdef0);
 pub const PLANE: AssetId<Mesh> = AssetId::from_u128(0xfca61c1a76b14268b25058d36dbc6389);
 pub const UNLIT_COLOR_MAT: AssetId<UnlitColor> =
     AssetId::from_u128(0xa0cc79971c2d4206874539cb5ac54fe2u128);
-
+pub const LIT_COLOR_MAT: AssetId<LitColor> = AssetId::from_u128(0x9a8b7c6d5e4f3a2b1c0d8e7f6a5b4c3d);
 pub struct ExamplePlugin;
 
 impl Plugin for ExamplePlugin {
@@ -56,17 +61,37 @@ impl Plugin for ExamplePlugin {
             ShaderSettings::default()
         );
 
+        embed_asset!(
+            embedded,
+            LIT_COLOR_SHADER,
+            "shaders/forward-lighting.wgsl",
+            ShaderSettings::default()
+        );
+
         embed_asset!(embedded, CUBE, "meshes/cube.obj", MeshSettings::default());
         embed_asset!(embedded, PLANE, "meshes/plane.obj", MeshSettings::default());
 
-        app.add_drawable::<DrawMesh<UnlitColor>>()
+        app.add_plugins(SyncComponentPlugin::<Light, RenderApp>::new())
+            .add_drawable::<DrawMesh<LitColor>>()
             .add_source("embedded", embedded)
             .load_asset::<Mesh>(CUBE)
             .load_asset::<Mesh>(PLANE)
             .add_asset(UNLIT_COLOR_MAT, UnlitColor::from(Color::red()))
-            .add_render_resource::<Lights>();
+            .add_asset(LIT_COLOR_MAT, LitColor::from(Color::white()))
+            .add_render_resource::<Lights>()
+            .sub_app_mut(RenderApp)
+            .add_sub_phase(Queue, QueueLights)
+            .add_systems(
+                PreRender,
+                ShaderModel3d::update.when::<Exists<ShaderModelData<ShaderModel3d>>>(),
+            )
+            .add_systems(QueueLights, Lights::queue)
+            .add_systems(PostRender, Lights::clear);
     }
 }
+
+#[derive(Phase)]
+pub struct QueueLights;
 
 #[derive(Default, Clone, Copy, PartialEq, PartialOrd)]
 pub struct ZDistance(f32);
@@ -186,6 +211,30 @@ impl Material for UnlitColor {
     }
 }
 
+#[derive(Clone, Copy, Asset, AsBinding)]
+pub struct LitColor {
+    #[uniform(0)]
+    color: Color,
+}
+
+impl From<Color> for LitColor {
+    fn from(color: Color) -> Self {
+        Self { color }
+    }
+}
+
+impl Material for LitColor {
+    type View = View3d;
+
+    type Model = ShaderModel3d;
+
+    type Phase = Opaque3d;
+
+    fn shader() -> impl Into<AssetId<Shader>> {
+        LIT_COLOR_SHADER
+    }
+}
+
 pub struct ShaderModel3d {
     layout: BindGroupLayout,
     bind_group: BindGroup,
@@ -248,6 +297,33 @@ pub struct Light {
     pub range: f32,
 }
 
+impl Light {
+    pub fn with_color(mut self, color: Color) -> Self {
+        self.color = color;
+        self
+    }
+
+    pub fn with_intensity(mut self, intensity: f32) -> Self {
+        self.intensity = intensity;
+        self
+    }
+
+    pub fn with_range(mut self, range: f32) -> Self {
+        self.range = range;
+        self
+    }
+}
+
+impl Default for Light {
+    fn default() -> Self {
+        Self {
+            color: Color::white(),
+            intensity: 1.0,
+            range: 10.0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, ShaderType)]
 pub struct LightData {
     pub position: Vec3,
@@ -280,6 +356,21 @@ impl Lights {
 
         self.buffer.update(device)
     }
+
+    fn queue(lights: &mut Self, query: Query<(&Light, &GlobalTransform)>) {
+        for (light, transform) in query.iter() {
+            let Color { r, g, b, .. } = light.color;
+            lights.buffer.push(&LightData {
+                position: transform.translation(),
+                range: light.range,
+                color: Color::new(r, g, b, light.intensity),
+            });
+        }
+    }
+
+    fn clear(lights: &mut Self) {
+        lights.buffer.clear();
+    }
 }
 
 impl RenderResource for Lights {
@@ -304,8 +395,6 @@ impl RenderResource for Lights {
     }
 }
 
-// const UNLIT_BLUE: AssetId<UnlitColor> = AssetId::from_u128(0x87654321fedcba98);
-// const LIT_WHITE: AssetId<LitColor> = AssetId::from_u128(0x9a8b7c6d5e4f3a2b1c0d8e7f6a5b4c3d);
 // const LIGHT_MAT: AssetId<LightMaterial> = AssetId::from_u128(0xcd9c7e475e84435db8316d2612b94e2d);
 // const QUAD_ID: AssetId<Mesh> = AssetId::from_u128(0xe51f72d138f747c6b22e2ac8a64b7b92u128);
 // const CUBE_ID: AssetId<Mesh> = AssetId::from_u128(0x9d3919f428f8429a80e195849b3b6c21u128);

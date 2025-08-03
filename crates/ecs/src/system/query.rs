@@ -899,7 +899,7 @@ macro_rules! impl_base_query_for_tuples {
 
                 fn filter<'w>(state: &Self::State<'w>, entity: Entity, row: RowIndex) -> bool {
                     let ($($name,)*) = state;
-                    let mut filter = true;
+                    let mut filter = false;
 
                     ($(
                         filter = filter || $name::filter($name, entity, row),

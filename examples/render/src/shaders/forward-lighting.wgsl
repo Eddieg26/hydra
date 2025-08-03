@@ -1,3 +1,5 @@
+#import embedded://shaders/common.wgsl
+
 struct FragmentInput {
     @location(0) world_pos: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -14,7 +16,7 @@ struct PointLight {
 @group(2) @binding(0) var<uniform> albedo: vec4<f32>;
 
 @group(3) @binding(0)
-var<storage, read> point_lights: array<PointLight>;
+var<uniform> point_lights: array<PointLight, BATCH_SIZE>;
 
 @group(3) @binding(1)
 var<uniform> light_count: u32;
@@ -23,6 +25,7 @@ var<uniform> light_count: u32;
 fn main(input: FragmentInput) -> @location(0) vec4<f32> {
     let color: vec3<f32> = compute_diffuse_lighting(input.world_pos, normalize(input.normal), albedo.rgb);
     return vec4<f32>(color, 1.0);
+    // return vec4<f32>(input.normal, 1.0); // visualize normals
 }
 
 fn compute_diffuse_lighting(
@@ -34,7 +37,7 @@ fn compute_diffuse_lighting(
 
     for (var i = 0u; i < light_count; i++) {
         let light = point_lights[i];
-        let light_dir = light.position - world_pos;
+        let light_dir =  light.position - world_pos;
         let distance = length(light_dir);
         let L = normalize(light_dir);
 

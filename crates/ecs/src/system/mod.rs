@@ -97,7 +97,6 @@ impl System {
     pub fn run(&mut self, world: WorldCell) -> bool {
         if self.should_run(unsafe { world.get() }) {
             (self.run)(&mut self.state, world, &self.meta);
-            self.meta.frame = unsafe { world.get().frame() };
             true
         } else {
             false
@@ -105,6 +104,7 @@ impl System {
     }
 
     pub fn update(&mut self, world: &mut World) {
+        self.meta.frame = world.frame();
         (self.update)(&mut self.state, world);
     }
 
