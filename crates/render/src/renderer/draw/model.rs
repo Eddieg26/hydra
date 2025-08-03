@@ -1,9 +1,9 @@
 use crate::{
-    BindGroup, BindGroupLayout, Color, GraphPass, PassBuilder, RenderContext, RenderGraphError,
-    RenderState, SubGraph,
+    BindGroup, BindGroupLayout, Color, GraphPass, PassBuilder, RenderContext, RenderDevice,
+    RenderGraphError, RenderResource, RenderState, SubGraph,
     draw::{PhaseDrawCalls, View, ViewBuffer},
 };
-use ecs::Entity;
+use ecs::{Entity, Resource, unlifetime::Read};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum BlendMode {
@@ -65,6 +65,8 @@ pub trait ShaderModel: Send + Sync + Sized + 'static {
 
     type Data: Send + Sync + 'static;
 
+    fn new(device: &RenderDevice) -> Self;
+
     fn bind_group(&self) -> Option<&BindGroup> {
         None
     }
@@ -83,10 +85,38 @@ pub trait ShaderModel: Send + Sync + Sized + 'static {
     }
 }
 
+#[derive(Resource)]
+pub struct ShaderModelData<M: ShaderModel>(M);
+impl<M: ShaderModel> std::ops::Deref for ShaderModelData<M> {
+    type Target = M;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<M: ShaderModel> std::ops::DerefMut for ShaderModelData<M> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<M: ShaderModel> RenderResource for ShaderModelData<M> {
+    type Arg = Read<RenderDevice>;
+
+    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
+        Ok(Self(M::new(device)))
+    }
+}
+
 impl ShaderModel for () {
     type Base = ();
 
     type Data = ();
+
+    fn new(_: &RenderDevice) -> Self {
+        ()
+    }
 
     fn setup(_: &mut PassBuilder, _: &mut ShaderPhases<Self>) -> Self::Data {
         ()
@@ -98,6 +128,10 @@ impl<M: ShaderModel> ShaderModel for Unlit<M> {
     type Base = M;
 
     type Data = ();
+
+    fn new(_: &RenderDevice) -> Self {
+        Self(std::marker::PhantomData)
+    }
 
     fn setup(_: &mut PassBuilder, _: &mut ShaderPhases<Self>) -> Self::Data {
         ()

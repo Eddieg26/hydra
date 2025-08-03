@@ -9,7 +9,7 @@ use crate::{
     draw::{
         BatchedUniformBuffer, DrawModel, DrawPass, DrawPhase, DrawPipeline, Drawable, MainDrawPass,
         Material, MaterialInstance, MaterialLayout, ModelData, ModelUniformData, PhaseDrawCalls,
-        ShaderModel, ShaderPhase, View, ViewBuffer,
+        ShaderModel, ShaderModelData, ShaderPhase, View, ViewBuffer,
     },
     processor::{ShaderConstant, ShaderConstants},
     renderer::{GraphPass, RenderGraph, SubGraph},
@@ -274,6 +274,7 @@ impl<P: ShaderPhase, M: ShaderModel> ShaderPhasePlugin<P, M> {
 impl<P: ShaderPhase, M: ShaderModel> Plugin for ShaderPhasePlugin<P, M> {
     fn setup(&mut self, app: &mut AppBuilder) {
         app.add_plugins(RenderPlugin)
+            .add_render_resource::<ShaderModelData<M>>()
             .sub_app_mut(RenderApp)
             .add_resource(PhaseDrawCalls::<P, M>::new())
             .add_systems(PostRender, PhaseDrawCalls::<P, M>::clear);

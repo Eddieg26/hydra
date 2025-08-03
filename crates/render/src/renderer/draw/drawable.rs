@@ -7,7 +7,7 @@ use crate::{
     constants::MAX_BATCH_SIZE,
     draw::{
         BlendMode, DepthWrite, Material, MaterialId, MaterialInstance, MaterialLayout, ShaderModel,
-        ShaderPhase, View, ViewBuffer, ViewInstance,
+        ShaderModelData, ShaderPhase, View, ViewBuffer, ViewInstance,
     },
 };
 use asset::AssetId;
@@ -320,11 +320,12 @@ impl<D: Drawable> RenderResource for DrawPipeline<D> {
         Option<Read<BatchedUniformBuffer<ModelData>>>,
         Option<Read<ViewBuffer<D::View>>>,
         Option<Write<MaterialLayout<D::Material>>>,
+        Option<Read<ShaderModelData<DrawModel<D>>>>,
         SCommands,
     );
 
     fn extract(arg: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
-        let (cache, surface, cpu_model, views, layout, mut commands) = arg;
+        let (cache, surface, cpu_model, views, layout, shader_model, mut commands) = arg;
 
         let view_layout = match views {
             Some(views) => views.layout(),
@@ -343,6 +344,10 @@ impl<D: Drawable> RenderResource for DrawPipeline<D> {
             }
         };
 
+        let Some(shader_model_layout) = shader_model.map(|s| s.bind_group_layout()) else {
+            return Err(crate::resources::ExtractError::Retry(()));
+        };
+
         let vertex_shader: AssetId<Shader> = D::shader().into();
         let fragment_shader: AssetId<Shader> = D::Material::shader().into();
 
@@ -357,15 +362,19 @@ impl<D: Drawable> RenderResource for DrawPipeline<D> {
             VertexStepMode::Vertex,
         )];
 
-        let layout = vec![
+        let mut layouts = vec![
             view_layout.clone(),
             model_layout.clone(),
             material_layout.as_ref().clone(),
         ];
 
+        if let Some(layout) = shader_model_layout {
+            layouts.push(layout.clone());
+        }
+
         let id = cache.queue_render_pipeline(RenderPipelineDesc {
             label: None,
-            layout,
+            layout: layouts,
             vertex: VertexState {
                 shader: *vertex_shader.as_ref(),
                 entry: "main".into(),
