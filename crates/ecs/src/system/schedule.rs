@@ -10,13 +10,25 @@ use crate::{
 use std::collections::HashMap;
 
 pub struct PhaseContext<'a> {
-    world: WorldCell<'a>,
+    index: usize,
     executor: &'a dyn SystemExecutor,
+    systems: &'a Systems,
+    world: WorldCell<'a>,
 }
 
 impl<'a> PhaseContext<'a> {
-    pub(crate) fn new(world: WorldCell<'a>, executor: &'a dyn SystemExecutor) -> Self {
-        Self { world, executor }
+    pub(crate) fn new(
+        index: usize,
+        executor: &'a dyn SystemExecutor,
+        world: WorldCell<'a>,
+        systems: &'a Systems,
+    ) -> Self {
+        Self {
+            index,
+            executor,
+            systems,
+            world,
+        }
     }
 
     pub unsafe fn world(&self) -> WorldCell {
@@ -25,6 +37,12 @@ impl<'a> PhaseContext<'a> {
 
     pub fn execute(&self) {
         self.executor.execute(self.world);
+        for dep in self.systems.hierarchy.dependents()[self.index].ones() {
+            let index = self.systems.hierarchy.nodes()[dep];
+            self.systems.visit(index, |node| {
+                node.run(index, self.world, self.systems);
+            });
+        }
     }
 }
 
@@ -111,8 +129,8 @@ pub struct PhaseNode {
 }
 
 impl PhaseNode {
-    pub fn run(&self, world: WorldCell) {
-        let ctx = PhaseContext::new(world, self.executor.as_ref());
+    pub fn run<'a>(&self, index: usize, world: WorldCell<'a>, systems: &'a Systems) {
+        let ctx = PhaseContext::new(index, self.executor.as_ref(), world, systems);
         self.phase.run(ctx);
     }
 }
@@ -283,11 +301,11 @@ impl Systems {
         let world = unsafe { WorldCell::new_mut(world) };
 
         if let Some(index) = self.map.get(phase.name()).copied() {
-            self.visit(index, &|node| node.run(world));
+            self.phases.nodes()[index].run(index, world, self);
         }
     }
 
-    pub fn visit(&self, index: usize, visiter: &impl Fn(&PhaseNode)) {
+    pub fn visit(&self, index: usize, visiter: impl Fn(&PhaseNode) + Copy) {
         visiter(&self.phases.nodes()[index]);
         for child in self.hierarchy.dependents()[index].ones() {
             self.visit(self.hierarchy.nodes()[child], visiter);
@@ -440,7 +458,7 @@ mod tests {
         let mut world = World::new();
         let systems = schedule.build(&mut world).unwrap();
 
-        systems.visit(0, &|node| {
+        systems.visit(0, |node| {
             println!("{}", node.phase.name());
         });
     }

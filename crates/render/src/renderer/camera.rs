@@ -6,7 +6,7 @@ use crate::{
     resources::RenderTexture,
 };
 use asset::AssetId;
-use ecs::{AddComponent, Commands, Component, Entity, Query, Resource, query::Without};
+use ecs::{AddComponent, Commands, Component, Entity, Phase, Query, Resource, query::Without};
 use encase::ShaderType;
 use math::{Mat4, Size, Vec3, Vec3A, Vec4, bounds::Bounds, sphere::Sphere};
 
@@ -234,6 +234,25 @@ impl CameraAttachments {
                 | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         })
+    }
+}
+
+pub struct CameraPhase;
+impl Phase for Camera {
+    fn run(&self, ctx: ecs::system::PhaseContext) {
+        let world = unsafe { ctx.world().get() };
+        let cameras = world.resource::<CameraSortOrder>();
+        for (camera, _) in cameras.iter() {
+            let Some(attachments) = world.get_component::<CameraAttachments>(*camera) else {
+                return;
+            };
+
+            ctx.execute();
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        ecs::ext::short_type_name::<Self>()
     }
 }
 
