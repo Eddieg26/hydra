@@ -135,6 +135,15 @@ impl GlobalTransform {
     pub fn inverse(&self) -> Self {
         GlobalTransform(self.0.inverse())
     }
+
+    pub fn view_matrix(&self) -> Mat4 {
+        let (_, rotation, translation) = self.to_scale_rotation_translation();
+        Mat4::look_at_rh(
+            translation,
+            translation + rotation * Vec3::Z,
+            rotation * Vec3::Y,
+        )
+    }
 }
 
 impl<L: LocalTransform> std::ops::Mul<&L> for &GlobalTransform {

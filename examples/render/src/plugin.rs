@@ -3,7 +3,7 @@ use ecs::{
     Component, IntoSystemConfig, Phase, Plugin, Query, Resource, app::sync::SyncComponentPlugin,
     system::Exists, unlifetime::Read,
 };
-use math::Vec3;
+use math::{Mat4, Vec3};
 use render::{
     AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, Color, Mesh,
     MeshSettings, PostRender, PreRender, Projection, Queue, RenderApp, RenderDevice,
@@ -119,16 +119,7 @@ impl View for View3d {
     type Item = ZDistance;
 
     fn projection(&self, width: f32, height: f32) -> math::Mat4 {
-        let aspect_ratio = width / height;
-        match self.projection {
-            Projection::Orthographic { near, far, size } => {
-                let width = size * aspect_ratio;
-                math::Mat4::orthographic_rh(-width, width, -size, size, near, far)
-            }
-            Projection::Perspective { fov, near, .. } => {
-                math::Mat4::perspective_infinite_reverse_rh(fov, aspect_ratio, near)
-            }
-        }
+        self.projection.matrix(width, height)
     }
 
     fn far(&self) -> f32 {
@@ -330,6 +321,7 @@ pub struct LightData {
     pub range: f32,
     /// Alpha value for the light, used for attenuation.
     pub color: Color,
+    pub view_proj_matrix: Mat4,
 }
 
 #[derive(Resource)]
@@ -360,10 +352,19 @@ impl Lights {
     fn queue(lights: &mut Self, query: Query<(&Light, &GlobalTransform)>) {
         for (light, transform) in query.iter() {
             let Color { r, g, b, .. } = light.color;
+            let projection = Projection::Perspective {
+                fov: 90.0,
+                near: 0.1,
+                far: 1000.0,
+            };
+
+            let view_proj_matrix = projection.matrix(2048f32, 2048f32) * transform.view_matrix();
+
             lights.buffer.push(&LightData {
                 position: transform.translation(),
                 range: light.range,
                 color: Color::new(r, g, b, light.intensity),
+                view_proj_matrix,
             });
         }
     }

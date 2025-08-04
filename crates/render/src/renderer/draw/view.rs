@@ -31,7 +31,7 @@ pub struct ViewData {
 }
 
 impl ViewData {
-    pub fn new(world: Mat4, projection: Mat4) -> Self {
+    pub fn new(world: GlobalTransform, projection: Mat4) -> Self {
         let (_, rotation, translation) = world.to_scale_rotation_translation();
         let view = Mat4::look_at_rh(
             translation,
@@ -40,7 +40,7 @@ impl ViewData {
         );
 
         Self {
-            world,
+            world: world.matrix(),
             view,
             projection,
         }
@@ -100,7 +100,7 @@ impl<V: View> ViewBuffer<V> {
         let Size { width, height } = surface.size();
         for (entity, transform, view) in query.iter() {
             let projection = view.projection(width as f32, height as f32);
-            let data = ViewData::new(transform.matrix(), projection);
+            let data = ViewData::new(*transform, projection);
             let offset = ViewInstance {
                 offset: views.buffer.push(&data),
                 _marker: std::marker::PhantomData,

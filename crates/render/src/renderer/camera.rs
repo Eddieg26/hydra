@@ -66,6 +66,19 @@ impl Projection {
         }
     }
 
+    pub fn matrix(&self, width: f32, height: f32) -> Mat4 {
+        let aspect_ratio = width / height;
+        match *self {
+            Projection::Orthographic { near, far, size } => {
+                let width = size * aspect_ratio;
+                Mat4::orthographic_rh(-width, width, -size, size, near, far)
+            }
+            Projection::Perspective { fov, near, .. } => {
+                Mat4::perspective_infinite_reverse_rh(fov, aspect_ratio, near)
+            }
+        }
+    }
+
     pub fn frustum_points(&self, width: u32, height: u32, camera: &Camera) -> [Vec3A; 8] {
         match *self {
             Projection::Orthographic { near, far, .. } => {

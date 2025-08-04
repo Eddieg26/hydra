@@ -186,6 +186,12 @@ impl<T: ModelUniformData> BatchedUniformBuffer<T> {
     }
 }
 
+impl<T: ModelUniformData> AsRef<Buffer> for BatchedUniformBuffer<T> {
+    fn as_ref(&self) -> &Buffer {
+        &self.buffer
+    }
+}
+
 impl BatchedUniformBuffer<ModelData> {
     pub fn queue<D>(
         views: Query<Entity, With<D::View>>,
