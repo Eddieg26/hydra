@@ -84,14 +84,18 @@ impl<V: View> ViewBuffer<V> {
         &self.bind_group
     }
 
+    pub fn clear(&mut self) {
+        self.buffer.clear();
+        self.instances.clear();
+    }
+
     pub fn queue(
         views: &mut Self,
         query: Query<(Entity, &GlobalTransform, &V)>,
         surface: &RenderSurface,
         device: &RenderDevice,
     ) {
-        views.buffer.reset();
-        views.instances.clear();
+        views.clear();
 
         let Size { width, height } = surface.size();
         for (entity, transform, view) in query.iter() {

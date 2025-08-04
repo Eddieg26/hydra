@@ -1,10 +1,13 @@
-use crate::plugin::{DrawMesh, ExamplePlugin, Light, View3d, CUBE, LIT_COLOR_MAT, PLANE};
-use ecs::{App, Init, Spawner};
+use crate::plugin::{ DrawMesh, ExamplePlugin, LIT_COLOR_MAT, Light, PLANE, View3d};
+use ecs::{App, AppTag, Component, Init, Spawner};
 use math::Vec3;
 use render::{Camera, Color, MeshFilter};
 use transform::{GlobalTransform, Transform};
 
 pub mod plugin;
+
+#[derive(Component, Clone, AppTag)]
+pub struct Test;
 
 fn main() {
     App::new()
@@ -13,10 +16,12 @@ fn main() {
             spawner
                 .spawn()
                 .with_component(Camera {
-                    clear_color: Some(Color::blue()),
+                    clear_color: Some(Color::black()),
                     ..Default::default()
                 })
-                .with_component(Transform::default().with_translation(Vec3::NEG_Z * 5.0 + Vec3::Y * 1.5))
+                .with_component(
+                    Transform::default().with_translation(Vec3::NEG_Z * 5.0 + Vec3::Y * 1.5),
+                )
                 .with_component(GlobalTransform::default())
                 .with_component(View3d::default())
                 .finish();
@@ -31,9 +36,9 @@ fn main() {
 
             spawner
                 .spawn()
-                .with_component(Transform::default().with_translation(Vec3::Y * 9.0))
+                .with_component(Transform::default().with_translation(Vec3::Y * 1.0))
                 .with_component(GlobalTransform::default())
-                .with_component(Light::default().with_color(Color::red()))
+                .with_component(Light::default().with_color(Color::white()))
                 .finish();
         })
         .run();

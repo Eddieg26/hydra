@@ -22,7 +22,7 @@ pub use event::*;
 pub use resource::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WorldId(u32);
+pub struct WorldId(pub u32);
 impl WorldId {
     fn new() -> Self {
         static mut ID: u32 = 0;
@@ -258,7 +258,8 @@ impl World {
     }
 
     pub fn add_component<C: Component>(&mut self, entity: Entity, component: C) -> EntityIndex {
-        self.archetypes.add_component(entity, component, self.frame)
+        self.archetypes
+            .add_component(entity, component, self.frame + Frame(1))
     }
 
     pub fn remove_component<C: Component>(&mut self, entity: Entity) -> Option<EntityIndex> {

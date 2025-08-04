@@ -4,7 +4,7 @@ use crate::{
     world::{World, cell::WorldCell},
 };
 use fixedbitset::FixedBitSet;
-use std::{any::Any, borrow::Cow, cell::UnsafeCell};
+use std::{any::Any, cell::UnsafeCell};
 
 pub mod arg;
 pub mod config;
@@ -18,7 +18,7 @@ pub use executor::*;
 pub use query::*;
 pub use schedule::*;
 
-pub type SystemName = Cow<'static, str>;
+pub type SystemName = &'static str;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SystemId(u32);

@@ -250,10 +250,7 @@ impl RenderAsset for GpuShader {
     ) -> Result<Self, super::ExtractError<Self::Source>> {
         let local = global_constants.local(&id);
         GpuShader::new(device, asset, &global_constants, local)
-            .map_err(|e| {
-                println!("{e}");
-                super::ExtractError::from_error(e)
-            })
+            .map_err(|e| super::ExtractError::from_error(e))
     }
 
     fn usage(_: &Self::Source) -> super::AssetUsage {

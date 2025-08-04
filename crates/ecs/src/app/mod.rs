@@ -1,5 +1,11 @@
 use crate::{
-    app::defaults::{DefaultPhases, DefaultPlugins}, core::task::{CpuTaskPool, Task}, ext, system::MainWorld, world::Archetypes, Component, Components, Entities, Event, EventRegistry, IntoSystemConfigs, Phase, Resource, Resources, RunMode, Schedule, Systems, World, WorldMode
+    Component, Components, Entities, Event, EventRegistry, IntoSystemConfigs, Phase, Resource,
+    Resources, RunMode, Schedule, Systems, World, WorldMode,
+    app::defaults::{DefaultPhases, DefaultPlugins},
+    core::task::{CpuTaskPool, Task},
+    ext,
+    system::MainWorld,
+    world::Archetypes,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -105,6 +111,7 @@ impl App {
         self.world.add_resource(main);
         self.run(phase);
         self.world.remove_resource::<MainWorld>();
+        self.world.frame = main.frame;
     }
 
     fn run_once(mut self, phase: impl Phase) -> Self {
