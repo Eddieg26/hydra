@@ -5,13 +5,7 @@ use ecs::{
 };
 use math::{Mat4, Vec3};
 use render::{
-    AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, Color, Mesh,
-    MeshSettings, PostRender, PreRender, Projection, Queue, RenderApp, RenderDevice,
-    RenderResource, Shader, ShaderSettings, ShaderType,
-    draw::{BlendMode, Drawable, Material, ShaderModel, ShaderModelData, ShaderPhase, Unlit, View},
-    plugins::RenderAppExt,
-    uniform::{UniformBuffer, UniformBufferArray},
-    wgpu::ShaderStages,
+    constants::UniformBatchSize, draw::{BlendMode, Drawable, Material, ShaderModel, ShaderModelData, ShaderPhase, Unlit, View}, plugins::RenderAppExt, uniform::{UniformBuffer, UniformBufferArray}, wgpu::ShaderStages, AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, Color, Mesh, MeshSettings, PostRender, PreRender, Projection, Queue, RenderApp, RenderDevice, RenderResource, Shader, ShaderSettings, ShaderType
 };
 use std::num::NonZero;
 use transform::{GlobalTransform, Transform};
@@ -321,7 +315,6 @@ pub struct LightData {
     pub range: f32,
     /// Alpha value for the light, used for attenuation.
     pub color: Color,
-    pub view_proj_matrix: Mat4,
 }
 
 #[derive(Resource)]
@@ -352,19 +345,18 @@ impl Lights {
     fn queue(lights: &mut Self, query: Query<(&Light, &GlobalTransform)>) {
         for (light, transform) in query.iter() {
             let Color { r, g, b, .. } = light.color;
-            let projection = Projection::Perspective {
-                fov: 90.0,
-                near: 0.1,
-                far: 1000.0,
-            };
+            // let projection = Projection::Perspective {
+            //     fov: 90.0,
+            //     near: 0.1,
+            //     far: 1000.0,
+            // };
 
-            let view_proj_matrix = projection.matrix(2048f32, 2048f32) * transform.view_matrix();
+            // let view_proj_matrix = projection.matrix(2048f32, 2048f32) * transform.view_matrix();
 
             lights.buffer.push(&LightData {
                 position: transform.translation(),
                 range: light.range,
                 color: Color::new(r, g, b, light.intensity),
-                view_proj_matrix,
             });
         }
     }
@@ -378,7 +370,8 @@ impl RenderResource for Lights {
     type Arg = Read<RenderDevice>;
 
     fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, render::ExtractError<()>> {
-        let size = NonZero::new(Self::MAX_LIGHTS as u64 * LightData::min_size().get());
+        let max_lights = UniformBatchSize::<LightData>::size(device, Self::MAX_LIGHTS) as u64;
+        let size = NonZero::new(max_lights * LightData::min_size().get());
         let count = UniformBuffer::new(device, 0, None, None);
         let buffer = UniformBufferArray::with_size(
             device,

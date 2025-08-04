@@ -36,7 +36,7 @@ fn main() {
 
             spawner
                 .spawn()
-                .with_component(Transform::default().with_translation(Vec3::Y * 1.0))
+                .with_component(Transform::default().with_translation(Vec3::Y * 7.0))
                 .with_component(GlobalTransform::default())
                 .with_component(Light::default().with_color(Color::white()))
                 .finish();
