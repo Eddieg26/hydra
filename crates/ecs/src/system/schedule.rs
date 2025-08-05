@@ -38,10 +38,8 @@ impl<'a> PhaseContext<'a> {
     pub fn execute(&self) {
         self.executor.execute(self.world);
         for dep in self.systems.hierarchy.dependents()[self.index].ones() {
-            let index = self.systems.hierarchy.nodes()[dep];
-            self.systems.visit(index, |node| {
-                node.run(index, self.world, self.systems);
-            });
+            let node = &self.systems.phases.nodes()[dep];
+            node.run(dep, self.world, self.systems);
         }
     }
 }
@@ -129,6 +127,10 @@ pub struct PhaseNode {
 }
 
 impl PhaseNode {
+    pub fn name(&self) -> &'static str {
+        self.phase.name()
+    }
+
     pub fn run<'a>(&self, index: usize, world: WorldCell<'a>, systems: &'a Systems) {
         let ctx = PhaseContext::new(index, self.executor.as_ref(), world, systems);
         self.phase.run(ctx);
@@ -219,8 +221,12 @@ impl Schedule {
     }
 
     pub fn build(self, world: &mut World) -> Result<Systems, ScheduleBuildError> {
-        let mode = self.mode;
-        let mut phases = self.phases;
+        let Schedule {
+            mode,
+            mut phases,
+            mut hierarchy,
+            map,
+        } = self;
 
         if let Err(error) = phases.build() {
             let names = error
@@ -229,21 +235,6 @@ impl Schedule {
                 .map(|index| phases.nodes()[*index].phase.name())
                 .collect();
             return Err(ScheduleBuildError::CyclicDependency(names));
-        }
-
-        let mut hierarchy = IndexDag::new();
-        let mut map = HashMap::new();
-        for index in phases.topology() {
-            let node = *map
-                .entry(*index)
-                .or_insert_with(|| hierarchy.add_node(*index));
-            if let Some(parent) = phases.nodes()[*index].parent {
-                let parent = *map
-                    .entry(parent)
-                    .or_insert_with(|| hierarchy.add_node(parent));
-
-                hierarchy.add_dependency(parent, node);
-            }
         }
 
         if let Err(error) = hierarchy.build() {
@@ -261,7 +252,7 @@ impl Schedule {
             mode,
             phases: phases.into_immutable(),
             hierarchy: hierarchy.into_immutable(),
-            map: self.map,
+            map,
         })
     }
 }
@@ -295,6 +286,10 @@ pub struct Systems {
 impl Systems {
     pub fn mode(&self) -> RunMode {
         self.mode
+    }
+
+    pub fn get_phase_index(&self, phase: impl Phase) -> Option<usize> {
+        self.map.get(phase.name()).copied()
     }
 
     pub fn run(&self, phase: impl Phase, world: &mut World) {

@@ -1,4 +1,4 @@
-use crate::plugin::{ DrawMesh, ExamplePlugin, LIT_COLOR_MAT, Light, PLANE, View3d};
+use crate::plugin::{DrawMesh, ExamplePlugin, LIT_COLOR_MAT, Light, PLANE, View3d};
 use ecs::{App, AppTag, Component, Init, Spawner};
 use math::Vec3;
 use render::{Camera, Color, MeshFilter};

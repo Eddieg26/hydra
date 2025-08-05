@@ -108,15 +108,10 @@ impl ApplicationHandler for WindowApp {
 
                 let mut apps = builder.build();
                 apps.init();
-                
+
                 *self = Self::Running { apps };
             }
-            _ => {
-                if let Some(exit) = self.update() {
-                    println!("Application exit: {}", exit);
-                    event_loop.exit();
-                }
-            }
+            _ => {}
         };
     }
 

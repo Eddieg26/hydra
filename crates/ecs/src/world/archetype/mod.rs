@@ -97,7 +97,7 @@ impl Archetype {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ArchetypeEdgeId {
     Component(ComponentId),
     Kit(ComponentId),
@@ -274,7 +274,7 @@ impl Archetypes {
 
             column.replace(index.to_usize(), component, frame);
 
-            EntityIndex::new(archetype, index)
+            EntityIndex::new(next, index)
         } else {
             let mut row = self.remove_entity(entity).unwrap();
             row.insert(id, component, frame);
@@ -465,7 +465,7 @@ impl Archetypes {
         current: ArchetypeId,
         edge: ArchetypeEdgeId,
     ) -> ArchetypeId {
-        match self.archetypes[current.to_usize()].edges.added(edge) {
+        match self.archetypes[current.to_usize()].edges.removed(edge) {
             Some(id) => id,
             None => {
                 let mut bits = self.archetypes[current.to_usize()].bitset.clone();
@@ -492,7 +492,7 @@ impl Archetypes {
                 let next_id = ArchetypeId::from_usize(self.archetypes.len());
                 let mut archetype = Archetype::new(next_id, table.build(), bits.clone());
 
-                archetype.edges.add.insert(edge, current);
+                archetype.edges.remove.insert(edge, current);
                 self.archetypes[current.to_usize()]
                     .edges
                     .remove

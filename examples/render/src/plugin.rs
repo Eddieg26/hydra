@@ -3,7 +3,7 @@ use ecs::{
     Component, IntoSystemConfig, Phase, Plugin, Query, Resource, app::sync::SyncComponentPlugin,
     system::Exists, unlifetime::Read,
 };
-use math::{Mat4, Vec3};
+use math::{Vec3};
 use render::{
     AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, Color, Mesh,
     MeshSettings, PostRender, PreRender, Projection, Queue, RenderApp, RenderDevice,

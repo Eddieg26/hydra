@@ -257,8 +257,6 @@ impl std::ops::DerefMut for CameraSortOrder {
 #[derive(Component)]
 pub struct ActiveCamera;
 
-pub struct CameraSubGraph;
-
 pub struct CameraPhase;
 impl CameraPhase {
     fn clear_screen(&self, world: WorldCell, camera: Entity) -> Option<()> {
@@ -313,8 +311,7 @@ impl Phase for CameraPhase {
                 if self.clear_screen(world, camera).is_some() {
                     world.get_mut().add_component(camera, ActiveCamera);
                     ctx.execute();
-                    // world.get_mut().remove_component::<ActiveCamera>(camera);
-                    world.get_mut().get_component::<Camera>(camera).unwrap();
+                    world.get_mut().remove_component::<ActiveCamera>(camera);
                 }
             }
         }

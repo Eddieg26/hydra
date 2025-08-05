@@ -1,9 +1,11 @@
 use crate::{
-    allocator::MeshAllocator, draw::{PhaseDrawCalls, View, ViewBuffer}, ActiveCamera, BindGroup, BindGroupLayout, Camera, CameraAttachments, ExtractError, PipelineCache, RenderCommandEncoder, RenderResource, RenderState
+    ActiveCamera, BindGroup, BindGroupLayout, CameraAttachments, ExtractError, PipelineCache,
+    RenderCommandEncoder, RenderResource, RenderState,
+    allocator::MeshAllocator,
+    draw::{PhaseDrawCalls, View, ViewBuffer},
 };
 use ecs::{
-    ArgItem, Entity, IntoSystemConfig, Phase, Query, ReadOnly, Resource, SystemArg, SystemConfig,
-    World,
+    ArgItem, Entity, IntoSystemConfig, Phase, ReadOnly, Resource, SystemArg, SystemConfig, World,
     query::{Single, With},
 };
 
@@ -42,7 +44,6 @@ impl<M: ShaderModel> ShaderPhases<M> {
 
     fn run_shader_phase<P: ShaderPhase>(
         view: Option<Single<(Entity, &CameraAttachments), (With<P::View>, With<ActiveCamera>)>>,
-        multi: Query<Entity, With<Camera>>,
         views: &ViewBuffer<P::View>,
         draws: &PhaseDrawCalls<P, M>,
         meshes: &MeshAllocator,
