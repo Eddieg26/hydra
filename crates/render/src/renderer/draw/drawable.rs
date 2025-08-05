@@ -435,33 +435,45 @@ pub enum DrawError {
     Skip,
 }
 
-pub type Draw<V> =
-    fn(&mut RenderState<'_>, ViewInstance<V>, &DrawCall<V>, &World) -> Result<(), DrawError>;
+pub type Draw<P, M> = fn(
+    &mut RenderState<'_>,
+    ViewInstance<<P as ShaderPhase>::View>,
+    &DrawCall<P, M>,
+    &ViewBuffer<<P as ShaderPhase>::View>,
+    &MeshAllocator,
+    &PipelineCache,
+    Option<&ShaderModelData<M>>,
+    &World,
+) -> Result<(), DrawError>;
 
-pub struct DrawCall<V: View> {
+pub struct DrawCall<P: ShaderPhase, M: ShaderModel> {
     pub material: MaterialId,
     pub mesh: AssetId<Mesh>,
     pub sub_mesh: SubMesh,
     pub mode: DrawMode,
     pub pipeline: PipelineId,
-    pub item: V::Item,
-    function: Draw<V>,
+    pub item: <P::View as View>::Item,
+    function: Draw<P, M>,
 }
 
-impl<V: View> DrawCall<V> {
+impl<P: ShaderPhase, M: ShaderModel> DrawCall<P, M> {
     pub fn draw(
         &self,
         state: &mut RenderState<'_>,
-        view: ViewInstance<V>,
+        view: ViewInstance<P::View>,
+        views: &ViewBuffer<P::View>,
+        meshes: &MeshAllocator,
+        pipelines: &PipelineCache,
+        model: Option<&ShaderModelData<M>>,
         world: &World,
     ) -> Result<(), DrawError> {
-        (self.function)(state, view, self, world)
+        (self.function)(state, view, self, views, meshes, pipelines, model, world)
     }
 }
 
 #[derive(Resource)]
 pub struct PhaseDrawCalls<P: ShaderPhase, M: ShaderModel>(
-    pub(crate) HashMap<Entity, Vec<DrawCall<P::View>>>,
+    pub(crate) HashMap<Entity, Vec<DrawCall<P, M>>>,
     std::marker::PhantomData<M>,
 );
 
@@ -473,7 +485,11 @@ impl<P: ShaderPhase, M: ShaderModel> PhaseDrawCalls<P, M> {
     pub(super) fn draw<D>(
         state: &mut RenderState<'_>,
         view: ViewInstance<P::View>,
-        call: &DrawCall<P::View>,
+        call: &DrawCall<P, M>,
+        views: &ViewBuffer<P::View>,
+        meshes: &MeshAllocator,
+        pipelines: &PipelineCache,
+        model: Option<&ShaderModelData<M>>,
         world: &World,
     ) -> Result<(), DrawError>
     where
@@ -486,19 +502,12 @@ impl<P: ShaderPhase, M: ShaderModel> PhaseDrawCalls<P, M> {
         const MATERIAL: u32 = 2;
         const MODEL: u32 = 3;
 
-        let pipeline = world
-            .resource::<PipelineCache>()
+        let pipeline = pipelines
             .get_render_pipeline(&call.pipeline)
             .ok_or(DrawError::Skip)?;
 
-        let model = world
-            .try_resource::<ShaderModelData<DrawModel<D>>>()
-            .ok_or(DrawError::Skip)?;
-
-        let views = world.resource::<ViewBuffer<D::View>>();
-        let meshes = world.resource::<MeshAllocator>();
+        let model = model.ok_or(DrawError::Skip)?;
         let vertex = meshes.vertex_slice(&call.mesh).ok_or(DrawError::Skip)?;
-
         let materials = world.resource::<RenderAssets<MaterialInstance<D::Material>>>();
         let material = materials
             .get(&call.material.into())

@@ -276,17 +276,17 @@ unsafe impl<R: Resource + Send + Clone> SystemArg for Cloned<R> {
     }
 }
 
-unsafe impl<A: SystemArg> SystemArg for Option<A> {
-    type Item<'world, 'state> = Option<A::Item<'world, 'state>>;
+unsafe impl<R: Resource + Send> SystemArg for Option<&R> {
+    type Item<'world, 'state> = Option<&'world R>;
 
-    type State = A::State;
+    type State = ResourceId;
 
     fn init(world: &mut World, access: &mut WorldAccess) -> Self::State {
-        A::init(world, access)
+        <&R as SystemArg>::init(world, access)
     }
 
     unsafe fn validate(state: &Self::State, world: WorldCell, system: &SystemMeta) -> bool {
-        unsafe { A::validate(state, world, system) }
+        unsafe { <&R as SystemArg>::validate(state, world, system) }
     }
 
     unsafe fn get<'world, 'state>(
@@ -295,8 +295,8 @@ unsafe impl<A: SystemArg> SystemArg for Option<A> {
         system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         unsafe {
-            if A::validate(state, world, system) {
-                Some(A::get(state, world, system))
+            if <&R as SystemArg>::validate(state, world, system) {
+                Some(<&R as SystemArg>::get(state, world, system))
             } else {
                 None
             }
@@ -304,11 +304,140 @@ unsafe impl<A: SystemArg> SystemArg for Option<A> {
     }
 
     fn send() -> bool {
-        A::send()
+        true
+    }
+
+    fn exclusive() -> bool {
+        false
+    }
+
+    fn update(state: &mut Self::State, world: &mut World) {
+        <&R as SystemArg>::update(state, world);
     }
 }
 
-unsafe impl<T: ReadOnly> ReadOnly for Option<T> {}
+unsafe impl<R: Resource + Send> SystemArg for Option<&mut R> {
+    type Item<'world, 'state> = Option<&'world R>;
+
+    type State = ResourceId;
+
+    fn init(world: &mut World, access: &mut WorldAccess) -> Self::State {
+        <&mut R as SystemArg>::init(world, access)
+    }
+
+    unsafe fn validate(state: &Self::State, world: WorldCell, system: &SystemMeta) -> bool {
+        unsafe { <&mut R as SystemArg>::validate(state, world, system) }
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        world: WorldCell<'world>,
+        system: &'world SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        unsafe {
+            if <&mut R as SystemArg>::validate(state, world, system) {
+                Some(<&mut R as SystemArg>::get(state, world, system))
+            } else {
+                None
+            }
+        }
+    }
+
+    fn send() -> bool {
+        true
+    }
+
+    fn exclusive() -> bool {
+        false
+    }
+
+    fn update(state: &mut Self::State, world: &mut World) {
+        <&mut R as SystemArg>::update(state, world);
+    }
+}
+
+unsafe impl<R: Resource> SystemArg for Option<NonSend<'_, R>> {
+    type Item<'world, 'state> = Option<NonSend<'world, R>>;
+
+    type State = ResourceId;
+
+    fn init(world: &mut World, access: &mut WorldAccess) -> Self::State {
+        <NonSend<R> as SystemArg>::init(world, access)
+    }
+
+    unsafe fn validate(state: &Self::State, world: WorldCell, system: &SystemMeta) -> bool {
+        unsafe { <NonSend<R> as SystemArg>::validate(state, world, system) }
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        world: WorldCell<'world>,
+        system: &'world SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        unsafe {
+            if <NonSend<R> as SystemArg>::validate(state, world, system) {
+                Some(<NonSend<R> as SystemArg>::get(state, world, system))
+            } else {
+                None
+            }
+        }
+    }
+
+    fn send() -> bool {
+        false
+    }
+
+    fn exclusive() -> bool {
+        false
+    }
+
+    fn update(state: &mut Self::State, world: &mut World) {
+        <NonSend<R> as SystemArg>::update(state, world);
+    }
+}
+
+unsafe impl<R: Resource> SystemArg for Option<NonSendMut<'_, R>> {
+    type Item<'world, 'state> = Option<NonSendMut<'world, R>>;
+
+    type State = ResourceId;
+
+    fn init(world: &mut World, access: &mut WorldAccess) -> Self::State {
+        <NonSendMut<R> as SystemArg>::init(world, access)
+    }
+
+    unsafe fn validate(state: &Self::State, world: WorldCell, system: &SystemMeta) -> bool {
+        unsafe { <NonSendMut<R> as SystemArg>::validate(state, world, system) }
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        world: WorldCell<'world>,
+        system: &'world SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        unsafe {
+            if <NonSendMut<R> as SystemArg>::validate(state, world, system) {
+                Some(<NonSendMut<R> as SystemArg>::get(state, world, system))
+            } else {
+                None
+            }
+        }
+    }
+
+    fn send() -> bool {
+        false
+    }
+
+    fn exclusive() -> bool {
+        false
+    }
+
+    fn update(state: &mut Self::State, world: &mut World) {
+        <NonSendMut<R> as SystemArg>::update(state, world);
+    }
+}
+
+unsafe impl<R: Resource + Send> ReadOnly for Option<&R> {}
+unsafe impl<R: Resource> ReadOnly for Option<NonSend<'_, R>> {}
 
 unsafe impl<E: Event> SystemArg for EventReader<'_, E> {
     type Item<'world, 'state> = EventReader<'world, E>;

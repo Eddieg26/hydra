@@ -12,12 +12,12 @@ pub trait BaseQuery {
 
     /// Data used to construct the state of the query.
     /// This is used to create the query state when the query is first created.
-    type Data: Send + Sync + Sized;
+    type Data: Send + Sync + Sized + Clone;
 
     fn init(world: &mut World, access: &mut ArchetypeAccess) -> Self::Data;
 
-    fn state<'w>(
-        data: &'w Self::Data,
+    fn state<'w, 's>(
+        data: Self::Data,
         world: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
@@ -31,12 +31,12 @@ pub unsafe trait ReadQuery: BaseQuery {}
 
 pub trait BaseFilter {
     type State<'w>;
-    type Data: Send + Sync + Sized;
+    type Data: Send + Sync + Sized + Clone;
 
     fn init(world: &mut World, access: &mut ArchetypeAccess) -> Self::Data;
 
-    fn state<'w>(
-        data: &'w Self::Data,
+    fn state<'w, 's>(
+        data: Self::Data,
         world: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
@@ -58,7 +58,7 @@ impl BaseQuery for () {
     }
 
     fn state<'w>(
-        _: &'w Self::Data,
+        _: Self::Data,
         _: WorldCell<'w>,
         _: &'w Archetype,
         _: Frame,
@@ -84,7 +84,7 @@ impl BaseFilter for () {
     }
 
     fn state<'w>(
-        _: &Self::Data,
+        _: Self::Data,
         _: WorldCell<'w>,
         _: &'w Archetype,
         _: Frame,
@@ -110,7 +110,7 @@ impl BaseQuery for Entity {
     }
 
     fn state<'w>(
-        _: &'w Self::Data,
+        _: Self::Data,
         _: WorldCell<'w>,
         _: &'w Archetype,
         _: Frame,
@@ -156,13 +156,13 @@ impl<C: Component> BaseQuery for &C {
     }
 
     fn state<'w>(
-        data: &'w Self::Data,
+        data: Self::Data,
         _: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
         system_frame: Frame,
     ) -> Self::State<'w> {
-        match archetype.table().get_column(*data) {
+        match archetype.table().get_column(data) {
             Some(column) => ReadPtr::new(column, current_frame, system_frame),
             None => {
                 let component = std::any::type_name::<C>();
@@ -210,13 +210,13 @@ impl<C: Component> BaseQuery for &mut C {
     }
 
     fn state<'w>(
-        data: &'w Self::Data,
+        data: Self::Data,
         _: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
         _: Frame,
     ) -> Self::State<'w> {
-        match archetype.table().get_column(*data) {
+        match archetype.table().get_column(data) {
             Some(column) => {
                 let (components, frames) = unsafe { column.get_ptr::<C>() };
                 WritePtr::new(components, frames, current_frame)
@@ -248,13 +248,13 @@ impl<C: Component> BaseQuery for Option<&C> {
     }
 
     fn state<'w>(
-        data: &'w Self::Data,
+        data: Self::Data,
         world: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
         system_frame: Frame,
     ) -> Self::State<'w> {
-        if archetype.has_component_id(*data) {
+        if archetype.has_component_id(data) {
             Some(<&C as BaseQuery>::state(
                 data,
                 world,
@@ -288,13 +288,13 @@ impl<C: Component> BaseQuery for Option<&mut C> {
     }
 
     fn state<'w>(
-        data: &'w Self::Data,
+        data: Self::Data,
         world: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
         system_frame: Frame,
     ) -> Self::State<'w> {
-        if archetype.has_component_id(*data) {
+        if archetype.has_component_id(data) {
             Some(<&mut C as BaseQuery>::state(
                 data,
                 world,
@@ -327,13 +327,13 @@ impl<C: Component> BaseFilter for With<C> {
     }
 
     fn state<'w>(
-        data: &Self::Data,
+        data: Self::Data,
         _: WorldCell<'w>,
         archetype: &'w Archetype,
         _: Frame,
         _: Frame,
     ) -> Self::State<'w> {
-        archetype.has_component_id(*data)
+        archetype.has_component_id(data)
     }
 
     fn filter<'w>(state: &Self::State<'w>, _: Entity, _: RowIndex) -> bool {
@@ -352,13 +352,13 @@ impl<C: Component> BaseFilter for Without<C> {
     }
 
     fn state<'w>(
-        data: &Self::Data,
+        data: Self::Data,
         _: WorldCell<'w>,
         archetype: &'w Archetype,
         _: Frame,
         _: Frame,
     ) -> Self::State<'w> {
-        !archetype.has_component_id(*data)
+        !archetype.has_component_id(data)
     }
 
     fn filter<'w>(state: &Self::State<'w>, _: Entity, _: RowIndex) -> bool {
@@ -377,7 +377,7 @@ impl<C: Component> BaseFilter for Added<C> {
     }
 
     fn state<'w>(
-        data: &'w Self::Data,
+        data: Self::Data,
         world: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
@@ -405,7 +405,7 @@ impl<C: Component> BaseFilter for Modified<C> {
     }
 
     fn state<'w>(
-        data: &'w Self::Data,
+        data: Self::Data,
         world: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
@@ -432,7 +432,7 @@ impl<C: Component> BaseFilter for Not<Added<C>> {
     }
 
     fn state<'w>(
-        data: &'w Self::Data,
+        data: Self::Data,
         world: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
@@ -456,7 +456,7 @@ impl<C: Component> BaseFilter for Not<Modified<C>> {
     }
 
     fn state<'w>(
-        data: &'w Self::Data,
+        data: Self::Data,
         world: WorldCell<'w>,
         archetype: &'w Archetype,
         current_frame: Frame,
@@ -480,7 +480,7 @@ impl<E: Event> BaseFilter for E {
     }
 
     fn state<'w>(
-        _: &Self::Data,
+        _: Self::Data,
         world: WorldCell<'w>,
         _: &'w Archetype,
         _: Frame,
@@ -511,7 +511,7 @@ impl<E: Event> BaseQuery for Events<E> {
     }
 
     fn state<'w>(
-        _: &Self::Data,
+        _: Self::Data,
         world: WorldCell<'w>,
         _: &'w Archetype,
         _: Frame,
@@ -539,7 +539,7 @@ impl<C: Component> BaseQuery for Removed<C> {
     }
 
     fn state<'w>(
-        _: &Self::Data,
+        _: Self::Data,
         world: WorldCell<'w>,
         _: &'w Archetype,
         _: Frame,
@@ -610,6 +610,18 @@ pub struct Query<'w, 's, Q: BaseQuery, F: BaseFilter = ()> {
     pub(crate) system_frame: Frame,
 }
 
+impl<'w, 's, Q: BaseQuery, F: BaseFilter> Copy for Query<'w, 's, Q, F> {}
+impl<'w, 's, Q: BaseQuery, F: BaseFilter> Clone for Query<'w, 's, Q, F> {
+    fn clone(&self) -> Self {
+        Self {
+            world: self.world,
+            state: self.state,
+            current_frame: self.current_frame,
+            system_frame: self.system_frame,
+        }
+    }
+}
+
 impl<'w, 's, Q: BaseQuery, F: BaseFilter> Query<'w, 's, Q, F> {
     pub fn new(world: WorldCell<'w>, state: &'s mut QueryState<Q, F>) -> Self {
         Self::with_frame(world, state, Frame::ZERO)
@@ -631,7 +643,7 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> Query<'w, 's, Q, F> {
     }
 
     pub fn iter(&'w self) -> QueryIter<'w, 's, Q, F> {
-        QueryIter::new(self)
+        QueryIter::new(*self)
     }
 
     pub fn contains(&self, entity: Entity) -> bool {
@@ -649,7 +661,7 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> Query<'w, 's, Q, F> {
         }
 
         let filter = F::state(
-            &self.state.filter,
+            self.state.filter.clone(),
             self.world,
             archetype,
             self.current_frame,
@@ -668,13 +680,24 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> Query<'w, 's, Q, F> {
             None => return None,
         };
 
-        let mut state = QueryIterState::new(self, archetype);
+        let mut state = QueryIterState::new(*self, archetype);
 
         let row = archetype.table().get_entity_row(entity).unwrap();
 
         match F::filter(&state.filter, entity, row) {
             true => Some(Q::get(&mut state.data, entity, row)),
             false => None,
+        }
+    }
+
+    pub fn into_single(self) -> Option<Q::Item<'w>> {
+        let mut iter = self.into_iter();
+        let item = iter.next();
+        let next = iter.next();
+
+        match (item, next) {
+            (Some(item), None) => Some(item),
+            _ => None,
         }
     }
 }
@@ -709,19 +732,30 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> IntoIterator for &'w Query<'w, 's, Q, 
     type IntoIter = QueryIter<'w, 's, Q, F>;
 
     fn into_iter(self) -> Self::IntoIter {
+        QueryIter::new(*self)
+    }
+}
+
+impl<'w, 's, Q: BaseQuery, F: BaseFilter> IntoIterator for Query<'w, 's, Q, F> {
+    type Item = Q::Item<'w>;
+
+    type IntoIter = QueryIter<'w, 's, Q, F>;
+
+    fn into_iter(self) -> Self::IntoIter {
         QueryIter::new(self)
     }
 }
 
-pub struct QueryIterState<'a, Q: BaseQuery, F: BaseFilter = ()> {
-    pub(crate) data: Q::State<'a>,
-    pub(crate) filter: F::State<'a>,
+pub struct QueryIterState<'w, 's, Q: BaseQuery, F: BaseFilter = ()> {
+    pub(crate) data: Q::State<'w>,
+    pub(crate) filter: F::State<'w>,
+    _marker: std::marker::PhantomData<&'s F>,
 }
 
-impl<'a, Q: BaseQuery, F: BaseFilter> QueryIterState<'a, Q, F> {
-    pub fn new(query: &'a Query<'a, 'a, Q, F>, archetype: &'a Archetype) -> Self {
+impl<'w, 's, Q: BaseQuery, F: BaseFilter> QueryIterState<'w, 's, Q, F> {
+    pub fn new(query: Query<'w, 's, Q, F>, archetype: &'w Archetype) -> Self {
         let data = Q::state(
-            &query.state.data,
+            query.state.data.clone(),
             query.world,
             archetype,
             query.current_frame,
@@ -729,35 +763,31 @@ impl<'a, Q: BaseQuery, F: BaseFilter> QueryIterState<'a, Q, F> {
         );
 
         let filter = F::state(
-            &query.state.filter,
+            query.state.filter.clone(),
             query.world,
             archetype,
             query.current_frame,
             query.system_frame,
         );
 
-        Self { data, filter }
-    }
-
-    pub fn data(&'a self) -> &'a Q::State<'a> {
-        &self.data
-    }
-
-    pub fn filter(&'a self) -> &'a F::State<'a> {
-        &self.filter
+        Self {
+            data,
+            filter,
+            _marker: std::marker::PhantomData,
+        }
     }
 }
 
 pub struct QueryIter<'w, 's, Q: BaseQuery, F: BaseFilter = ()> {
-    query: &'w Query<'w, 's, Q, F>,
+    query: Query<'w, 's, Q, F>,
     archetypes: Vec<&'w Archetype>,
-    state: Option<QueryIterState<'w, Q, F>>,
+    state: Option<QueryIterState<'w, 's, Q, F>>,
     entities: Option<indexmap::set::Iter<'w, Entity>>,
     archetype: usize,
 }
 
 impl<'w, 's, Q: BaseQuery, F: BaseFilter> QueryIter<'w, 's, Q, F> {
-    pub fn new(query: &'w Query<'w, 's, Q, F>) -> Self {
+    pub fn new(query: Query<'w, 's, Q, F>) -> Self {
         let world = unsafe { query.world.get() };
         let archetypes = world.archetypes().archetypes();
         let archetypes = query
@@ -825,6 +855,73 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> Iterator for QueryIter<'w, 's, Q, F> {
     }
 }
 
+pub struct Single<'w, 's, Q: BaseQuery, F: BaseFilter> {
+    item: Q::Item<'w>,
+    _filter: std::marker::PhantomData<&'s F>,
+}
+
+impl<'w, 's, Q: BaseQuery, F: BaseFilter> std::ops::Deref for Single<'w, 's, Q, F> {
+    type Target = Q::Item<'w>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.item
+    }
+}
+
+impl<'w, 's, Q: BaseQuery, F: BaseFilter> std::ops::DerefMut for Single<'w, 's, Q, F> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.item
+    }
+}
+
+unsafe impl<Q: BaseQuery + 'static, F: BaseFilter + 'static> SystemArg for Single<'_, '_, Q, F> {
+    type Item<'world, 'state> = Single<'world, 'state, Q, F>;
+
+    type State = QueryState<Q, F>;
+
+    fn init(world: &mut World, access: &mut crate::WorldAccess) -> Self::State {
+        Query::<Q, F>::init(world, access)
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        world: WorldCell<'world>,
+        system: &'world super::SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        let item = Query::<Q, F>::with_frame(world, state, system.frame)
+            .into_single()
+            .expect("Expected a single item in the query, but found none or multiple items.");
+        Single {
+            item,
+            _filter: std::marker::PhantomData,
+        }
+    }
+}
+
+unsafe impl<Q: BaseQuery + 'static, F: BaseFilter + 'static> SystemArg
+    for Option<Single<'_, '_, Q, F>>
+{
+    type Item<'world, 'state> = Option<Single<'world, 'state, Q, F>>;
+
+    type State = QueryState<Q, F>;
+
+    fn init(world: &mut World, access: &mut crate::WorldAccess) -> Self::State {
+        Query::<Q, F>::init(world, access)
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        world: WorldCell<'world>,
+        system: &'world super::SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        let item = Query::<Q, F>::with_frame(world, state, system.frame).into_single();
+        item.map(|item| Single {
+            item,
+            _filter: std::marker::PhantomData,
+        })
+    }
+}
+
 #[macro_export]
 macro_rules! impl_base_query_for_tuples {
     ($(($($name:ident),*)),*)  => {
@@ -841,7 +938,7 @@ macro_rules! impl_base_query_for_tuples {
                     ($($name::init(world, access),)*)
                 }
 
-                fn state<'w>(data: &'w Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
+                fn state<'w>(data: Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
                     let ($($name,)*) = data;
                     ($($name::state($name, world, archetype, current_frame, system_frame),)*)
                 }
@@ -865,7 +962,7 @@ macro_rules! impl_base_query_for_tuples {
                     ($($name::init(world, access),)*)
                 }
 
-                fn state<'w>(data: &'w Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
+                fn state<'w>(data: Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
                     let ($($name,)*) = data;
                     ($($name::state($name, world, archetype, current_frame, system_frame),)*)
                 }
@@ -892,7 +989,7 @@ macro_rules! impl_base_query_for_tuples {
                     ($($name::init(world, access),)*)
                 }
 
-                fn state<'w>(data: &'w Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
+                fn state<'w>(data: Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
                     let ($($name,)*) = data;
                     ($($name::state($name, world, archetype, current_frame, system_frame),)*)
                 }

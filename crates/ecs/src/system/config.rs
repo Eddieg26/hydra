@@ -294,6 +294,21 @@ impl<F: Fn() + Send + Sync + 'static> IntoSystemConfig<()> for F {
     }
 }
 
+impl IntoSystemConfigs<()> for Vec<SystemConfig> {
+    fn configs(self) -> SystemConfigs {
+        SystemConfigs::Configs(self)
+    }
+
+    fn before<Marker>(mut self, configs: impl IntoSystemConfigs<Marker>) -> SystemConfigs {
+        match configs.configs() {
+            SystemConfigs::Config(config) => self.push(config),
+            SystemConfigs::Configs(configs) => self.extend(configs),
+        };
+
+        SystemConfigs::Configs(self)
+    }
+}
+
 impl From<SystemNode> for System {
     fn from(value: SystemNode) -> Self {
         let resources = value.access.current.resources.collect();

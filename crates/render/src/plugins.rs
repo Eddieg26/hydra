@@ -1,18 +1,17 @@
 use crate::{
-    Camera, CameraAttachments, CameraSortOrder, CameraSubGraph, ExtractError, GlobalShaderConstant,
-    GlobalShaderConstants, GpuShader, GpuTexture, MeshFilter, ObjImporter, ProcessAssets,
-    QueueDraws, QueueViews, RenderDevice, RenderGraphBuilder, RenderMesh, RenderTarget, SubMesh,
-    Texture2dImporter,
+    ActiveCamera, Camera, CameraAttachments, CameraPhase, CameraSortOrder, CameraSubGraph,
+    ExtractError, GlobalShaderConstant, GlobalShaderConstants, GpuShader, GpuTexture, MeshFilter,
+    ObjImporter, ProcessAssets, QueueDraws, QueueViews, RenderDevice, RenderMesh, RenderTarget,
+    SubMesh, Texture2dImporter,
     allocator::MeshAllocatorPlugin,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     constants::{StorageBufferEnabled, UniformBatchSize},
     draw::{
         BatchedUniformBuffer, DrawModel, DrawPass, DrawPhase, DrawPipeline, Drawable, MainDrawPass,
         Material, MaterialInstance, MaterialLayout, ModelData, ModelUniformData, PhaseDrawCalls,
-        ShaderModel, ShaderModelData, ShaderPhase, View, ViewBuffer,
+        ShaderModel, ShaderModelData, ShaderPhase, ShaderPhases, View, ViewBuffer,
     },
     processor::{ShaderConstant, ShaderConstants},
-    renderer::{GraphPass, RenderGraph, SubGraph},
     resources::{
         AssetExtractors, ExtractInfo, Fallbacks, Mesh, PipelineCache, RenderAsset, RenderAssets,
         RenderResource, ResourceExtractors, Shader,
@@ -44,14 +43,10 @@ impl Plugin for RenderPlugin {
             .add_sub_phase(Run, Render)
             .add_sub_phase(Run, Present)
             .add_sub_phase(Run, PostRender)
-            .add_systems(Init, RenderGraph::create_graph)
             .add_systems(Init, GlobalShaderConstants::init)
             .add_systems(Extract, RenderSurface::resize_surface)
-            .add_systems(Extract, RenderGraph::invalidate)
             .add_systems(Queue, RenderSurface::queue_surface)
-            .add_systems(Render, RenderGraph::run_graph)
             .add_systems(Present, RenderSurface::present_surface)
-            .add_resource(RenderGraphBuilder::new())
             .add_resource(RenderSurfaceTexture::new())
             .add_resource(AssetExtractors::default())
             .add_resource(ResourceExtractors::default())
@@ -121,10 +116,10 @@ impl Plugin for RenderPlugin {
 pub trait RenderAppExt {
     fn add_drawable<D: Drawable>(&mut self) -> &mut Self;
     fn add_shader_constant<C: GlobalShaderConstant>(&mut self) -> &mut Self;
-    fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self;
-    fn add_sub_graph<S: SubGraph>(&mut self) -> &mut Self;
-    fn add_sub_graph_pass<S: SubGraph, P: GraphPass>(&mut self, pass: P) -> &mut Self;
-    fn add_nested_sub_graph<S: SubGraph, Nested: SubGraph>(&mut self) -> &mut Self;
+    // fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self;
+    // fn add_sub_graph<S: SubGraph>(&mut self) -> &mut Self;
+    // fn add_sub_graph_pass<S: SubGraph, P: GraphPass>(&mut self, pass: P) -> &mut Self;
+    // fn add_nested_sub_graph<S: SubGraph, Nested: SubGraph>(&mut self) -> &mut Self;
     fn add_render_asset<R: RenderAsset>(&mut self) -> &mut Self;
     fn add_render_resource<R: RenderResource>(&mut self) -> &mut Self;
 }
@@ -140,37 +135,37 @@ impl RenderAppExt for AppBuilder {
         self
     }
 
-    fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self {
-        self.scoped_sub_app(RenderApp, |render_app| {
-            render_app
-                .get_or_insert_resource(RenderGraphBuilder::new)
-                .add_pass(pass);
-        })
-    }
+    // fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self {
+    //     self.scoped_sub_app(RenderApp, |render_app| {
+    //         render_app
+    //             .get_or_insert_resource(RenderGraphBuilder::new)
+    //             .add_pass(pass);
+    //     })
+    // }
 
-    fn add_sub_graph<S: SubGraph>(&mut self) -> &mut Self {
-        self.scoped_sub_app(RenderApp, |render_app| {
-            render_app
-                .get_or_insert_resource(RenderGraphBuilder::new)
-                .add_sub_graph::<S>();
-        })
-    }
+    // fn add_sub_graph<S: SubGraph>(&mut self) -> &mut Self {
+    //     self.scoped_sub_app(RenderApp, |render_app| {
+    //         render_app
+    //             .get_or_insert_resource(RenderGraphBuilder::new)
+    //             .add_sub_graph::<S>();
+    //     })
+    // }
 
-    fn add_sub_graph_pass<S: SubGraph, P: GraphPass>(&mut self, pass: P) -> &mut Self {
-        self.scoped_sub_app(RenderApp, |render_app| {
-            render_app
-                .get_or_insert_resource(RenderGraphBuilder::new)
-                .add_sub_graph_pass::<S, P>(pass);
-        })
-    }
+    // fn add_sub_graph_pass<S: SubGraph, P: GraphPass>(&mut self, pass: P) -> &mut Self {
+    //     self.scoped_sub_app(RenderApp, |render_app| {
+    //         render_app
+    //             .get_or_insert_resource(RenderGraphBuilder::new)
+    //             .add_sub_graph_pass::<S, P>(pass);
+    //     })
+    // }
 
-    fn add_nested_sub_graph<S: SubGraph, Nested: SubGraph>(&mut self) -> &mut Self {
-        self.scoped_sub_app(RenderApp, |render_app| {
-            render_app
-                .get_or_insert_resource(RenderGraphBuilder::new)
-                .add_nested_sub_graph::<S, Nested>();
-        })
-    }
+    // fn add_nested_sub_graph<S: SubGraph, Nested: SubGraph>(&mut self) -> &mut Self {
+    //     self.scoped_sub_app(RenderApp, |render_app| {
+    //         render_app
+    //             .get_or_insert_resource(RenderGraphBuilder::new)
+    //             .add_nested_sub_graph::<S, Nested>();
+    //     })
+    // }
 
     fn add_render_asset<R: RenderAsset>(&mut self) -> &mut Self {
         let app = self.sub_app_mut(RenderApp);
@@ -203,9 +198,10 @@ impl Plugin for CameraPlugin {
             SyncComponentPlugin::<Camera, RenderApp>::new(),
             RenderPlugin,
         ))
-        .add_sub_graph::<CameraSubGraph>()
         .sub_app_mut(RenderApp)
+        .add_sub_phase(Render, CameraPhase)
         .register::<CameraAttachments>()
+        .register::<ActiveCamera>()
         .add_resource(CameraSortOrder::default())
         .add_systems(PreRender, CameraAttachments::queue)
         .add_systems(PostRender, CameraAttachments::cleanup);
@@ -264,6 +260,32 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
     }
 }
 
+pub struct ShaderModelPlugin<M: ShaderModel>(std::marker::PhantomData<M>);
+impl<M: ShaderModel> ShaderModelPlugin<M> {
+    pub fn new() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
+impl<M: ShaderModel> Plugin for ShaderModelPlugin<M> {
+    fn setup(&mut self, app: &mut AppBuilder) {
+        app.add_plugins(CameraPlugin)
+            .sub_app_mut(RenderApp)
+            .add_sub_phase(CameraPhase, MainDrawPass)
+            .add_sub_phase(MainDrawPass, DrawPass::<M>::new());
+
+        let mut phases = ShaderPhases::new();
+        M::setup(&mut phases);
+
+        for v in phases.0.chunks_exact_mut(2) {
+            v[1].add_dependency(v[0].id());
+        }
+
+        app.sub_app_mut(RenderApp)
+            .add_systems(DrawPass::<M>::new(), phases.0);
+    }
+}
+
 pub struct ShaderPhasePlugin<P: ShaderPhase, M: ShaderModel>(std::marker::PhantomData<(P, M)>);
 impl<P: ShaderPhase, M: ShaderModel> ShaderPhasePlugin<P, M> {
     pub fn new() -> Self {
@@ -273,7 +295,7 @@ impl<P: ShaderPhase, M: ShaderModel> ShaderPhasePlugin<P, M> {
 
 impl<P: ShaderPhase, M: ShaderModel> Plugin for ShaderPhasePlugin<P, M> {
     fn setup(&mut self, app: &mut AppBuilder) {
-        app.add_plugins(RenderPlugin)
+        app.add_plugins(ShaderModelPlugin::<M>::new())
             .add_render_resource::<ShaderModelData<M>>()
             .sub_app_mut(RenderApp)
             .add_resource(PhaseDrawCalls::<P, M>::new())
@@ -301,8 +323,6 @@ impl<D: Drawable> Plugin for DrawPlugin<D> {
         .load_asset::<Shader>(D::shader().into())
         .load_asset::<Shader>(D::Material::shader().into())
         .add_render_resource::<DrawPipeline<D>>()
-        .add_nested_sub_graph::<CameraSubGraph, MainDrawPass>()
-        .add_sub_graph_pass::<MainDrawPass, DrawPass<DrawModel<D>>>(DrawPass::new())
         .sub_app_mut(RenderApp)
         .add_systems(
             QueueDraws,

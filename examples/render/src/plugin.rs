@@ -5,7 +5,14 @@ use ecs::{
 };
 use math::{Mat4, Vec3};
 use render::{
-    constants::UniformBatchSize, draw::{BlendMode, Drawable, Material, ShaderModel, ShaderModelData, ShaderPhase, Unlit, View}, plugins::RenderAppExt, uniform::{UniformBuffer, UniformBufferArray}, wgpu::ShaderStages, AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, Color, Mesh, MeshSettings, PostRender, PreRender, Projection, Queue, RenderApp, RenderDevice, RenderResource, Shader, ShaderSettings, ShaderType
+    AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, Color, Mesh,
+    MeshSettings, PostRender, PreRender, Projection, Queue, RenderApp, RenderDevice,
+    RenderResource, Shader, ShaderSettings, ShaderType,
+    constants::UniformBatchSize,
+    draw::{BlendMode, Drawable, Material, ShaderModel, ShaderModelData, ShaderPhase, Unlit, View},
+    plugins::RenderAppExt,
+    uniform::{UniformBuffer, UniformBufferArray},
+    wgpu::ShaderStages,
 };
 use std::num::NonZero;
 use transform::{GlobalTransform, Transform};
@@ -228,8 +235,6 @@ pub struct ShaderModel3d {
 impl ShaderModel for ShaderModel3d {
     type Base = Self;
 
-    type Data = ();
-
     type Arg = (Read<RenderDevice>, Option<Read<Lights>>);
 
     fn create((device, lights): ecs::ArgItem<Self::Arg>) -> Result<Self, render::ExtractError<()>> {
@@ -256,10 +261,7 @@ impl ShaderModel for ShaderModel3d {
         Some(&self.layout)
     }
 
-    fn setup(
-        _: &mut render::PassBuilder,
-        phases: &mut render::draw::ShaderPhases<Self>,
-    ) -> Self::Data {
+    fn setup(phases: &mut render::draw::ShaderPhases<Self>) {
         phases.add_phase::<Opaque3d>();
     }
 }

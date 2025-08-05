@@ -1,9 +1,11 @@
 use crate::{
-    BindGroup, BindGroupLayout, Color, ExtractError, GraphPass, PassBuilder, RenderContext,
-    RenderGraphError, RenderResource, RenderState, SubGraph,
-    draw::{PhaseDrawCalls, View, ViewBuffer},
+    allocator::MeshAllocator, draw::{PhaseDrawCalls, View, ViewBuffer}, ActiveCamera, BindGroup, BindGroupLayout, Camera, CameraAttachments, ExtractError, PipelineCache, RenderCommandEncoder, RenderResource, RenderState
 };
-use ecs::{ArgItem, Entity, ReadOnly, Resource, SystemArg};
+use ecs::{
+    ArgItem, Entity, IntoSystemConfig, Phase, Query, ReadOnly, Resource, SystemArg, SystemConfig,
+    World,
+    query::{Single, With},
+};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum BlendMode {
@@ -26,9 +28,7 @@ pub trait ShaderPhase: Send + Sync + 'static {
     fn mode() -> BlendMode;
 }
 
-pub type ShaderPhaseFn = for<'a> fn(Entity, &RenderContext<'a>, &mut RenderState<'a>);
-
-pub struct ShaderPhases<M: ShaderModel>(Vec<ShaderPhaseFn>, std::marker::PhantomData<M>);
+pub struct ShaderPhases<M: ShaderModel>(pub(crate) Vec<SystemConfig>, std::marker::PhantomData<M>);
 
 impl<M: ShaderModel> ShaderPhases<M> {
     pub fn new() -> Self {
@@ -36,34 +36,74 @@ impl<M: ShaderModel> ShaderPhases<M> {
     }
 
     pub fn add_phase<P: ShaderPhase>(&mut self) {
-        let f: ShaderPhaseFn = |entity, ctx, state| {
-            let views = ctx.world().resource::<ViewBuffer<P::View>>();
-            let Some(view) = views.instance(&entity) else {
-                return;
-            };
+        let config = Self::run_shader_phase::<P>.config();
+        self.0.push(config);
+    }
 
-            let Some(calls) = ctx
-                .world()
-                .resource::<PhaseDrawCalls<P, M>>()
-                .0
-                .get(&entity)
-            else {
-                return;
-            };
-
-            for call in calls.iter() {
-                let _ = call.draw(state, view, ctx.world());
-            }
+    fn run_shader_phase<P: ShaderPhase>(
+        view: Option<Single<(Entity, &CameraAttachments), (With<P::View>, With<ActiveCamera>)>>,
+        multi: Query<Entity, With<Camera>>,
+        views: &ViewBuffer<P::View>,
+        draws: &PhaseDrawCalls<P, M>,
+        meshes: &MeshAllocator,
+        pipelines: &PipelineCache,
+        model: Option<&ShaderModelData<M>>,
+        world: &World,
+        mut encoder: RenderCommandEncoder,
+    ) {
+        let Some((view, attachments)) = view.as_deref() else {
+            return;
         };
 
-        self.0.push(f)
+        let Some(instance) = views.instance(view) else {
+            return;
+        };
+
+        let Some(calls) = draws.0.get(&view) else {
+            return;
+        };
+
+        let Some(color) = attachments.color.as_ref() else {
+            return;
+        };
+
+        let mut color_attachments = vec![Some(wgpu::RenderPassColorAttachment {
+            view: color,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            },
+        })];
+
+        color_attachments.extend(M::attachments());
+        let depth_stencil_attachment = wgpu::RenderPassDepthStencilAttachment {
+            view: &attachments.depth,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        };
+
+        let desc = wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &color_attachments,
+            depth_stencil_attachment: Some(depth_stencil_attachment),
+            timestamp_writes: Default::default(),
+            occlusion_query_set: Default::default(),
+        };
+
+        let mut state = RenderState::new(encoder.begin_render_pass(&desc));
+
+        for call in calls {
+            let _ = call.draw(&mut state, instance, views, meshes, pipelines, model, world);
+        }
     }
 }
 
 pub trait ShaderModel: Send + Sync + Sized + 'static {
     type Base: ShaderModel;
-
-    type Data: Send + Sync + 'static;
 
     type Arg: SystemArg + ReadOnly;
 
@@ -77,12 +117,9 @@ pub trait ShaderModel: Send + Sync + Sized + 'static {
         None
     }
 
-    fn setup(builder: &mut PassBuilder, phases: &mut ShaderPhases<Self>) -> Self::Data;
+    fn setup(phases: &mut ShaderPhases<Self>);
 
-    fn attachments<'a>(
-        _ctx: &RenderContext<'a>,
-        _data: &Self::Data,
-    ) -> Vec<Option<wgpu::RenderPassColorAttachment<'a>>> {
+    fn attachments<'a>() -> Vec<Option<wgpu::RenderPassColorAttachment<'a>>> {
         vec![]
     }
 }
@@ -114,24 +151,18 @@ impl<M: ShaderModel> RenderResource for ShaderModelData<M> {
 impl ShaderModel for () {
     type Base = ();
 
-    type Data = ();
-
     type Arg = ();
 
     fn create(_: ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
         Ok(())
     }
 
-    fn setup(_: &mut PassBuilder, _: &mut ShaderPhases<Self>) -> Self::Data {
-        ()
-    }
+    fn setup(_: &mut ShaderPhases<Self>) {}
 }
 
 pub struct Unlit<M: ShaderModel = ()>(std::marker::PhantomData<M>);
 impl<M: ShaderModel> ShaderModel for Unlit<M> {
     type Base = M;
-
-    type Data = ();
 
     type Arg = ();
 
@@ -139,134 +170,20 @@ impl<M: ShaderModel> ShaderModel for Unlit<M> {
         Ok(Self(std::marker::PhantomData))
     }
 
-    fn setup(_: &mut PassBuilder, _: &mut ShaderPhases<Self>) -> Self::Data {
-        ()
-    }
+    fn setup(_: &mut ShaderPhases<Self>) {}
 
-    fn attachments<'a>(
-        _ctx: &RenderContext<'a>,
-        _data: &Self::Data,
-    ) -> Vec<Option<wgpu::RenderPassColorAttachment<'a>>> {
+    fn attachments<'a>() -> Vec<Option<wgpu::RenderPassColorAttachment<'a>>> {
         vec![]
     }
 }
 
-#[derive(Debug, Default)]
-pub struct ClearPass {
-    pub color: Color,
-}
-
-impl From<Color> for ClearPass {
-    fn from(color: Color) -> Self {
-        Self { color }
-    }
-}
-
-impl GraphPass for ClearPass {
-    const NAME: crate::Name = "Clear";
-
-    fn setup(
-        self,
-        builder: &mut PassBuilder,
-    ) -> impl Fn(&mut RenderContext) -> Result<(), RenderGraphError> + Send + Sync + 'static {
-        builder.has_side_effect();
-
-        move |ctx| {
-            let color = wgpu::RenderPassColorAttachment {
-                view: ctx.surface_texture(),
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::from(self.color)),
-                    store: wgpu::StoreOp::Store,
-                },
-            };
-
-            let mut encoder = ctx.encoder();
-            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("ClearPass"),
-                color_attachments: &vec![Some(color)],
-                depth_stencil_attachment: None,
-                timestamp_writes: Default::default(),
-                occlusion_query_set: Default::default(),
-            });
-
-            Ok(ctx.submit(encoder.finish()))
-        }
-    }
-}
-
+#[derive(Phase)]
 pub struct DrawPass<M: ShaderModel>(std::marker::PhantomData<M>);
-
 impl<M: ShaderModel> DrawPass<M> {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self(std::marker::PhantomData)
     }
 }
 
-impl<M: ShaderModel> GraphPass for DrawPass<M> {
-    const NAME: crate::Name = "DrawPass";
-
-    fn setup(
-        self,
-        builder: &mut PassBuilder,
-    ) -> impl Fn(&mut RenderContext) -> Result<(), crate::RenderGraphError> + Send + Sync + 'static
-    {
-        let mut phases = ShaderPhases::<M>::new();
-        let name: &'static str = ecs::ext::short_type_name::<Self>();
-        let data = M::setup(builder, &mut phases);
-        builder.name = name;
-        builder.has_side_effect();
-        builder.dependency::<ClearPass>();
-
-        move |ctx: &mut RenderContext| {
-            let view = ctx.view().ok_or(RenderGraphError::MissingView)?;
-            let color = view.attachments.color.as_ref();
-            let mut encoder = ctx.encoder();
-            let mut color_attachments = vec![Some(wgpu::RenderPassColorAttachment {
-                view: color
-                    .as_ref()
-                    .ok_or(RenderGraphError::MissingRenderTarget {
-                        entity: view.entity,
-                    })?,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })];
-
-            color_attachments.extend(M::attachments(ctx, &data));
-            let depth_stencil_attachment = wgpu::RenderPassDepthStencilAttachment {
-                view: &view.attachments.depth,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            };
-
-            let desc = wgpu::RenderPassDescriptor {
-                label: Some(name),
-                color_attachments: &color_attachments,
-                depth_stencil_attachment: Some(depth_stencil_attachment),
-                timestamp_writes: Default::default(),
-                occlusion_query_set: Default::default(),
-            };
-
-            let mut state = RenderState::new(encoder.begin_render_pass(&desc));
-            for phase in &phases.0 {
-                phase(view.entity, ctx, &mut state);
-            }
-
-            drop(state);
-
-            Ok(ctx.submit(encoder.finish()))
-        }
-    }
-}
-
+#[derive(Phase)]
 pub struct MainDrawPass;
-
-impl SubGraph for MainDrawPass {
-    const NAME: crate::Name = "MainDrawPass";
-}

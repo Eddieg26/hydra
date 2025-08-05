@@ -1,12 +1,13 @@
 use crate::{
-    RenderAssets, RenderContext, RenderDevice, RenderGraphError, RenderSurface,
-    RenderSurfaceTexture, RenderTarget,
+    RenderAssets, RenderDevice, RenderSurface, RenderSurfaceTexture, RenderTarget,
     primitives::{Color, Viewport},
-    renderer::graph::SubGraph,
     resources::RenderTexture,
 };
 use asset::AssetId;
-use ecs::{AddComponent, Commands, Component, Entity, Phase, Query, Resource, query::Without};
+use ecs::{
+    AddComponent, Commands, Component, Entity, Phase, Query, Resource, query::Without,
+    world::WorldCell,
+};
 use encase::ShaderType;
 use math::{Mat4, Size, Vec3, Vec3A, Vec4, bounds::Bounds, sphere::Sphere};
 
@@ -237,26 +238,7 @@ impl CameraAttachments {
     }
 }
 
-pub struct CameraPhase;
-impl Phase for Camera {
-    fn run(&self, ctx: ecs::system::PhaseContext) {
-        let world = unsafe { ctx.world().get() };
-        let cameras = world.resource::<CameraSortOrder>();
-        for (camera, _) in cameras.iter() {
-            let Some(attachments) = world.get_component::<CameraAttachments>(*camera) else {
-                return;
-            };
-
-            ctx.execute();
-        }
-    }
-
-    fn name(&self) -> &'static str {
-        ecs::ext::short_type_name::<Self>()
-    }
-}
-
-#[derive(Default, Resource)]
+#[derive(Default, Resource, Clone)]
 pub struct CameraSortOrder(Vec<(Entity, i32)>);
 impl std::ops::Deref for CameraSortOrder {
     type Target = Vec<(Entity, i32)>;
@@ -272,13 +254,17 @@ impl std::ops::DerefMut for CameraSortOrder {
     }
 }
 
+#[derive(Component)]
+pub struct ActiveCamera;
+
 pub struct CameraSubGraph;
 
-impl CameraSubGraph {
-    fn clear_screen<'a>(
-        ctx: &mut RenderContext<'a>,
-        attachments: &'a CameraAttachments,
-    ) -> Option<()> {
+pub struct CameraPhase;
+impl CameraPhase {
+    fn clear_screen(&self, world: WorldCell, camera: Entity) -> Option<()> {
+        let world = unsafe { world.get() };
+        let device = world.resource::<RenderDevice>();
+        let attachments = world.get_component::<CameraAttachments>(camera)?;
         let color = attachments.color.as_ref()?;
         let color_attachments = vec![Some(wgpu::RenderPassColorAttachment {
             view: color,
@@ -301,7 +287,7 @@ impl CameraSubGraph {
             stencil_ops: None,
         };
 
-        let mut encoder = ctx.encoder();
+        let mut encoder = device.create_command_encoder(&Default::default());
         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("ClearPass"),
             color_attachments: &color_attachments,
@@ -310,28 +296,32 @@ impl CameraSubGraph {
             occlusion_query_set: Default::default(),
         });
 
-        Some(ctx.submit(encoder.finish()))
+        device.queue.submit(std::iter::once(encoder.finish()));
+        Some(())
     }
 }
 
-impl SubGraph for CameraSubGraph {
-    const NAME: super::graph::Name = "CameraSubGraph";
+impl Phase for CameraPhase {
+    fn run(&self, ctx: ecs::system::PhaseContext) {
+        let (mut world, cameras) = unsafe {
+            let cameras = ctx.world().get().resource::<CameraSortOrder>().clone();
+            (ctx.world(), cameras)
+        };
 
-    fn run(ctx: &mut super::graph::RenderContext) -> Result<(), RenderGraphError> {
-        let order = ctx.world().resource::<CameraSortOrder>();
-        for (entity, _) in order.iter() {
-            let Some(attachments) = ctx.world().get_component::<CameraAttachments>(*entity) else {
-                continue;
-            };
-
-            Self::clear_screen(ctx, attachments);
-
-            ctx.set_view(*entity, attachments);
-
-            let _ = ctx.run_sub_graph(Self::NAME);
+        unsafe {
+            for (camera, _) in cameras.0 {
+                if self.clear_screen(world, camera).is_some() {
+                    world.get_mut().add_component(camera, ActiveCamera);
+                    ctx.execute();
+                    // world.get_mut().remove_component::<ActiveCamera>(camera);
+                    world.get_mut().get_component::<Camera>(camera).unwrap();
+                }
+            }
         }
+    }
 
-        Ok(())
+    fn name(&self) -> &'static str {
+        ecs::ext::short_type_name::<Self>()
     }
 }
 
