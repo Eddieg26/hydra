@@ -2,7 +2,7 @@ use crate::{
     BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, RenderDevice,
     RenderResource, RenderSurface, uniform::UniformBufferArray,
 };
-use ecs::{Component, Entity, Query, Resource, unlifetime::Read};
+use ecs::{system::Always, unlifetime::Read, Component, Entity, Query, Resource};
 use encase::ShaderType;
 use math::{Mat4, Size, Vec3};
 use std::collections::HashMap;
@@ -126,6 +126,8 @@ impl<V: View> AsRef<UniformBufferArray<ViewData>> for ViewBuffer<V> {
 
 impl<V: View> RenderResource for ViewBuffer<V> {
     type Arg = Read<RenderDevice>;
+
+    type Condition = Always<true>;
 
     fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
         let buffer = UniformBufferArray::new(device, None, None);

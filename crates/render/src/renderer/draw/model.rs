@@ -7,6 +7,7 @@ use crate::{
 use ecs::{
     ArgItem, Entity, IntoSystemConfig, Phase, ReadOnly, Resource, SystemArg, SystemConfig, World,
     query::{Single, With},
+    system::Always,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -143,6 +144,8 @@ impl<M: ShaderModel> std::ops::DerefMut for ShaderModelData<M> {
 
 impl<M: ShaderModel> RenderResource for ShaderModelData<M> {
     type Arg = M::Arg;
+
+    type Condition = Always<true>;
 
     fn extract(arg: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
         M::create(arg).map(Self)

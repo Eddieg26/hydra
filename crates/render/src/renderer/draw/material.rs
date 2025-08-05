@@ -1,16 +1,13 @@
 use crate::{
-    AsBinding, BindGroup, BindGroupLayout, ExtractError, ExtractResource, RenderAsset,
-    RenderDevice, RenderResource, Shader,
+    AsBinding, BindGroup, BindGroupLayout, ExtractError, RenderAsset, RenderDevice, RenderResource,
+    Shader,
     draw::{
         View,
         model::{ShaderModel, ShaderPhase},
     },
 };
 use asset::{Asset, AssetId, ErasedId};
-use ecs::{
-    Resource,
-    unlifetime::{Read, SCommands},
-};
+use ecs::{Resource, system::Always, unlifetime::Read};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -54,6 +51,8 @@ impl<M: Material> AsRef<BindGroupLayout> for MaterialLayout<M> {
 impl<M: Material> RenderResource for MaterialLayout<M> {
     type Arg = Read<RenderDevice>;
 
+    type Condition = Always<true>;
+
     fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, ExtractError<()>> {
         let layout = M::create_bind_group_layout(device);
         Ok(Self(layout, std::marker::PhantomData))
@@ -73,26 +72,13 @@ impl<M: Material> std::ops::Deref for MaterialInstance<M> {
 impl<M: Material> RenderAsset for MaterialInstance<M> {
     type Source = M;
 
-    type Arg = (
-        Read<RenderDevice>,
-        Option<Read<MaterialLayout<M>>>,
-        M::Arg,
-        SCommands,
-    );
+    type Arg = (Read<RenderDevice>, Read<MaterialLayout<M>>, M::Arg);
 
     fn extract(
         _: AssetId<Self::Source>,
         asset: Self::Source,
-        (device, layout, arg, commands): &mut ecs::ArgItem<Self::Arg>,
+        (device, layout, arg): &mut ecs::ArgItem<Self::Arg>,
     ) -> Result<Self, ExtractError<Self::Source>> {
-        let layout = match layout {
-            Some(layout) => layout.clone(),
-            None => {
-                commands.add(ExtractResource::<MaterialLayout<M>>::new());
-                return Err(ExtractError::Retry(asset));
-            }
-        };
-
         let bind_group = asset
             .create_bind_group(device, &layout, arg)
             .map_err(|_| ExtractError::Retry(asset))?;

@@ -1,8 +1,8 @@
 use crate::{
-    BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, Buffer, ExtractResource,
-    FragmentState, Mesh, MeshFilter, MeshFormat, MeshKey, MeshLayout, PipelineCache, PipelineId,
-    RenderAssets, RenderDevice, RenderMesh, RenderPipelineDesc, RenderResource, RenderState,
-    RenderSurface, Shader, SubMesh, VertexState,
+    BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, Buffer, FragmentState,
+    Mesh, MeshFilter, MeshFormat, MeshKey, MeshLayout, PipelineCache, PipelineId, RenderAssets,
+    RenderDevice, RenderMesh, RenderPipelineDesc, RenderResource, RenderState, RenderSurface,
+    Shader, SubMesh, VertexState,
     allocator::MeshAllocator,
     constants::{MAX_BATCH_SIZE, UniformBatchSize},
     draw::{
@@ -14,7 +14,8 @@ use asset::AssetId;
 use ecs::{
     Component, Entity, Query, Resource, World,
     query::With,
-    unlifetime::{Read, SCommands, Write},
+    system::{Always, Exists},
+    unlifetime::{Read, Write},
 };
 use encase::{DynamicUniformBuffer, ShaderType, internal::WriteInto};
 use math::Mat4;
@@ -286,6 +287,8 @@ impl BatchedUniformBuffer<ModelData> {
 impl<T: ModelUniformData> RenderResource for BatchedUniformBuffer<T> {
     type Arg = Read<RenderDevice>;
 
+    type Condition = Always<true>;
+
     fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
         Ok(Self::new(device))
     }
@@ -318,36 +321,22 @@ impl<D: Drawable> RenderResource for DrawPipeline<D> {
     type Arg = (
         Write<PipelineCache>,
         Read<RenderSurface>,
-        Option<Read<BatchedUniformBuffer<ModelData>>>,
-        Option<Read<ViewBuffer<D::View>>>,
-        Option<Write<MaterialLayout<D::Material>>>,
-        Option<Read<ShaderModelData<DrawModel<D>>>>,
-        SCommands,
+        Read<ViewBuffer<D::View>>,
+        Read<BatchedUniformBuffer<ModelData>>,
+        Write<MaterialLayout<D::Material>>,
+        Read<ShaderModelData<DrawModel<D>>>,
     );
 
-    fn extract(arg: ecs::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError<()>> {
-        let (cache, surface, cpu_model, views, layout, shader_model, mut commands) = arg;
+    type Condition = (
+        Exists<BatchedUniformBuffer<ModelData>>,
+        Exists<ViewBuffer<D::View>>,
+        Exists<MaterialLayout<D::Material>>,
+        Exists<ShaderModelData<DrawModel<D>>>,
+    );
 
-        let material_layout = match layout {
-            Some(layout) => layout,
-            None => {
-                commands.add(ExtractResource::<MaterialLayout<D::Material>>::new());
-                return Err(crate::resources::ExtractError::Retry(()));
-            }
-        };
-
-        let view_layout = views
-            .map(|v| v.layout())
-            .ok_or(crate::resources::ExtractError::Retry(()))?;
-
-        let model_layout = cpu_model
-            .map(|v| v.layout())
-            .ok_or(crate::resources::ExtractError::Retry(()))?;
-
-        let shader_layout = shader_model
-            .map(|s| s.bind_group_layout())
-            .ok_or(crate::resources::ExtractError::Retry(()))?;
-
+    fn extract(
+        (cache, surface, views, objects, material, model): ecs::ArgItem<Self::Arg>,
+    ) -> Result<Self, crate::ExtractError<()>> {
         let vertex_shader: AssetId<Shader> = D::shader().into();
         let fragment_shader: AssetId<Shader> = D::Material::shader().into();
 
@@ -363,12 +352,12 @@ impl<D: Drawable> RenderResource for DrawPipeline<D> {
         )];
 
         let mut layouts = vec![
-            view_layout.clone(),
-            model_layout.clone(),
-            material_layout.as_ref().clone(),
+            views.layout().clone(),
+            objects.layout().clone(),
+            material.as_ref().clone(),
         ];
 
-        if let Some(layout) = shader_layout {
+        if let Some(layout) = model.bind_group_layout() {
             layouts.push(layout.clone());
         }
 

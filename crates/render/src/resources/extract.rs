@@ -1,8 +1,8 @@
 use asset::{AssetEvent, AssetId, Assets, asset::Asset};
 use ecs::{
-    Command, Commands, Event, EventReader, EventWriter, IndexMap, IntoSystemConfig, Resource,
-    SystemId, SystemMeta, WorldAccess,
-    system::{ArgItem, Main, SystemArg, SystemConfig, unlifetime::StaticArg},
+    Commands, Condition, Event, EventReader, EventWriter, IndexMap, IntoSystemConfig, Resource,
+    SystemId,
+    system::{ArgItem, Exists, Main, Not, SystemArg, SystemConfig, unlifetime::StaticArg},
 };
 use std::{
     any::TypeId,
@@ -275,60 +275,35 @@ impl AssetExtractors {
 pub trait RenderResource: Resource + Send + Sync + Sized {
     type Arg: SystemArg;
 
+    type Condition: Condition;
+
     fn extract(arg: ArgItem<Self::Arg>) -> Result<Self, ExtractError<()>>;
 }
 
-pub struct ExtractResource<R: RenderResource>(std::marker::PhantomData<R>);
-impl<R: RenderResource> ExtractResource<R> {
-    pub fn new() -> Self {
-        Self(std::marker::PhantomData)
-    }
-}
-
-impl<R: RenderResource> Command for ExtractResource<R> {
-    fn execute(self, world: &mut ecs::World) {
-        world.resource_mut::<ResourceExtractors>().add::<R>();
-    }
-}
-
 #[derive(Default, Resource)]
-pub struct ResourceExtractors(HashMap<TypeId, fn(&mut ecs::World)>);
+pub struct ResourceExtractors(pub(crate) IndexMap<TypeId, SystemConfig>);
 
 impl ResourceExtractors {
     pub fn add<R: RenderResource>(&mut self) {
-        self.0
-            .entry(TypeId::of::<R>())
-            .or_insert_with(|| Self::extract_resource::<R>);
+        self.0.entry(TypeId::of::<R>()).or_insert_with(|| {
+            Self::extract_resource::<R>
+                .config()
+                .when::<(Not<Exists<R>>, R::Condition)>()
+        });
     }
 
-    pub(crate) fn extract(
-        main_extractors: Main<&mut ResourceExtractors>,
-        extractors: &mut ResourceExtractors,
+    fn extract_resource<R: RenderResource>(
+        mut commands: Commands,
+        mut errors: EventWriter<ExtractError<R>>,
+        arg: StaticArg<R::Arg>,
     ) {
-        extractors.0.extend(main_extractors.into_inner().0.drain());
-    }
-
-    pub(crate) fn process(extractors: &mut ResourceExtractors, mut commands: Commands) {
-        extractors
-            .0
-            .drain()
-            .for_each(|(_, command)| commands.add(command));
-    }
-
-    fn extract_resource<R: RenderResource>(world: &mut ecs::World) {
-        let mut state = R::Arg::init(world, &mut WorldAccess::new());
-        let meta = SystemMeta::default();
-        let arg = unsafe { R::Arg::get(&mut state, world.cell(), &meta) };
-
-        match R::extract(arg) {
-            Ok(resource) => {
+        match R::extract(arg.into_inner()) {
+            Ok(resource) => commands.add(move |world: &mut ecs::World| {
                 world.add_resource(resource);
-            }
-            Err(ExtractError::Retry(_)) => world.resource_mut::<Self>().add::<R>(),
-            Err(ExtractError::Error(error)) => world.send(ExtractError::<R>::Error(error)),
+            }),
+            Err(ExtractError::Retry(_)) => {}
+            Err(ExtractError::Error(error)) => errors.send(ExtractError::<R>::Error(error)),
         }
-
-        R::Arg::update(&mut state, world);
     }
 }
 

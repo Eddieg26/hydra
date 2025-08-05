@@ -2,7 +2,7 @@ use super::{GpuTexture, Sampler, SamplerDesc, Texture, TextureDimension};
 use crate::{device::RenderDevice, resources::extract::RenderResource};
 use ecs::{
     Resource,
-    system::{ArgItem, unlifetime::Read},
+    system::{Always, ArgItem, unlifetime::Read},
 };
 
 pub struct Fallbacks {
@@ -83,6 +83,8 @@ impl Resource for Fallbacks {}
 
 impl RenderResource for Fallbacks {
     type Arg = Read<RenderDevice>;
+
+    type Condition = Always<true>;
 
     fn extract(arg: ArgItem<Self::Arg>) -> Result<Self, crate::resources::extract::ExtractError> {
         Ok(Fallbacks::new(&arg))

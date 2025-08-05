@@ -1,7 +1,6 @@
 use asset::{Asset, AssetId, embed_asset, io::EmbeddedFs, plugin::AssetAppExt};
 use ecs::{
-    Component, IntoSystemConfig, Phase, Plugin, Query, Resource, app::sync::SyncComponentPlugin,
-    system::Exists, unlifetime::Read,
+    app::sync::SyncComponentPlugin, system::{Always, Exists}, unlifetime::Read, Component, IntoSystemConfig, Phase, Plugin, Query, Resource
 };
 use math::{Vec3};
 use render::{
@@ -370,6 +369,8 @@ impl Lights {
 
 impl RenderResource for Lights {
     type Arg = Read<RenderDevice>;
+
+    type Condition = Always<true>;
 
     fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, render::ExtractError<()>> {
         let max_lights = UniformBatchSize::<LightData>::size(device, Self::MAX_LIGHTS) as u64;

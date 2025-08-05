@@ -1,8 +1,8 @@
 use crate::{
-    ActiveCamera, Camera, CameraAttachments, CameraPhase, CameraSortOrder,
-    ExtractError, GlobalShaderConstant, GlobalShaderConstants, GpuShader, GpuTexture, MeshFilter,
-    ObjImporter, ProcessAssets, QueueDraws, QueueViews, RenderDevice, RenderMesh, RenderTarget,
-    SubMesh, Texture2dImporter,
+    ActiveCamera, Camera, CameraAttachments, CameraPhase, CameraSortOrder, ExtractError,
+    GlobalShaderConstant, GlobalShaderConstants, GpuShader, GpuTexture, MeshFilter, ObjImporter,
+    ProcessAssets, QueueDraws, QueueViews, RenderDevice, RenderMesh, RenderTarget, SubMesh,
+    Texture2dImporter,
     allocator::MeshAllocatorPlugin,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     constants::{StorageBufferEnabled, UniformBatchSize},
@@ -48,8 +48,6 @@ impl Plugin for RenderPlugin {
             .add_systems(Queue, RenderSurface::queue_surface)
             .add_systems(Present, RenderSurface::present_surface)
             .add_resource(RenderSurfaceTexture::new())
-            .add_resource(AssetExtractors::default())
-            .add_resource(ResourceExtractors::default())
             .add_resource(PipelineCache::default())
             .add_resource(GlobalShaderConstants::new())
             .register_event::<ExtractError>();
@@ -91,13 +89,14 @@ impl Plugin for RenderPlugin {
     }
 
     fn finish(&mut self, app: &mut AppBuilder) {
-        if !app.resources().contains::<ResourceExtractors>() {
-            app.add_resource(ResourceExtractors::default());
-        }
-
         let app = app.sub_app_mut(RenderApp);
-        app.add_systems(Extract, ResourceExtractors::extract);
-        app.add_systems(Process, ResourceExtractors::process);
+
+        let configs = app
+            .remove_resource::<ResourceExtractors>()
+            .map(|e| e.0.into_values().collect::<Vec<_>>())
+            .unwrap_or_default();
+
+        app.add_systems(Process, configs);
 
         let configs = app
             .remove_resource::<AssetExtractors>()
@@ -169,7 +168,8 @@ impl RenderAppExt for AppBuilder {
 
     fn add_render_asset<R: RenderAsset>(&mut self) -> &mut Self {
         let app = self.sub_app_mut(RenderApp);
-        app.resource_mut::<AssetExtractors>().add::<R>();
+        app.get_or_insert_resource(|| AssetExtractors::default())
+            .add::<R>();
 
         if !app.resources().contains::<RenderAssets<R>>() {
             app.add_resource(RenderAssets::<R>::new());
@@ -179,14 +179,17 @@ impl RenderAppExt for AppBuilder {
             app.add_resource(ExtractInfo::<R>::new());
         }
 
-        self.register_event::<ExtractError<R>>();
+        app.register_event::<ExtractError<R>>();
         self.register_asset::<R::Source>()
     }
 
     fn add_render_resource<R: RenderResource>(&mut self) -> &mut Self {
-        self.get_or_insert_resource(|| ResourceExtractors::default())
+        let app = self.sub_app_mut(RenderApp);
+        app.get_or_insert_resource(|| ResourceExtractors::default())
             .add::<R>();
-        self.register_event::<ExtractError<R>>();
+
+        app.register_event::<ExtractError<R>>();
+
         self
     }
 }

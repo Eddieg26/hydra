@@ -422,6 +422,14 @@ pub trait Condition: Sized + 'static {
     }
 }
 
+pub struct Always<const VALUE: bool>(pub bool);
+
+impl<const VALUE: bool> Condition for Always<VALUE> {
+    fn evaluate(_: &World, _: &SystemMeta) -> bool {
+        VALUE
+    }
+}
+
 impl<T: Condition> Condition for Not<T> {
     fn evaluate(world: &World, system: &SystemMeta) -> bool {
         !T::evaluate(world, system)
