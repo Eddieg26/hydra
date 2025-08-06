@@ -1,17 +1,11 @@
 use crate::{
     ActiveCamera, Camera, CameraAttachments, CameraPhase, CameraSortOrder, ExtractError,
-    GlobalShaderConstant, GlobalShaderConstants, GpuShader, GpuTexture, MeshFilter, ObjImporter,
-    ProcessAssets, QueueDraws, QueueViews, RenderDevice, RenderMesh, RenderTarget, SubMesh,
-    Texture2dImporter,
+    GlobalShaderConstant, GlobalShaderConstants, GpuShader, GpuTexture, ObjImporter, ProcessAssets,
+    QueueDraws, QueueViews, RenderDevice, RenderMesh, RenderTarget, SubMesh, Texture2dImporter,
     allocator::MeshAllocatorPlugin,
     app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
-    constants::{StorageBufferEnabled, UniformBatchSize},
-    draw::{
-        BatchedUniformBuffer, DrawModel, DrawPass, DrawPhase, DrawPipeline, Drawable, MainDrawPass,
-        Material, MaterialInstance, MaterialLayout, ModelData, ModelUniformData, PhaseDrawCalls,
-        ShaderModel, ShaderModelData, ShaderPhase, ShaderPhases, View, ViewBuffer,
-    },
-    processor::{ShaderConstant, ShaderConstants},
+    constants::StorageBufferEnabled,
+    processor::ShaderConstant,
     resources::{
         AssetExtractors, ExtractInfo, Fallbacks, Mesh, PipelineCache, RenderAsset, RenderAssets,
         RenderResource, ResourceExtractors, Shader,
@@ -20,10 +14,9 @@ use crate::{
 };
 use asset::plugin::{AssetAppExt, AssetPlugin};
 use ecs::{
-    AppBuilder, Extract, Init, IntoSystemConfig, Phase, Plugin, Run,
-    app::sync::SyncComponentPlugin, system::Exists,
+    AppBuilder, Extract, Init, IntoSystemConfig, Phase, Plugin, Run, app::sync::SyncComponentPlugin,
 };
-use transform::{GlobalTransform, plugin::TransformPlugin};
+use transform::GlobalTransform;
 use window::{Window, plugin::WindowPlugin};
 
 pub struct RenderPlugin;
@@ -113,19 +106,18 @@ impl Plugin for RenderPlugin {
 }
 
 pub trait RenderAppExt {
-    fn add_drawable<D: Drawable>(&mut self) -> &mut Self;
     fn add_shader_constant<C: GlobalShaderConstant>(&mut self) -> &mut Self;
     fn add_pass<M>(&mut self, pass: impl IntoSystemConfig<M>) -> &mut Self;
-    fn add_sub_pass<M>(&mut self, phase: impl Phase + Clone, pass: impl IntoSystemConfig<M>) -> &mut Self;
+    fn add_sub_pass<M>(
+        &mut self,
+        phase: impl Phase + Clone,
+        pass: impl IntoSystemConfig<M>,
+    ) -> &mut Self;
     fn add_render_asset<R: RenderAsset>(&mut self) -> &mut Self;
     fn add_render_resource<R: RenderResource>(&mut self) -> &mut Self;
 }
 
 impl RenderAppExt for AppBuilder {
-    fn add_drawable<D: Drawable>(&mut self) -> &mut Self {
-        self.add_plugins(DrawPlugin::<D>::new())
-    }
-
     fn add_shader_constant<C: GlobalShaderConstant>(&mut self) -> &mut Self {
         self.get_or_insert_resource(|| GlobalShaderConstants::new())
             .register::<C>();
@@ -138,7 +130,11 @@ impl RenderAppExt for AppBuilder {
         })
     }
 
-    fn add_sub_pass<M>(&mut self, phase: impl Phase + Clone, pass: impl IntoSystemConfig<M>) -> &mut Self {
+    fn add_sub_pass<M>(
+        &mut self,
+        phase: impl Phase + Clone,
+        pass: impl IntoSystemConfig<M>,
+    ) -> &mut Self {
         self.scoped_sub_app(RenderApp, move |app| {
             app.add_sub_phase(Render, phase.clone());
             app.add_systems(phase, pass);
@@ -187,146 +183,5 @@ impl Plugin for CameraPlugin {
         .add_resource(CameraSortOrder::default())
         .add_systems(PreRender, CameraAttachments::queue)
         .add_systems(PostRender, CameraAttachments::cleanup);
-    }
-}
-
-pub struct ViewPlugin<V: View>(std::marker::PhantomData<V>);
-impl<V: View> ViewPlugin<V> {
-    pub fn new() -> Self {
-        Self(std::marker::PhantomData)
-    }
-}
-impl<V: View> Plugin for ViewPlugin<V> {
-    fn setup(&mut self, app: &mut AppBuilder) {
-        app.add_plugins((
-            SyncComponentPlugin::<V, RenderApp>::new(),
-            SyncComponentPlugin::<V::Transform, RenderApp>::new(),
-            SyncComponentPlugin::<GlobalTransform, RenderApp>::new(),
-            TransformPlugin::<V::Transform>::new(),
-            CameraPlugin,
-        ))
-        .add_render_resource::<ViewBuffer<V>>()
-        .sub_app_mut(RenderApp)
-        .add_systems(QueueViews, ViewBuffer::<V>::queue);
-    }
-}
-
-pub struct ModelDataPlugin<T: ModelUniformData>(std::marker::PhantomData<T>);
-impl<T: ModelUniformData> ModelDataPlugin<T> {
-    pub fn new() -> Self {
-        Self(std::marker::PhantomData)
-    }
-}
-impl<T: ModelUniformData> Plugin for ModelDataPlugin<T> {
-    fn setup(&mut self, app: &mut AppBuilder) {
-        app.add_plugins(RenderPlugin)
-            .add_render_resource::<BatchedUniformBuffer<T>>()
-            .sub_app_mut(RenderApp)
-            .add_systems(PreRender, BatchedUniformBuffer::<T>::update_buffer)
-            .add_systems(PostRender, BatchedUniformBuffer::<T>::reset_buffer);
-    }
-}
-
-pub struct MaterialPlugin<M: Material>(std::marker::PhantomData<M>);
-impl<M: Material> MaterialPlugin<M> {
-    pub fn new() -> Self {
-        Self(std::marker::PhantomData)
-    }
-}
-impl<M: Material> Plugin for MaterialPlugin<M> {
-    fn setup(&mut self, app: &mut AppBuilder) {
-        app.add_plugins(RenderPlugin)
-            .register_asset::<M>()
-            .add_render_asset::<MaterialInstance<M>>()
-            .add_render_resource::<MaterialLayout<M>>();
-    }
-}
-
-pub struct ShaderModelPlugin<M: ShaderModel>(std::marker::PhantomData<M>);
-impl<M: ShaderModel> ShaderModelPlugin<M> {
-    pub fn new() -> Self {
-        Self(std::marker::PhantomData)
-    }
-}
-
-impl<M: ShaderModel> Plugin for ShaderModelPlugin<M> {
-    fn setup(&mut self, app: &mut AppBuilder) {
-        app.add_plugins(CameraPlugin)
-            .sub_app_mut(RenderApp)
-            .add_sub_phase(CameraPhase, MainDrawPass)
-            .add_sub_phase(MainDrawPass, DrawPass::<M>::new());
-
-        let mut phases = ShaderPhases::new();
-        M::setup(&mut phases);
-
-        for v in phases.0.chunks_exact_mut(2) {
-            v[1].add_dependency(v[0].id());
-        }
-
-        app.sub_app_mut(RenderApp)
-            .add_systems(DrawPass::<M>::new(), phases.0);
-    }
-}
-
-pub struct ShaderPhasePlugin<P: ShaderPhase, M: ShaderModel>(std::marker::PhantomData<(P, M)>);
-impl<P: ShaderPhase, M: ShaderModel> ShaderPhasePlugin<P, M> {
-    pub fn new() -> Self {
-        Self(std::marker::PhantomData)
-    }
-}
-
-impl<P: ShaderPhase, M: ShaderModel> Plugin for ShaderPhasePlugin<P, M> {
-    fn setup(&mut self, app: &mut AppBuilder) {
-        app.add_plugins(ShaderModelPlugin::<M>::new())
-            .add_render_resource::<ShaderModelData<M>>()
-            .sub_app_mut(RenderApp)
-            .add_resource(PhaseDrawCalls::<P, M>::new())
-            .add_systems(PostRender, PhaseDrawCalls::<P, M>::clear);
-    }
-}
-
-pub struct DrawPlugin<D: Drawable>(std::marker::PhantomData<D>);
-impl<D: Drawable> DrawPlugin<D> {
-    pub fn new() -> Self {
-        Self(std::marker::PhantomData)
-    }
-}
-
-impl<D: Drawable> Plugin for DrawPlugin<D> {
-    fn setup(&mut self, app: &mut AppBuilder) {
-        app.add_plugins((
-            ViewPlugin::<D::View>::new(),
-            ModelDataPlugin::<ModelData>::new(),
-            MaterialPlugin::<D::Material>::new(),
-            ShaderPhasePlugin::<DrawPhase<D>, DrawModel<D>>::new(),
-            SyncComponentPlugin::<D, RenderApp>::new(),
-            SyncComponentPlugin::<MeshFilter, RenderApp>::new(),
-        ))
-        .load_asset::<Shader>(D::shader().into())
-        .load_asset::<Shader>(D::Material::shader().into())
-        .add_render_resource::<DrawPipeline<D>>()
-        .sub_app_mut(RenderApp)
-        .add_systems(
-            QueueDraws,
-            BatchedUniformBuffer::<ModelData>::queue::<D>.when::<Exists<DrawPipeline<D>>>(),
-        );
-    }
-
-    fn build(&mut self, app: &mut AppBuilder) {
-        let constants = {
-            let device = app.sub_app_mut(RenderApp).resource::<RenderDevice>();
-
-            let mut constants = ShaderConstants::new();
-            constants.set(
-                UniformBatchSize::<ModelData>::NAME,
-                UniformBatchSize::<ModelData>::get(device),
-            );
-
-            constants
-        };
-
-        app.sub_app_mut(RenderApp)
-            .resource_mut::<GlobalShaderConstants>()
-            .add_local(D::shader().into(), constants);
     }
 }

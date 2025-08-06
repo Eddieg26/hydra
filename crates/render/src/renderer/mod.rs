@@ -1,5 +1,4 @@
 pub mod camera;
-pub mod draw;
 pub mod encoder;
 pub mod state;
 
