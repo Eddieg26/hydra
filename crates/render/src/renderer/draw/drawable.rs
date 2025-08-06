@@ -11,6 +11,7 @@ use crate::{
     },
 };
 use asset::AssetId;
+use bytemuck::{Pod, Zeroable};
 use ecs::{
     Component, Entity, Query, Resource, World,
     query::With,
@@ -32,7 +33,8 @@ impl<T: ShaderType + WriteInto + Send + Sync + 'static> ModelUniformData for T {
 pub type DrawPhase<D> = <<D as Drawable>::Material as Material>::Phase;
 pub type DrawModel<D> = <<<D as Drawable>::Material as Material>::Model as ShaderModel>::Base;
 
-#[derive(Default, Clone, Copy, ShaderType)]
+#[derive(Default, Clone, Copy, ShaderType, Pod, Zeroable)]
+#[repr(C)]
 pub struct ModelData {
     world: Mat4,
 }
@@ -469,6 +471,10 @@ pub struct PhaseDrawCalls<P: ShaderPhase, M: ShaderModel>(
 impl<P: ShaderPhase, M: ShaderModel> PhaseDrawCalls<P, M> {
     pub fn new() -> Self {
         Self(HashMap::new(), std::marker::PhantomData)
+    }
+
+    pub fn get(&self, entity: &Entity) -> Option<&[DrawCall<P, M>]> {
+        self.0.get(entity).map(|v| v.as_slice())
     }
 
     pub(super) fn draw<D>(

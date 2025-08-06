@@ -65,12 +65,13 @@ impl Into<wgpu::FilterMode> for FilterMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum WrapMode {
-    Repeat,
+    #[default]
     ClampToEdge,
-    ClampToBorder,
+    Repeat,
     MirrorRepeat,
+    ClampToBorder,
 }
 
 impl Into<wgpu::AddressMode> for WrapMode {

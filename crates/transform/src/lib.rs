@@ -136,6 +136,11 @@ impl GlobalTransform {
         GlobalTransform(self.0.inverse())
     }
 
+    pub fn look_at(&self, target: Vec3, up: Vec3) -> Mat4 {
+        let translation = self.translation();
+        Mat4::look_to_rh(translation, translation + target, up)
+    }
+
     pub fn view_matrix(&self) -> Mat4 {
         let (_, rotation, translation) = self.to_scale_rotation_translation();
         Mat4::look_at_rh(

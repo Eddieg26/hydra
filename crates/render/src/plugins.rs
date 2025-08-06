@@ -20,8 +20,8 @@ use crate::{
 };
 use asset::plugin::{AssetAppExt, AssetPlugin};
 use ecs::{
-    AppBuilder, Extract, Init, IntoSystemConfig, Plugin, Run, app::sync::SyncComponentPlugin,
-    system::Exists,
+    AppBuilder, Extract, Init, IntoSystemConfig, Phase, Plugin, Run,
+    app::sync::SyncComponentPlugin, system::Exists,
 };
 use transform::{GlobalTransform, plugin::TransformPlugin};
 use window::{Window, plugin::WindowPlugin};
@@ -115,10 +115,8 @@ impl Plugin for RenderPlugin {
 pub trait RenderAppExt {
     fn add_drawable<D: Drawable>(&mut self) -> &mut Self;
     fn add_shader_constant<C: GlobalShaderConstant>(&mut self) -> &mut Self;
-    // fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self;
-    // fn add_sub_graph<S: SubGraph>(&mut self) -> &mut Self;
-    // fn add_sub_graph_pass<S: SubGraph, P: GraphPass>(&mut self, pass: P) -> &mut Self;
-    // fn add_nested_sub_graph<S: SubGraph, Nested: SubGraph>(&mut self) -> &mut Self;
+    fn add_pass<M>(&mut self, pass: impl IntoSystemConfig<M>) -> &mut Self;
+    fn add_sub_pass<M>(&mut self, phase: impl Phase + Clone, pass: impl IntoSystemConfig<M>) -> &mut Self;
     fn add_render_asset<R: RenderAsset>(&mut self) -> &mut Self;
     fn add_render_resource<R: RenderResource>(&mut self) -> &mut Self;
 }
@@ -134,37 +132,18 @@ impl RenderAppExt for AppBuilder {
         self
     }
 
-    // fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self {
-    //     self.scoped_sub_app(RenderApp, |render_app| {
-    //         render_app
-    //             .get_or_insert_resource(RenderGraphBuilder::new)
-    //             .add_pass(pass);
-    //     })
-    // }
+    fn add_pass<M>(&mut self, pass: impl IntoSystemConfig<M>) -> &mut Self {
+        self.scoped_sub_app(RenderApp, move |app| {
+            app.add_systems(Render, pass);
+        })
+    }
 
-    // fn add_sub_graph<S: SubGraph>(&mut self) -> &mut Self {
-    //     self.scoped_sub_app(RenderApp, |render_app| {
-    //         render_app
-    //             .get_or_insert_resource(RenderGraphBuilder::new)
-    //             .add_sub_graph::<S>();
-    //     })
-    // }
-
-    // fn add_sub_graph_pass<S: SubGraph, P: GraphPass>(&mut self, pass: P) -> &mut Self {
-    //     self.scoped_sub_app(RenderApp, |render_app| {
-    //         render_app
-    //             .get_or_insert_resource(RenderGraphBuilder::new)
-    //             .add_sub_graph_pass::<S, P>(pass);
-    //     })
-    // }
-
-    // fn add_nested_sub_graph<S: SubGraph, Nested: SubGraph>(&mut self) -> &mut Self {
-    //     self.scoped_sub_app(RenderApp, |render_app| {
-    //         render_app
-    //             .get_or_insert_resource(RenderGraphBuilder::new)
-    //             .add_nested_sub_graph::<S, Nested>();
-    //     })
-    // }
+    fn add_sub_pass<M>(&mut self, phase: impl Phase + Clone, pass: impl IntoSystemConfig<M>) -> &mut Self {
+        self.scoped_sub_app(RenderApp, move |app| {
+            app.add_sub_phase(Render, phase.clone());
+            app.add_systems(phase, pass);
+        })
+    }
 
     fn add_render_asset<R: RenderAsset>(&mut self) -> &mut Self {
         let app = self.sub_app_mut(RenderApp);
