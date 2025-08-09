@@ -705,23 +705,16 @@ macro_rules! impl_into_system_configs {
     };
 }
 
-impl_into_system_configs!(A);
-impl_into_system_configs!(A, B);
-impl_into_system_configs!(A, B, C);
-impl_into_system_configs!(A, B, C, D);
-impl_into_system_configs!(A, B, C, D, E);
-impl_into_system_configs!(A, B, C, D, E, F2);
-impl_into_system_configs!(A, B, C, D, E, F2, G);
-impl_into_system_configs!(A, B, C, D, E, F2, G, H);
-impl_into_system_configs!(A, B, C, D, E, F2, G, H, I);
-impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J);
-impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J, K);
-impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J, K, L);
-impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J, K, L, M);
-impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N);
-impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O2);
-impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O2, P);
-impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J, K, L, M, N, O2, P, Q);
+variadics::variable_impl!(impl_into_system_configs, P, 16);
+
+macro_rules! impl_read_only_for_tuples {
+    ($($arg:ident), *) => {
+        #[allow(non_snake_case)]
+        unsafe impl<$($arg: ReadOnly),*> ReadOnly for ($($arg),*) {}
+    };
+}
+
+variadics::variable_impl!(impl_read_only_for_tuples, P, 2, 16);
 
 #[allow(type_alias_bounds)]
 pub mod unlifetime {

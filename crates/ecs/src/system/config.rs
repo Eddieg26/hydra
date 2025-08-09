@@ -436,34 +436,6 @@ impl<T: Condition> Condition for Not<T> {
     }
 }
 
-macro_rules! impl_tuple_condition {
-    ($(($($name:ident),*)),*)  => {
-        $(
-            #[allow(non_snake_case)]
-            impl<$($name: Condition),+> Condition for ($($name),+) {
-                fn evaluate(world: &World, meta: &SystemMeta) -> bool {
-                    let mut result = true;
-                    $(
-                        result = result && $name::evaluate(world, meta);
-                    )+
-                    result
-                }
-            }
-
-            #[allow(non_snake_case)]
-            impl<$($name: Condition),+> Condition for Or<($($name),+)> {
-                fn evaluate( world: &World, meta: &SystemMeta) -> bool {
-                    let mut result = false;
-                    $(
-                        result = result || $name::evaluate(world, meta);
-                    )+
-                    result
-                }
-            }
-        )+
-    };
-}
-
 pub struct CurrentMode<M: WorldMode>(std::marker::PhantomData<M>);
 impl<M: WorldMode> Condition for CurrentMode<M> {
     fn evaluate(world: &World, _: &SystemMeta) -> bool {
@@ -548,17 +520,33 @@ impl<R: Resource> Condition for Removed<R> {
     }
 }
 
-impl_tuple_condition! {
-    (A, B),
-    (A, B, C),
-    (A, B, C, D),
-    (A, B, C, D, E),
-    (A, B, C, D, E, F),
-    (A, B, C, D, E, F, G),
-    (A, B, C, D, E, F, G, H),
-    (A, B, C, D, E, F, G, H, I),
-    (A, B, C, D, E, F, G, H, I, J)
+macro_rules! impl_tuple_condition {
+    ($($name:ident),*) => {
+        #[allow(non_snake_case)]
+        impl<$($name: Condition),*> Condition for ($($name),*) {
+            fn evaluate(world: &World, meta: &SystemMeta) -> bool {
+                let mut result = true;
+                $(
+                    result = result && $name::evaluate(world, meta);
+                )*
+                result
+            }
+        }
+
+        #[allow(non_snake_case)]
+        impl<$($name: Condition),*> Condition for Or<($($name),*)> {
+            fn evaluate( world: &World, meta: &SystemMeta) -> bool {
+                let mut result = false;
+                $(
+                    result = result || $name::evaluate(world, meta);
+                )*
+                result
+            }
+        }
+    };
 }
+
+variadics::variable_impl!(impl_tuple_condition, P, 2, 16);
 
 #[allow(unused_imports, dead_code)]
 mod tests {

@@ -282,6 +282,7 @@ impl Default for AppAccess {
     }
 }
 
+#[derive(Default)]
 pub struct WorldAccess {
     pub(crate) current: AppAccess,
     pub(crate) main: AppAccess,
@@ -327,6 +328,35 @@ impl WorldAccess {
     pub fn conflicts(&self, other: &Self) -> Result<(), AccessError> {
         self.current.conflicts(&other.current)?;
         self.main.conflicts(&other.main)
+    }
+
+    pub fn extend(&mut self, other: WorldAccess) {
+        self.current.archetypes.extend(other.current.archetypes);
+        self.current
+            .components
+            .read
+            .union(&other.current.components.read);
+        self.current
+            .components
+            .write
+            .union(&other.current.components.write);
+        self.current
+            .resources
+            .read
+            .union(&other.current.resources.read);
+        self.current
+            .resources
+            .write
+            .union(&other.current.resources.write);
+
+        self.main.archetypes.extend(other.main.archetypes);
+        self.main.components.read.union(&other.main.components.read);
+        self.main
+            .components
+            .write
+            .union(&other.main.components.write);
+        self.main.resources.read.union(&other.main.resources.read);
+        self.main.resources.write.union(&other.main.resources.write);
     }
 }
 

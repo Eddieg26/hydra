@@ -760,6 +760,7 @@ dependencies = [
  "indexmap",
  "smol",
  "threadpool",
+ "variadics",
 ]
 
 [[package]]
@@ -3032,6 +3033,13 @@ dependencies = [
  "aligned-vec",
  "num-traits",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "variadics"
+version = "0.1.0"
+dependencies = [
+ "macro-utils",
 ]
 
 [[package]]

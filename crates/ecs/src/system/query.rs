@@ -922,113 +922,100 @@ unsafe impl<Q: BaseQuery + 'static, F: BaseFilter + 'static> SystemArg
     }
 }
 
-#[macro_export]
 macro_rules! impl_base_query_for_tuples {
-    ($(($($name:ident),*)),*)  => {
-        $(
-            #[allow(non_snake_case)]
-            impl<$($name: BaseQuery),+> BaseQuery for ($($name),+) {
-                type Item<'w> = ($($name::Item<'w>), +);
+    ($($name:ident),*) => {
+    #[allow(non_snake_case)]
+    impl<$($name: BaseQuery),*> BaseQuery for ($($name),*)
+        {
 
-                type State<'w> = ($($name::State<'w>), +);
+            type Item<'w> = ($($name::Item<'w>), *);
+            type State<'w> = ($($name::State<'w>), *);
+            type Data = ($($name::Data), *);
 
-                type Data = ($($name::Data), +);
-
-                fn init(world: &mut World, access: &mut ArchetypeAccess) -> Self::Data {
-                    ($($name::init(world, access),)*)
-                }
-
-                fn state<'w>(data: Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
-                    let ($($name,)*) = data;
-                    ($($name::state($name, world, archetype, current_frame, system_frame),)*)
-                }
-
-                fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w> {
-                    let ($($name,)*) = state;
-
-                    ($(
-                        $name::get($name, entity, row),
-                    )*)
-                }
+            fn init(world: &mut World, access: &mut ArchetypeAccess) -> Self::Data {
+                ($($name::init(world, access),)*)
             }
 
-            #[allow(non_snake_case)]
-            impl<$($name: BaseFilter),+> BaseFilter for ($($name),+) {
-                type State<'w> = ($($name::State<'w>), +);
-
-                type Data = ($($name::Data), +);
-
-                fn init(world: &mut World, access: &mut ArchetypeAccess) -> Self::Data {
-                    ($($name::init(world, access),)*)
-                }
-
-                fn state<'w>(data: Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
-                    let ($($name,)*) = data;
-                    ($($name::state($name, world, archetype, current_frame, system_frame),)*)
-                }
-
-                fn filter<'w>(state: &Self::State<'w>, entity: Entity, row: RowIndex) -> bool {
-                    let ($($name,)*) = state;
-                    let mut filter = true;
-
-                    ($(
-                        filter = filter && $name::filter($name, entity, row),
-                    )*);
-
-                    filter
-                }
+            fn state<'w>(data: Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
+                let ($($name,)*) = data;
+                let ($($name,)*) = ($($name::state($name, world, archetype, current_frame, system_frame),)*);
+                 ($($name,)*)
             }
 
-            #[allow(non_snake_case)]
-            impl<$($name: BaseFilter),+> BaseFilter for Or<($($name),+)> {
-                type State<'w> = ($($name::State<'w>), +);
-
-                type Data = ($($name::Data), +);
-
-                fn init(world: &mut World, access: &mut ArchetypeAccess) -> Self::Data {
-                    ($($name::init(world, access),)*)
-                }
-
-                fn state<'w>(data: Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
-                    let ($($name,)*) = data;
-                    ($($name::state($name, world, archetype, current_frame, system_frame),)*)
-                }
-
-                fn filter<'w>(state: &Self::State<'w>, entity: Entity, row: RowIndex) -> bool {
-                    let ($($name,)*) = state;
-                    let mut filter = false;
-
-                    ($(
-                        filter = filter || $name::filter($name, entity, row),
-                    )*);
-
-                    filter
-                }
+            fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w> {
+                let ($($name,)*) = state;
+                let ($($name,)*) = ($($name::get($name, entity, row),)*);
+                ($($name,)*)
             }
+        }
 
-            unsafe impl<$($name: ReadQuery),+> ReadQuery for ($($name),+) {}
-
-            unsafe impl<$($name: ReadOnly),+> ReadOnly for ($($name),+) {}
-        )+
+        unsafe impl<$($name: ReadQuery),*> ReadQuery for ($($name),*) {}
     };
 }
 
-impl_base_query_for_tuples!((A, B));
-impl_base_query_for_tuples!((A, B, C));
-impl_base_query_for_tuples!((A, B, C, D));
-impl_base_query_for_tuples!((A, B, C, D, E));
-impl_base_query_for_tuples!((A, B, C, D, E, F));
-impl_base_query_for_tuples!((A, B, C, D, E, F, G));
-impl_base_query_for_tuples!((A, B, C, D, E, F, G, H));
-impl_base_query_for_tuples!((A, B, C, D, E, F, G, H, I));
-impl_base_query_for_tuples!((A, B, C, D, E, F, G, H, I, J));
-impl_base_query_for_tuples!((A, B, C, D, E, F, G, H, I, J, K));
-impl_base_query_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L));
-impl_base_query_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M));
-impl_base_query_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N));
-impl_base_query_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O));
-impl_base_query_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P));
-impl_base_query_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q));
+variadics::variable_impl!(impl_base_query_for_tuples, P, 2, 16);
+
+macro_rules! impl_base_filter_for_tuples {
+    ($($name:ident),*) => {
+    #[allow(non_snake_case)]
+    impl<$($name: BaseFilter),*> BaseFilter for ($($name),*)
+        {
+
+            type State<'w> = ($($name::State<'w>), *);
+            type Data = ($($name::Data), *);
+
+            fn init(world: &mut World, access: &mut ArchetypeAccess) -> Self::Data {
+                ($($name::init(world, access),)*)
+            }
+
+            fn state<'w>(data: Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
+                let ($($name,)*) = data;
+                ($($name::state($name, world, archetype, current_frame, system_frame),)*)
+            }
+
+            fn filter<'w>(state: &Self::State<'w>, entity: Entity, row: RowIndex) -> bool {
+                let ($($name,)*) = state;
+                let mut filter = true;
+
+                ($(
+                    filter = filter && $name::filter($name, entity, row),
+                )*);
+
+                filter
+            }
+        }
+
+        #[allow(non_snake_case)]
+        impl<$($name: BaseFilter),*> BaseFilter for Or<($($name),*)>
+        {
+
+            type State<'w> = ($($name::State<'w>), *);
+            type Data = ($($name::Data), *);
+
+            fn init(world: &mut World, access: &mut ArchetypeAccess) -> Self::Data {
+                ($($name::init(world, access),)*)
+            }
+
+            fn state<'w>(data: Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
+                let ($($name,)*) = data;
+                ($($name::state($name, world, archetype, current_frame, system_frame),)*)
+            }
+
+            fn filter<'w>(state: &Self::State<'w>, entity: Entity, row: RowIndex) -> bool {
+                let ($($name,)*) = state;
+                let mut filter = false;
+
+                ($(
+                    filter = filter || $name::filter($name, entity, row),
+                )*);
+
+                filter
+            }
+        }
+    };
+}
+
+variadics::variable_impl!(impl_base_filter_for_tuples, P, 2, 16);
 
 #[allow(unused_imports, dead_code)]
 mod tests {

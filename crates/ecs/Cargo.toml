@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 derive-ecs = { path = "../macros/derive-ecs" }
+variadics = { path = "../macros/variadics" }
 fixedbitset = { workspace = true }
 indexmap = { workspace = true }
 smol = { workspace = true }

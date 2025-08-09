@@ -13,7 +13,7 @@ impl RenderDevice {
         let desc = wgpu::DeviceDescriptor {
             required_features: wgpu::Features::ADDRESS_MODE_CLAMP_TO_BORDER
                 | wgpu::Features::ADDRESS_MODE_CLAMP_TO_ZERO
-                | wgpu::Features::POLYGON_MODE_LINE
+                | wgpu::Features::INDIRECT_FIRST_INSTANCE
                 | wgpu::Features::default(),
             ..Default::default()
         };
