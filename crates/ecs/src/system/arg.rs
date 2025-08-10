@@ -85,6 +85,28 @@ unsafe impl SystemArg for &World {
     }
 }
 
+unsafe impl SystemArg for &mut World {
+    type Item<'world, 'state> = &'world mut World;
+
+    type State = ();
+
+    fn init(_: &mut World, _: &mut WorldAccess) -> Self::State {
+        ()
+    }
+
+    unsafe fn get<'world, 'state>(
+        _state: &'state mut Self::State,
+        mut world: WorldCell<'world>,
+        _system: &'world SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        unsafe { world.get_mut() }
+    }
+
+    fn exclusive() -> bool {
+        true
+    }
+}
+
 unsafe impl ReadOnly for &World {}
 
 unsafe impl SystemArg for &Entities {
@@ -125,14 +147,15 @@ unsafe impl<R: Resource + Send> SystemArg for &R {
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         world: WorldCell<'world>,
-        _system: &'world SystemMeta,
+        system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         unsafe { world.get() }
             .resources()
             .get::<R>(*state)
             .expect(&format!(
-                "Resource of type {} not found",
+                "Resource of type {} not found for system: {:?}",
                 std::any::type_name::<R>(),
+                system.name,
             ))
     }
 }
@@ -157,15 +180,16 @@ unsafe impl<R: Resource + Send> SystemArg for &mut R {
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         mut world: WorldCell<'world>,
-        _system: &'world SystemMeta,
+        system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         let world = unsafe { world.get_mut() };
         world
             .resources
             .get_mut::<R>(*state, world.frame)
             .expect(&format!(
-                "Resource of type {} not found",
+                "Resource of type {} not found for system: {:?}",
                 std::any::type_name::<R>(),
+                system.name,
             ))
     }
 }
@@ -190,14 +214,15 @@ unsafe impl<R: Resource> SystemArg for NonSend<'_, R> {
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         world: WorldCell<'world>,
-        _system: &'world SystemMeta,
+        system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         let resource = unsafe { world.get() }
             .resources()
             .get::<R>(*state)
             .expect(&format!(
-                "NonSend resource of type {} not found",
+                "Resource of type {} not found for system: {:?}",
                 std::any::type_name::<R>(),
+                system.name,
             ));
 
         NonSend::new(resource)
@@ -226,15 +251,16 @@ unsafe impl<R: Resource> SystemArg for NonSendMut<'_, R> {
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         mut world: WorldCell<'world>,
-        _system: &'world SystemMeta,
+        system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         let world = unsafe { world.get_mut() };
         let resource = world
             .resources
             .get_mut::<R>(*state, world.frame)
             .expect(&format!(
-                "NonSendMut resource of type {} not found",
+                "NonSendMut resource of type {} not found for system {:?}",
                 std::any::type_name::<R>(),
+                system.name
             ));
 
         NonSendMut::new(resource)
@@ -261,15 +287,16 @@ unsafe impl<R: Resource + Send + Clone> SystemArg for Cloned<R> {
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         world: WorldCell<'world>,
-        _system: &'world SystemMeta,
+        system: &'world SystemMeta,
     ) -> Self::Item<'world, 'state> {
         let resource = unsafe { world.get() }
             .resources()
             .get::<R>(*state)
             .cloned()
             .expect(&format!(
-                "Cloned resource of type {} not found",
+                "Cloned resource of type {} not found for system {:?}",
                 std::any::type_name::<R>(),
+                system.name
             ));
 
         Cloned::new(resource)

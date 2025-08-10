@@ -33,34 +33,17 @@ impl<T: Plugin> PluginKit for T {
 
 #[macro_export]
 macro_rules! impl_plugin_kit_for_tuples {
-    ($(($($name:ident),*)),*)  => {
-        $(
-            #[allow(non_snake_case)]
-            impl<$($name: PluginKit),+> PluginKit for ($($name),+) {
-                fn get<Pc: PluginCollection>(self, plugins: &mut Pc) {
-                    let ($($name),+) = self;
-                    $(
-                        $name.get(plugins);
-                    )+
-                }
+    ($($name:ident),*) => {
+        #[allow(non_snake_case)]
+        impl<$($name: PluginKit),*> PluginKit for ($($name),*) {
+            fn get<Pc: PluginCollection>(self, plugins: &mut Pc) {
+                let ($($name),*) = self;
+                $(
+                    $name.get(plugins);
+                )*
             }
-        )+
+        }
     };
 }
 
-impl_plugin_kit_for_tuples!((A, B));
-impl_plugin_kit_for_tuples!((A, B, C));
-impl_plugin_kit_for_tuples!((A, B, C, D));
-impl_plugin_kit_for_tuples!((A, B, C, D, E));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P));
-impl_plugin_kit_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q));
+variadics::variable_impl!(impl_plugin_kit_for_tuples, P, 2, 16);

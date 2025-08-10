@@ -1,14 +1,17 @@
 use asset::{Asset, AssetId, embed_asset, io::EmbeddedFs, plugin::AssetAppExt};
 use ecs::{
-    app::sync::SyncComponentPlugin, system::{Always, Exists}, unlifetime::Read, Component, IntoSystemConfig, Phase, Plugin, Query, Resource
+    Component, IntoSystemConfig, Phase, Plugin, Query, Resource,
+    app::sync::SyncComponentPlugin,
+    system::{Always, Exists},
+    unlifetime::Read,
 };
-use math::{Vec3};
+use math::Vec3;
 use render::{
     AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, Color, Mesh,
     MeshSettings, PostRender, PreRender, Projection, Queue, RenderApp, RenderDevice,
     RenderResource, Shader, ShaderSettings, ShaderType,
     constants::UniformBatchSize,
-    draw::{BlendMode, Drawable, Material, ShaderModel, ShaderModelData, ShaderPhase, Unlit, View},
+    draw::{BlendMode, Drawable, Material, RenderPhase, ShaderModel, Unlit, View},
     plugins::RenderAppExt,
     uniform::{UniformBuffer, UniformBufferArray},
     wgpu::ShaderStages,
@@ -25,9 +28,13 @@ pub const UNLIT_TEX_SHADER: AssetId<Shader> =
 pub const LIT_COLOR_SHADER: AssetId<Shader> = AssetId::from_u128(0x87654321fedcba98);
 pub const CUBE: AssetId<Mesh> = AssetId::from_u128(0x123456789abcdef0);
 pub const PLANE: AssetId<Mesh> = AssetId::from_u128(0xfca61c1a76b14268b25058d36dbc6389);
+pub const SPHERE: AssetId<Mesh> = AssetId::from_u128(0xe51f72d138f747c6b22e2ac8a64b7b92u128);
+pub const SWORD: AssetId<Mesh> = AssetId::from_u128(0x6d3d79f5c6764b43993ae8de7ed0219bu128);
 pub const UNLIT_COLOR_MAT: AssetId<UnlitColor> =
     AssetId::from_u128(0xa0cc79971c2d4206874539cb5ac54fe2u128);
-pub const LIT_COLOR_MAT: AssetId<LitColor> = AssetId::from_u128(0x9a8b7c6d5e4f3a2b1c0d8e7f6a5b4c3d);
+pub const LIT_COLOR_WHITE: AssetId<LitColor> =
+    AssetId::from_u128(0x9a8b7c6d5e4f3a2b1c0d8e7f6a5b4c3d);
+pub const LIT_COLOR_RED: AssetId<LitColor> = AssetId::from_u128(0xcd9c7e475e84435db8316d2612b94e2d);
 pub struct ExamplePlugin;
 
 impl Plugin for ExamplePlugin {
@@ -70,23 +77,31 @@ impl Plugin for ExamplePlugin {
 
         embed_asset!(embedded, CUBE, "meshes/cube.obj", MeshSettings::default());
         embed_asset!(embedded, PLANE, "meshes/plane.obj", MeshSettings::default());
+        embed_asset!(embedded, SPHERE, "meshes/sphere.obj", MeshSettings::default());
+        embed_asset!(embedded, SWORD, "meshes/sword.obj", MeshSettings::default());
 
         app.add_plugins(SyncComponentPlugin::<Light, RenderApp>::new())
+            .add_drawable::<DrawMesh<UnlitColor>>()
             .add_drawable::<DrawMesh<LitColor>>()
             .add_source("embedded", embedded)
-            .load_asset::<Mesh>(CUBE)
+            // .load_asset::<Mesh>(CUBE)
             .load_asset::<Mesh>(PLANE)
-            .add_asset(UNLIT_COLOR_MAT, UnlitColor::from(Color::red()))
-            .add_asset(LIT_COLOR_MAT, LitColor::from(Color::white()))
-            .add_render_resource::<Lights>()
+            .load_asset::<Mesh>(SPHERE)
+            .load_asset::<Mesh>(SWORD)
+            .add_asset(UNLIT_COLOR_MAT, UnlitColor::from(Color::white()))
+            .add_asset(LIT_COLOR_WHITE, LitColor::from(Color::white()))
+            .add_asset(LIT_COLOR_RED, LitColor::from(Color::red()))
             .sub_app_mut(RenderApp)
             .add_sub_phase(Queue, QueueLights)
-            .add_systems(
-                PreRender,
-                ShaderModel3d::update.when::<Exists<ShaderModelData<ShaderModel3d>>>(),
-            )
+            .add_systems(PreRender, ShaderModel3d::update)
             .add_systems(QueueLights, Lights::queue)
             .add_systems(PostRender, Lights::clear);
+    }
+
+    fn build(&mut self, app: &mut ecs::AppBuilder) {
+        let app = app.sub_app_mut(RenderApp);
+        let lights = Lights::new(app.resource::<RenderDevice>());
+        app.add_resource(lights);
     }
 }
 
@@ -116,14 +131,8 @@ impl Default for View3d {
 impl View for View3d {
     type Transform = Transform;
 
-    type Item = ZDistance;
-
     fn projection(&self, width: f32, height: f32) -> math::Mat4 {
         self.projection.matrix(width, height)
-    }
-
-    fn far(&self) -> f32 {
-        self.projection.far()
     }
 }
 
@@ -163,6 +172,13 @@ impl<M: Material<View = View3d>> Drawable for DrawMesh<M> {
         ]
     }
 
+    fn primitive() -> render::wgpu::PrimitiveState {
+        render::wgpu::PrimitiveState {
+            cull_mode: Some(render::wgpu::Face::Back),
+            ..Default::default()
+        }
+    }
+
     fn shader() -> impl Into<AssetId<Shader>> {
         DRAW_MESH_SHADER
     }
@@ -170,7 +186,7 @@ impl<M: Material<View = View3d>> Drawable for DrawMesh<M> {
 
 pub struct Opaque3d;
 
-impl ShaderPhase for Opaque3d {
+impl RenderPhase for Opaque3d {
     type View = View3d;
 
     fn mode() -> BlendMode {
@@ -193,7 +209,7 @@ impl From<Color> for UnlitColor {
 impl Material for UnlitColor {
     type View = View3d;
 
-    type Model = Unlit<ShaderModel3d>;
+    type Model = Unlit;
 
     type Phase = Opaque3d;
 
@@ -226,18 +242,16 @@ impl Material for LitColor {
     }
 }
 
+#[derive(Resource)]
 pub struct ShaderModel3d {
     layout: BindGroupLayout,
     bind_group: BindGroup,
 }
 
 impl ShaderModel for ShaderModel3d {
-    type Base = Self;
-
-    type Arg = (Read<RenderDevice>, Option<Read<Lights>>);
-
-    fn create((device, lights): ecs::ArgItem<Self::Arg>) -> Result<Self, render::ExtractError<()>> {
-        let lights = lights.ok_or(render::ExtractError::Retry(()))?;
+    fn create(world: &ecs::World) -> Self {
+        let device = world.resource::<RenderDevice>();
+        let lights = world.resource::<Lights>();
 
         let layout = BindGroupLayoutBuilder::new()
             .with_uniform(0, ShaderStages::FRAGMENT, false, None, None)
@@ -249,24 +263,20 @@ impl ShaderModel for ShaderModel3d {
             .with_uniform(1, lights.count.as_ref(), 0, None)
             .build(device);
 
-        Ok(Self { layout, bind_group })
+        Self { layout, bind_group }
     }
 
     fn bind_group(&self) -> Option<&BindGroup> {
         Some(&self.bind_group)
     }
 
-    fn bind_group_layout(&self) -> Option<&BindGroupLayout> {
+    fn layout(&self) -> Option<&BindGroupLayout> {
         Some(&self.layout)
-    }
-
-    fn setup(phases: &mut render::draw::ShaderPhases<Self>) {
-        phases.add_phase::<Opaque3d>();
     }
 }
 
 impl ShaderModel3d {
-    pub fn update(model: &mut ShaderModelData<Self>, lights: &mut Lights, device: &RenderDevice) {
+    pub fn update(model: &mut ShaderModel3d, lights: &mut Lights, device: &RenderDevice) {
         if let Some(_) = lights.update(device) {
             model.bind_group = BindGroupBuilder::new(&model.layout)
                 .with_uniform(0, lights.buffer.as_ref(), 0, Some(lights.max_size))
@@ -328,6 +338,25 @@ pub struct Lights {
 impl Lights {
     pub const MAX_LIGHTS: u32 = 2048;
 
+    pub fn new(device: &RenderDevice) -> Self {
+        let max_lights = UniformBatchSize::<LightData>::size(device, Self::MAX_LIGHTS) as u64;
+        let size = NonZero::new(max_lights * LightData::min_size().get());
+        let count = UniformBuffer::new(device, 0, None, None);
+        let buffer = UniformBufferArray::with_size(
+            device,
+            size,
+            LightData::min_size().get() as u32,
+            None,
+            None,
+        );
+
+        Self {
+            buffer,
+            count,
+            max_size: size.unwrap(),
+        }
+    }
+
     pub fn count(&self) -> &UniformBuffer<u32> {
         &self.count
     }
@@ -367,36 +396,8 @@ impl Lights {
     }
 }
 
-impl RenderResource for Lights {
-    type Arg = Read<RenderDevice>;
-
-    type Condition = Always<true>;
-
-    fn extract(device: ecs::ArgItem<Self::Arg>) -> Result<Self, render::ExtractError<()>> {
-        let max_lights = UniformBatchSize::<LightData>::size(device, Self::MAX_LIGHTS) as u64;
-        let size = NonZero::new(max_lights * LightData::min_size().get());
-        let count = UniformBuffer::new(device, 0, None, None);
-        let buffer = UniformBufferArray::with_size(
-            device,
-            size,
-            LightData::min_size().get() as u32,
-            None,
-            None,
-        );
-
-        Ok(Self {
-            buffer,
-            count,
-            max_size: size.unwrap(),
-        })
-    }
-}
-
-// const LIGHT_MAT: AssetId<LightMaterial> = AssetId::from_u128(0xcd9c7e475e84435db8316d2612b94e2d);
-// const QUAD_ID: AssetId<Mesh> = AssetId::from_u128(0xe51f72d138f747c6b22e2ac8a64b7b92u128);
 // const CUBE_ID: AssetId<Mesh> = AssetId::from_u128(0x9d3919f428f8429a80e195849b3b6c21u128);
 // const PLANE_ID: AssetId<Mesh> = AssetId::from_u128(0x2b3c4d5e6f708192a0b1c2d3e4f50607u128);
-// const SWORD_ID: AssetId<Mesh> = AssetId::from_u128(0x6d3d79f5c6764b43993ae8de7ed0219bu128);
 // const GENGAR_ID: AssetId<Texture> = AssetId::from_u128(0x43c5893d2b2f4a3bb2bb33eb1b362ff6u128);
 // // const UNLIT_TEX_ID: AssetId<UnlitTexture> =
 // //     AssetId::from_u128(0x1a2b3c4d5e6f708192a0b1c2d3e4f506u128);

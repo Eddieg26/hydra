@@ -279,7 +279,7 @@ impl CameraPhase {
         let depth_stencil_attachment = wgpu::RenderPassDepthStencilAttachment {
             view: &attachments.depth,
             depth_ops: Some(wgpu::Operations {
-                load: wgpu::LoadOp::Clear(0f32),
+                load: wgpu::LoadOp::Clear(1.0),
                 store: wgpu::StoreOp::Store,
             }),
             stencil_ops: None,

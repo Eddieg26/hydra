@@ -27,11 +27,7 @@ struct Object {
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
-#ifdef STORAGE_BUFFER_ENABLED
 @group(1) @binding(0) var<storage, read> objects: array<Object>;
-#else
-@group(1) @binding(0) var<uniform> objects: array<Object, BATCH_SIZE>; // Adjust size as needed
-#endif
 
 @vertex
 fn main(input: VertexInput) -> VertexOutput {

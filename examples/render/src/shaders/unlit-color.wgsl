@@ -1,5 +1,6 @@
 struct FragmentInput {
     @builtin(position) position: vec4<f32>,
+    @location(1) normal: vec3<f32>,
 }
 
 @group(2) @binding(0) var<uniform> color: vec4<f32>;

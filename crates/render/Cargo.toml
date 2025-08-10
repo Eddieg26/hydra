@@ -10,6 +10,7 @@ math = { path = "../math" }
 window = { path = "../window" }
 transform = { path = "../transform" }
 derive-render = { path = "../macros/derive-render" }
+variadics = { path = "../macros/variadics" }
 bytemuck = { workspace = true, features = ["derive"] }
 bitflags = { workspace = true }
 smol = { workspace = true }

@@ -368,11 +368,13 @@ impl AppConfig {
         self
     }
 
+    /// Run the `phase` before the `target` phase.
     pub fn run_before(&mut self, phase: impl Phase, target: impl Phase) -> &mut Self {
         self.schedule.run_before(phase, target);
         self
     }
 
+    /// Run the `phase` after the `target` phase.
     pub fn run_after(&mut self, phase: impl Phase, target: impl Phase) -> &mut Self {
         self.schedule.run_after(phase, target);
         self

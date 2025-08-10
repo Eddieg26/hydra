@@ -2476,6 +2476,7 @@ dependencies = [
  "tobj",
  "transform",
  "uuid",
+ "variadics",
  "waker-fn",
  "wgpu",
  "window",

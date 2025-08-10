@@ -195,6 +195,7 @@ impl Schedule {
         self.phases.nodes_mut()[sub_index].parent = Some(main_index);
     }
 
+    /// Run the `phase` before the `target` phase.
     pub fn run_before(&mut self, phase: impl Phase, target: impl Phase) {
         let index = self.add_phase(phase);
         let target_index = self.add_phase(target);
@@ -211,6 +212,7 @@ impl Schedule {
         }
     }
 
+    /// Run the `phase` after the `target` phase.
     pub fn run_after(&mut self, phase: impl Phase, target: impl Phase) {
         self.run_before(target, phase);
     }

@@ -558,7 +558,7 @@ impl Mesh {
     }
 
     pub fn calculate_normals(positions: &[math::Vec3], indices: &[u32]) -> Vec<math::Vec3> {
-        let mut normals = vec![math::Vec3::ZERO; positions.len()];
+        let mut normals = vec![math::Vec3::ONE; positions.len()];
 
         for chunk in indices.chunks(3) {
             if chunk.len() < 3 {
@@ -589,56 +589,6 @@ impl Mesh {
         }
 
         normals
-    }
-
-    pub fn calculate_tangents(
-        positions: &[math::Vec3],
-        tex_coords: &[math::Vec2],
-        indices: &[u32],
-    ) -> Vec<math::Vec4> {
-        let mut tangents = vec![math::Vec4::ZERO; positions.len()];
-
-        for chunk in indices.chunks(3) {
-            if chunk.len() < 3 {
-                continue;
-            }
-
-            let a = positions[chunk[0] as usize];
-            let b = positions[chunk[1] as usize];
-            let c = positions[chunk[2] as usize];
-
-            let ta = tex_coords[chunk[0] as usize];
-            let tb = tex_coords[chunk[1] as usize];
-            let tc = tex_coords[chunk[2] as usize];
-
-            let edge1 = b - a;
-            let edge2 = c - a;
-
-            let delta_uv1 = tb - ta;
-            let delta_uv2 = tc - ta;
-
-            let f = 1.0 / (delta_uv1.x * delta_uv2.y - delta_uv1.y * delta_uv2.x);
-
-            if f.is_finite() {
-                let tangent = math::Vec4::new(
-                    f * (delta_uv2.y * edge1.x - delta_uv1.y * edge2.x),
-                    f * (delta_uv2.y * edge1.y - delta_uv1.y * edge2.y),
-                    f * (delta_uv2.y * edge1.z - delta_uv1.y * edge2.z),
-                    0.0,
-                )
-                .normalize();
-
-                tangents[chunk[0] as usize] += tangent;
-                tangents[chunk[1] as usize] += tangent;
-                tangents[chunk[2] as usize] += tangent;
-            }
-        }
-
-        for tangent in &mut tangents {
-            *tangent = tangent.normalize();
-        }
-
-        tangents
     }
 
     pub fn build_indices(positions: &[math::Vec3]) -> Vec<u32> {
@@ -1058,26 +1008,9 @@ impl AssetProcessor for Mesh {
         }
 
         if !asset.has_attribute(MeshAttributeType::Tangent) {
-            let tex_coords = asset
-                .attribute(MeshAttributeType::TexCoord0)
-                .or(asset.attribute(MeshAttributeType::TexCoord1))
-                .or(attributes
-                    .iter()
-                    .find(|a| a.ty == MeshAttributeType::TexCoord0))
-                .and_then(|a| match &a.values {
-                    MeshAttributeValues::Vec2(v) => Some(v.as_slice()),
-                    _ => None,
-                })
-                .expect("Tangent calculation requires tex coords");
-
-            let indices = bytemuck::cast_slice(indices.data());
             let tangents = MeshAttribute {
                 ty: MeshAttributeType::Tangent,
-                values: MeshAttributeValues::Vec4(Mesh::calculate_tangents(
-                    &positions,
-                    &tex_coords,
-                    indices,
-                )),
+                values: MeshAttributeValues::Vec4(vec![math::Vec4::ZERO; positions.len()]),
             };
 
             attributes.push(tangents);

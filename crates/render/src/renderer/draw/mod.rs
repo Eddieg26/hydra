@@ -1,25 +1,27 @@
 use crate::{
     ActiveCamera, ArrayBuffer, AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout,
-    BindGroupLayoutBuilder, Buffer, CameraAttachments, Mesh, MeshFilter, MeshFormat, MeshKey,
-    PipelineCache, PipelineId, RenderAsset, RenderAssets, RenderCommandEncoder, RenderDevice,
-    RenderMesh, RenderState, Shader, SubMesh, allocator::MeshAllocator,
-    uniform::UniformBufferArray,
+    BindGroupLayoutBuilder, Buffer, CameraAttachments, FragmentState, Mesh, MeshFilter, MeshFormat,
+    MeshKey, MeshLayout, PipelineCache, PipelineId, RenderAsset, RenderAssets,
+    RenderCommandEncoder, RenderDevice, RenderMesh, RenderPipelineDesc, RenderState, RenderSurface,
+    Shader, SubMesh, VertexState, allocator::MeshAllocator, uniform::UniformBufferArray,
 };
 use asset::{Asset, AssetId, ErasedId};
 use ecs::{
-    ArgItem, Component, Entity, IndexMap, Query, ReadOnly, Resource, SystemArg, SystemMeta, World,
-    WorldAccess,
-    query::{Single, With},
+    AddComponent, ArgItem, Commands, Component, Entity, IndexMap, Phase, Query, ReadOnly, Resource,
+    SystemArg, SystemMeta, World, WorldAccess,
+    commands::AddResource,
+    query::{Single, With, Without},
     unlifetime::Read,
     world::WorldCell,
 };
 use encase::ShaderType;
-use math::Mat4;
-use std::{any::TypeId, collections::HashMap, marker::PhantomData, ops::Range};
-use transform::GlobalTransform;
+use math::{Mat4, Size};
+use std::{any::TypeId, marker::PhantomData, ops::Range};
+use transform::{GlobalTransform, LocalTransform};
 use wgpu::{
-    BufferUsages, DynamicOffset, Operations, PrimitiveState, RenderPassColorAttachment,
-    RenderPassDepthStencilAttachment, RenderPassDescriptor, ShaderStages, VertexFormat,
+    BufferUsages, ColorTargetState, DynamicOffset, Operations, PrimitiveState,
+    RenderPassColorAttachment, RenderPassDepthStencilAttachment, RenderPassDescriptor,
+    ShaderStages, VertexFormat, VertexStepMode,
     wgt::{DrawIndexedIndirectArgs, DrawIndirectArgs},
 };
 
@@ -31,17 +33,19 @@ pub struct RenderView {
 }
 
 #[derive(Debug, Clone, Copy, Component)]
-pub struct ViewInstance {
+pub struct ViewInstance<V: View> {
     pub offset: DynamicOffset,
+    _marker: PhantomData<V>,
 }
 
-pub trait View: Component {
+pub trait View: Clone + Component {
+    type Transform: LocalTransform;
+
     fn projection(&self, width: f32, height: f32) -> Mat4;
 }
 
 #[derive(Resource)]
 pub struct ViewBuffer<V: View> {
-    instances: HashMap<Entity, ViewInstance>,
     buffer: UniformBufferArray<RenderView>,
     layout: BindGroupLayout,
     bind_group: BindGroup,
@@ -60,7 +64,6 @@ impl<V: View> ViewBuffer<V> {
             .build(device);
 
         Self {
-            instances: HashMap::new(),
             buffer,
             layout,
             bind_group,
@@ -80,17 +83,54 @@ impl<V: View> ViewBuffer<V> {
         &self.bind_group
     }
 
-    pub fn push(&mut self, entity: Entity, view: &RenderView) -> ViewInstance {
+    pub fn push(&mut self, view: &RenderView) -> DynamicOffset {
         let offset = self.buffer.push(view);
-        self.instances.insert(entity, ViewInstance { offset });
-        ViewInstance { offset }
+        offset
     }
 
-    pub fn update(&mut self, device: &RenderDevice) {
-        if self.buffer.update(device).is_some() {
-            self.bind_group = BindGroupBuilder::new(&self.layout)
-                .with_uniform(0, self.buffer.as_ref(), 0, None)
+    pub fn update(views: &mut Self, device: &RenderDevice) {
+        if views.buffer.update(device).is_some() {
+            views.bind_group = BindGroupBuilder::new(&views.layout)
+                .with_uniform(0, views.buffer.as_ref(), 0, None)
                 .build(device);
+        }
+    }
+
+    pub fn clear(views: &mut Self) {
+        views.buffer.clear();
+    }
+
+    pub(crate) fn queue(
+        surface: &RenderSurface,
+        views: Query<(&GlobalTransform, &V, &mut ViewInstance<V>)>,
+        new_views: Query<(Entity, &GlobalTransform, &V), Without<ViewInstance<V>>>,
+        buffer: &mut ViewBuffer<V>,
+        mut commands: Commands,
+    ) {
+        let Size { width, height } = surface.size();
+        for (transform, view, instance) in views {
+            let view = RenderView {
+                world: transform.matrix(),
+                view: transform.view_matrix(),
+                projection: view.projection(width as f32, height as f32),
+            };
+
+            instance.offset = buffer.push(&view)
+        }
+
+        for (entity, transform, view) in new_views.iter() {
+            let view = RenderView {
+                world: transform.matrix(),
+                view: transform.view_matrix(),
+                projection: view.projection(width as f32, height as f32),
+            };
+
+            let instance = ViewInstance::<V> {
+                offset: buffer.push(&view),
+                _marker: PhantomData,
+            };
+
+            commands.add(AddComponent::new(entity, instance));
         }
     }
 }
@@ -163,28 +203,38 @@ impl ObjectBuffer {
         instances
     }
 
-    pub fn update(&mut self, device: &RenderDevice) {
-        let data = bytemuck::cast_slice(&self.objects);
+    pub fn update(objects: &mut Self, device: &RenderDevice) {
+        let data = bytemuck::cast_slice(&objects.objects);
 
-        if self.buffer.size() < data.len() as u64 {
-            self.buffer.resize_with_data(device, data);
-            self.bind_group = BindGroupBuilder::new(&self.layout)
-                .with_storage(0, &self.buffer, 0, None)
+        if objects.buffer.size() < data.len() as u64 {
+            let len = (device.limits().max_storage_buffer_binding_size as usize).min(data.len());
+            objects.buffer.resize_with_data(device, &data[..len]);
+            objects.bind_group = BindGroupBuilder::new(&objects.layout)
+                .with_storage(0, &objects.buffer, 0, None)
                 .build(device);
         } else {
-            self.buffer.update(device, data);
+            objects.buffer.update(device, data);
         }
     }
 
-    pub fn clear(&mut self) {
-        self.objects.clear();
+    pub fn clear(objects: &mut Self) {
+        objects.objects.clear();
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlendMode {
     Opaque,
     Transparent,
+}
+
+impl Into<wgpu::BlendState> for BlendMode {
+    fn into(self) -> wgpu::BlendState {
+        match self {
+            BlendMode::Opaque => wgpu::BlendState::REPLACE,
+            BlendMode::Transparent => wgpu::BlendState::ALPHA_BLENDING,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -194,13 +244,15 @@ pub enum DepthWrite {
     Off,
 }
 
-pub trait RenderPhase: 'static {
+pub trait RenderPhase: Send + 'static {
     type View: View;
 
     fn mode() -> BlendMode;
 }
 
 pub trait ShaderModel: Resource + Send + 'static {
+    fn create(world: &World) -> Self;
+
     fn layout(&self) -> Option<&BindGroupLayout> {
         None
     }
@@ -213,8 +265,16 @@ pub trait ShaderModel: Resource + Send + 'static {
 #[derive(Resource)]
 pub struct Unlit;
 
+impl ShaderModel for Unlit {
+    fn create(_: &World) -> Self {
+        Unlit
+    }
+}
+
 pub trait Material: Asset + AsBinding + Clone {
-    type Phase: RenderPhase;
+    type View: View;
+
+    type Phase: RenderPhase<View = Self::View>;
 
     type Model: ShaderModel;
 
@@ -227,6 +287,12 @@ pub trait Material: Asset + AsBinding + Clone {
 
 #[derive(Resource)]
 pub struct MaterialLayout<M: Material>(BindGroupLayout, PhantomData<M>);
+impl<M: Material> MaterialLayout<M> {
+    pub fn layout(&self) -> &BindGroupLayout {
+        &self.0
+    }
+}
+
 impl<M: Material> std::ops::Deref for MaterialLayout<M> {
     type Target = BindGroupLayout;
 
@@ -268,13 +334,10 @@ impl<M: Material> RenderAsset for MaterialInstance<M> {
     }
 }
 
-pub trait Drawable: Component
-where
-    <Self::Material as Material>::Phase: RenderPhase<View = Self::View>,
-{
+pub trait Drawable: Clone + Component {
     type View: View;
 
-    type Material: Material;
+    type Material: Material<View = Self::View>;
 
     fn material(&self) -> AssetId<Self::Material>;
 
@@ -287,6 +350,9 @@ where
     fn shader() -> impl Into<AssetId<Shader>>;
 }
 
+pub type DrawPhase<D> = <<D as Drawable>::Material as Material>::Phase;
+pub type DrawModel<D> = <<D as Drawable>::Material as Material>::Model;
+
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 pub enum DrawError {
     #[error("Skipped draw call")]
@@ -298,7 +364,7 @@ pub trait DrawCommand: 'static {
 
     fn execute(
         state: &mut RenderState,
-        view: &ViewInstance,
+        view: DynamicOffset,
         call: &DrawCall,
         arg: ArgItem<Self::Arg>,
     ) -> Result<(), DrawError>;
@@ -312,7 +378,7 @@ impl DrawCommand for SetPipeline {
 
     fn execute(
         state: &mut RenderState,
-        _: &ViewInstance,
+        _: DynamicOffset,
         call: &DrawCall,
         pipelines: ArgItem<Self::Arg>,
     ) -> Result<(), DrawError> {
@@ -329,11 +395,11 @@ impl<V: View, const GROUP: u32> DrawCommand for SetView<V, GROUP> {
 
     fn execute(
         state: &mut RenderState,
-        view: &ViewInstance,
+        view: DynamicOffset,
         _: &DrawCall,
         views: ArgItem<Self::Arg>,
     ) -> Result<(), DrawError> {
-        Ok(state.set_bind_group(GROUP, views.bind_group(), &[view.offset]))
+        Ok(state.set_bind_group(GROUP, views.bind_group(), &[view]))
     }
 }
 
@@ -343,7 +409,7 @@ impl<const GROUP: u32> DrawCommand for SetObject<GROUP> {
 
     fn execute(
         state: &mut RenderState,
-        _: &ViewInstance,
+        _: DynamicOffset,
         _: &DrawCall,
         objects: ArgItem<Self::Arg>,
     ) -> Result<(), DrawError> {
@@ -357,7 +423,7 @@ impl<M: Material, const GROUP: u32> DrawCommand for SetMaterial<M, GROUP> {
 
     fn execute(
         state: &mut RenderState,
-        _: &ViewInstance,
+        _: DynamicOffset,
         call: &DrawCall,
         materials: ArgItem<Self::Arg>,
     ) -> Result<(), DrawError> {
@@ -375,7 +441,7 @@ impl<M: ShaderModel, const GROUP: u32> DrawCommand for SetShaderModel<M, GROUP> 
 
     fn execute(
         state: &mut RenderState,
-        _: &ViewInstance,
+        _: DynamicOffset,
         _: &DrawCall,
         model: ArgItem<Self::Arg>,
     ) -> Result<(), DrawError> {
@@ -393,7 +459,7 @@ impl DrawCommand for ExecuteDraw {
 
     fn execute(
         state: &mut RenderState,
-        _: &ViewInstance,
+        _: DynamicOffset,
         call: &DrawCall,
         (meshes, args): ArgItem<Self::Arg>,
     ) -> Result<(), DrawError> {
@@ -420,14 +486,14 @@ pub type Draw<D> = (
     SetView<<D as Drawable>::View, 0>,
     SetObject<1>,
     SetMaterial<<D as Drawable>::Material, 2>,
-    SetShaderModel<<<D as Drawable>::Material as Material>::Model, 3>,
+    SetShaderModel<DrawModel<D>, 3>,
     ExecuteDraw,
 );
 
 pub type DrawFunction =
-    Box<dyn FnMut(&mut RenderState, &ViewInstance, &DrawCall, &SystemMeta, WorldCell) + Send>;
+    Box<dyn FnMut(&mut RenderState, DynamicOffset, &DrawCall, &SystemMeta, WorldCell) + Send>;
 
-#[derive(Resource)]
+#[derive(Default, Resource)]
 pub struct DrawCommands {
     functions: IndexMap<TypeId, DrawFunction>,
     access: WorldAccess,
@@ -442,7 +508,7 @@ impl DrawCommands {
 
         let mut state = <R::Arg as SystemArg>::init(world, &mut self.access);
         let f = move |render: &mut RenderState,
-                      view: &ViewInstance,
+                      view: DynamicOffset,
                       call: &DrawCall,
                       system: &SystemMeta,
                       world: WorldCell| {
@@ -474,7 +540,7 @@ impl<'world> DrawFunctions<'world> {
     pub fn draw(
         &mut self,
         state: &mut RenderState,
-        view: &ViewInstance,
+        view: DynamicOffset,
         call: &DrawCall,
         meta: &SystemMeta,
     ) {
@@ -529,11 +595,12 @@ unsafe impl<D: Drawable> SystemArg for DrawId<D> {
 
     type State = Self;
 
-    fn init(world: &mut World, access: &mut WorldAccess) -> Self::State {
-        let commands = world.resource_mut::<DrawCommands>();
-        // commands.add(Draw<D>);
+    fn init(world: &mut World, _: &mut WorldAccess) -> Self::State {
+        let mut commands = world.remove_resource::<DrawCommands>().unwrap_or_default();
+        let id = commands.add::<Draw<D>>(world);
+        world.add_resource(commands);
 
-        todo!()
+        DrawId::<D>(DrawFunctionId(id), PhantomData)
     }
 
     unsafe fn get<'world, 'state>(
@@ -545,10 +612,85 @@ unsafe impl<D: Drawable> SystemArg for DrawId<D> {
     }
 }
 
-pub struct DrawPipline<D: Drawable> {
+#[derive(Resource)]
+pub struct DrawPipeline<D: Drawable> {
     pub id: PipelineId,
     pub key: MeshKey,
     _marker: PhantomData<D>,
+}
+
+impl<D: Drawable> DrawPipeline<D> {
+    pub fn queue(
+        surface: &RenderSurface,
+        views: &ViewBuffer<D::View>,
+        objects: &ObjectBuffer,
+        material: &MaterialLayout<D::Material>,
+        model: &DrawModel<D>,
+        pipelines: &mut PipelineCache,
+        mut commands: Commands,
+    ) {
+        let vertex_shader: AssetId<Shader> = D::shader().into();
+        let fragment_shader: AssetId<Shader> = D::Material::shader().into();
+
+        let buffers = vec![MeshLayout::into_vertex_buffer_layout(
+            0,
+            D::vertex(),
+            VertexStepMode::Vertex,
+        )];
+
+        let mut layout = vec![
+            views.layout().clone(),
+            objects.layout().clone(),
+            material.layout().clone(),
+        ];
+
+        if let Some(model) = model.layout().cloned() {
+            layout.push(model);
+        }
+
+        let id = pipelines.queue_render_pipeline(RenderPipelineDesc {
+            label: None,
+            layout,
+            vertex: VertexState {
+                shader: *vertex_shader.as_ref(),
+                entry: "main".into(),
+                buffers,
+            },
+            fragment: Some(FragmentState {
+                shader: *fragment_shader.as_ref(),
+                entry: "main".into(),
+                targets: vec![Some(ColorTargetState {
+                    format: surface.format(),
+                    blend: Some(<D::Material as Material>::Phase::mode().into()),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: D::primitive(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: surface.depth_format(),
+                depth_write_enabled: match <D::Material as Material>::depth_write() {
+                    DepthWrite::Auto => {
+                        <D::Material as Material>::Phase::mode() == BlendMode::Opaque
+                    }
+                    DepthWrite::On => true,
+                    DepthWrite::Off => false,
+                },
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            push_constants: vec![],
+        });
+
+        let pipeline = Self {
+            id,
+            key: MeshKey::from(D::vertex()),
+            _marker: Default::default(),
+        };
+
+        commands.add(AddResource::from(pipeline));
+    }
 }
 
 #[derive(Resource)]
@@ -556,6 +698,39 @@ pub struct DrawArgs {
     pub indexed: ArrayBuffer<DrawIndexedIndirectArgs>,
 
     pub non_indexed: ArrayBuffer<DrawIndirectArgs>,
+}
+
+impl DrawArgs {
+    pub fn new(device: &RenderDevice) -> Self {
+        let indexed = ArrayBuffer::new(
+            device,
+            1,
+            BufferUsages::STORAGE | BufferUsages::INDIRECT | BufferUsages::COPY_DST,
+            Some("Indexed Draw Args".into()),
+        );
+
+        let non_indexed = ArrayBuffer::new(
+            device,
+            1,
+            BufferUsages::STORAGE | BufferUsages::INDIRECT | BufferUsages::COPY_DST,
+            Some("Non-Indexed Draw Args".into()),
+        );
+
+        Self {
+            indexed,
+            non_indexed,
+        }
+    }
+
+    pub fn update(args: &mut Self, device: &RenderDevice) {
+        args.indexed.update(device);
+        args.non_indexed.update(device);
+    }
+
+    pub fn clear(args: &mut Self) {
+        args.indexed.clear();
+        args.non_indexed.clear();
+    }
 }
 
 pub struct DrawCall {
@@ -567,13 +742,18 @@ pub struct DrawCall {
     function: DrawFunctionId,
 }
 
+#[derive(Resource)]
 pub struct DrawCalls<P: RenderPhase>(Vec<DrawCall>, PhantomData<P>);
 
 impl<P: RenderPhase> DrawCalls<P> {
-    fn queue<D>(
+    pub fn new() -> Self {
+        Self(Vec::new(), PhantomData)
+    }
+
+    pub fn queue<D>(
         draws: Query<(&D, &MeshFilter, &GlobalTransform)>,
         draw: DrawId<D>,
-        pipeline: &DrawPipline<D>,
+        pipeline: &DrawPipeline<D>,
         meshes: &MeshAllocator,
         render_meshes: &RenderAssets<RenderMesh>,
         sub_meshes: &RenderAssets<SubMesh>,
@@ -670,8 +850,11 @@ impl<P: RenderPhase> DrawCalls<P> {
         }
     }
 
-    fn draw(
-        camera: Single<(&ViewInstance, &CameraAttachments), (With<P::View>, With<ActiveCamera>)>,
+    pub fn draw(
+        camera: Single<
+            (&ViewInstance<P::View>, &CameraAttachments),
+            (With<P::View>, With<ActiveCamera>),
+        >,
         calls: &DrawCalls<P>,
         meta: &SystemMeta,
         mut functions: DrawFunctions,
@@ -683,16 +866,18 @@ impl<P: RenderPhase> DrawCalls<P> {
             return;
         };
 
+        let color_attachments = vec![Some(RenderPassColorAttachment {
+            view: color,
+            resolve_target: None,
+            ops: Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            },
+        })];
+
         let pass = encoder.begin_render_pass(&RenderPassDescriptor {
             label: Some(ecs::ext::short_type_name::<P>()),
-            color_attachments: &[Some(RenderPassColorAttachment {
-                view: color,
-                resolve_target: None,
-                ops: Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
+            color_attachments: &color_attachments,
             depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
                 view: &attachments.depth,
                 depth_ops: Some(Operations {
@@ -708,7 +893,38 @@ impl<P: RenderPhase> DrawCalls<P> {
         let mut state = RenderState::new(pass);
 
         for call in &calls.0 {
-            functions.draw(&mut state, view, call, meta);
+            functions.draw(&mut state, view.offset, call, meta);
         }
     }
+
+    pub fn clear(calls: &mut DrawCalls<P>) {
+        calls.0.clear();
+    }
 }
+
+#[derive(Phase)]
+pub struct OpaquePhase;
+
+#[derive(Phase)]
+pub struct TransparentPhase;
+
+macro_rules! impl_draw_command {
+    ($($name:ident), *) => {
+        #[allow(non_snake_case)]
+        impl<$($name: DrawCommand), *> DrawCommand for ($($name), *) {
+            type Arg = ($($name::Arg,)*);
+
+            fn execute(
+                state: &mut RenderState,
+                view: DynamicOffset,
+                call: &DrawCall,
+                ($($name,)*): ArgItem<Self::Arg>,
+            ) -> Result<(), DrawError> {
+                ($($name::execute(state, view, call, $name)?,)*);
+                Ok(())
+            }
+        }
+    };
+}
+
+variadics::variable_impl!(impl_draw_command, P, 2, 16);
