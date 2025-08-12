@@ -1,5 +1,3 @@
-#import embedded://shaders/common.wgsl
-
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -28,12 +26,14 @@ struct Object {
 
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(1) @binding(0) var<storage, read> objects: array<Object>;
+@group(1) @binding(1) var<storage, read> visible_list: array<u32>;
 
 @vertex
 fn main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
 
-    let object: mat4x4<f32> = objects[input.instance_id].model;
+    let index = visible_list[input.instance_id];
+    let object: mat4x4<f32> = objects[index].model;
     
     // Calculate world position (model space -> world space)
     let world_position = object * vec4<f32>(input.position, 1.0);

@@ -1,5 +1,5 @@
 use crate::{
-    ActiveCamera, ArrayBuffer, AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout,
+    Aabb, ActiveCamera, ArrayBuffer, AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout,
     BindGroupLayoutBuilder, Buffer, CameraAttachments, FragmentState, Mesh, MeshFilter, MeshFormat,
     MeshKey, MeshLayout, PipelineCache, PipelineId, RenderAsset, RenderAssets,
     RenderCommandEncoder, RenderDevice, RenderMesh, RenderPipelineDesc, RenderState, RenderSurface,
@@ -141,6 +141,7 @@ pub type ObjectTransform = Mat4;
 #[derive(Resource)]
 pub struct ObjectBuffer {
     objects: Vec<ObjectTransform>,
+    visible: VisibleBuffer,
     buffer: Buffer,
     layout: BindGroupLayout,
     bind_group: BindGroup,
@@ -155,16 +156,35 @@ impl ObjectBuffer {
             None,
         );
 
+        let visibility = VisibleBuffer::new(device);
+
         let layout = BindGroupLayoutBuilder::new()
-            .with_storage(0, ShaderStages::VERTEX, false, true, None, None)
+            .with_storage(
+                0,
+                ShaderStages::VERTEX | ShaderStages::COMPUTE,
+                false,
+                true,
+                None,
+                None,
+            )
+            .with_storage(
+                1,
+                ShaderStages::VERTEX | ShaderStages::COMPUTE,
+                false,
+                true,
+                None,
+                None,
+            )
             .build(device);
 
         let bind_group = BindGroupBuilder::new(&layout)
             .with_storage(0, &buffer, 0, None)
+            .with_storage(1, &visibility.indices, 0, None)
             .build(device);
 
         Self {
             objects: Vec::new(),
+            visible: visibility,
             buffer,
             layout,
             bind_group,
@@ -215,10 +235,44 @@ impl ObjectBuffer {
         } else {
             objects.buffer.update(device, data);
         }
+
+        let size_required = (objects.objects.len() * std::mem::size_of::<u32>()) as u64;
+        if objects.visible.indices.size() < size_required {
+            objects.visible.indices.resize(device, size_required);
+        }
+
+        objects
+            .visible
+            .count
+            .update(device, bytemuck::bytes_of(&0u32));
     }
 
     pub fn clear(objects: &mut Self) {
         objects.objects.clear();
+    }
+}
+
+pub struct VisibleBuffer {
+    pub indices: Buffer,
+    pub count: Buffer,
+}
+
+impl VisibleBuffer {
+    pub fn new(device: &RenderDevice) -> Self {
+        let indices = Buffer::with_data(
+            device,
+            bytemuck::bytes_of(&0u32),
+            BufferUsages::STORAGE,
+            None,
+        );
+        let count = Buffer::with_data(
+            device,
+            bytemuck::bytes_of(&0u32),
+            BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            None,
+        );
+
+        Self { indices, count }
     }
 }
 
@@ -693,6 +747,15 @@ impl<D: Drawable> DrawPipeline<D> {
     }
 }
 
+#[derive(ShaderType)]
+pub struct BatchInfo {
+    bounds: Aabb,
+    index: u32,
+    offset: u32,
+    count: u32,
+    indexed: u32,
+}
+
 #[derive(Resource)]
 pub struct DrawArgs {
     pub indexed: ArrayBuffer<DrawIndexedIndirectArgs>,
@@ -730,6 +793,57 @@ impl DrawArgs {
     pub fn clear(args: &mut Self) {
         args.indexed.clear();
         args.non_indexed.clear();
+    }
+}
+
+#[derive(Resource)]
+pub struct GpuCulling {
+    batches: UniformBufferArray<BatchInfo>,
+    offsets: Vec<u32>,
+    pipeline: PipelineId,
+}
+
+impl GpuCulling {
+    const SHADER: AssetId<Shader> = AssetId::from_u128(0);
+
+    pub fn new(device: &RenderDevice, pipelines: &mut PipelineCache) -> Self {
+        let batches = UniformBufferArray::new(
+            device,
+            Some(BufferUsages::UNIFORM | BufferUsages::COPY_DST),
+            None,
+        );
+
+        let frustum_layout = BindGroupLayoutBuilder::new()
+            .with_uniform(0, ShaderStages::COMPUTE, true, None, None)
+            .build(device);
+
+        let batch_layout = BindGroupLayoutBuilder::new()
+            .with_uniform(0, ShaderStages::COMPUTE, true, None, None)
+            .build(device);
+
+        let object_layout = BindGroupLayoutBuilder::new()
+            .with_storage(0, ShaderStages::COMPUTE, false, true, None, None)
+            .build(device);
+
+        let draw_arg_layout = BindGroupLayoutBuilder::new()
+            .with_storage(0, ShaderStages::COMPUTE, false, false, None, None)
+            .with_storage(1, ShaderStages::COMPUTE, false, false, None, None)
+            .with_storage(2, ShaderStages::COMPUTE, false, false, None, None)
+            .with_storage(3, ShaderStages::COMPUTE, false, false, None, None)
+            .build(device);
+
+        let pipeline = pipelines.queue_compute_pipeline(crate::ComputePipelineDesc {
+            label: None,
+            layout: Vec::new(),
+            shader: *Self::SHADER.as_ref(),
+            entry: "main".into(),
+        });
+
+        Self {
+            batches,
+            offsets: Vec::new(),
+            pipeline,
+        }
     }
 }
 
@@ -806,7 +920,7 @@ impl<P: RenderPhase> DrawCalls<P> {
             let instances = objects.push_batch(transforms);
             let format = render_mesh.format();
 
-            let offset = match &format {
+            let (index, offset, indexed) = match &format {
                 MeshFormat::Indexed { .. } => {
                     let Some(index) = meshes.index_slice(&key.mesh) else {
                         continue;
@@ -814,20 +928,19 @@ impl<P: RenderPhase> DrawCalls<P> {
 
                     let base_vertex = sub_mesh.start_vertex + mesh.range.start;
                     let first_index = sub_mesh.start_index + index.range.start;
-
                     let index = args.indexed.push(DrawIndexedIndirectArgs {
                         base_vertex: base_vertex as i32,
                         first_index,
                         index_count: sub_mesh.index_count,
-                        first_instance: instances.start,
+                        first_instance: u32::MAX,
                         instance_count: instances.len() as u32,
                     });
 
-                    index * std::mem::size_of::<DrawIndexedIndirectArgs>()
+                    let offset = index * std::mem::size_of::<DrawIndexedIndirectArgs>();
+                    (index, offset, 1)
                 }
                 MeshFormat::NonIndexed => {
                     let first_vertex = sub_mesh.start_vertex + mesh.range.start;
-
                     let index = args.non_indexed.push(DrawIndirectArgs {
                         first_vertex,
                         vertex_count: sub_mesh.vertex_count,
@@ -835,8 +948,17 @@ impl<P: RenderPhase> DrawCalls<P> {
                         instance_count: instances.len() as u32,
                     });
 
-                    index * std::mem::size_of::<DrawIndirectArgs>()
+                    let offset = index * std::mem::size_of::<DrawIndirectArgs>();
+                    (index, offset, 0)
                 }
+            };
+
+            let info = BatchInfo {
+                bounds: *render_mesh.bounds(),
+                index: index as u32,
+                offset: instances.start,
+                count: instances.len() as u32,
+                indexed,
             };
 
             calls.0.push(DrawCall {

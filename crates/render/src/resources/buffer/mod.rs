@@ -103,10 +103,6 @@ impl Buffer {
         self.inner.as_entire_buffer_binding()
     }
 
-    // pub fn unmap(&self) {
-    //     self.inner.unmap();
-    // }
-
     pub fn resize(&mut self, device: &RenderDevice, size: u64) {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,

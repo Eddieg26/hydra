@@ -3,13 +3,12 @@ use super::{
     buffer::Indices,
     extract::{ExtractError, ReadWrite, RenderAsset},
 };
-use crate::{RenderAssetType, primitives::Color};
+use crate::{primitives::Color, Aabb, RenderAssetType};
 use asset::{
     Asset, AssetId, Settings,
     importer::{AssetImporter, AssetProcessor},
 };
 use ecs::{Component, IndexMap, system::ArgItem};
-use math::bounds::Bounds;
 use smol::io::AsyncAsSync;
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
@@ -250,7 +249,7 @@ pub struct Mesh {
     topology: MeshTopology,
     attributes: Vec<MeshAttribute>,
     indices: Option<Indices>,
-    bounds: Bounds,
+    bounds: Aabb,
     read_write: ReadWrite,
 
     #[serde(skip)]
@@ -263,7 +262,7 @@ impl Mesh {
             topology,
             attributes: Vec::new(),
             indices: None,
-            bounds: Bounds::ZERO,
+            bounds: Aabb::ZERO,
             read_write: ReadWrite::Disabled,
             dirty: MeshDirty::empty(),
         }
@@ -328,7 +327,7 @@ impl Mesh {
         indices
     }
 
-    pub fn bounds(&self) -> Bounds {
+    pub fn bounds(&self) -> Aabb {
         self.bounds
     }
 
@@ -409,15 +408,15 @@ impl Mesh {
 
         match (bounds_dirty, &attribute.values) {
             (true, MeshAttributeValues::Vec3(positions)) => {
-                self.bounds = Bounds::from(positions.as_slice());
+                self.bounds = Aabb::from(positions.as_slice());
                 self.dirty.remove(MeshDirty::BOUNDS);
             }
             (true, MeshAttributeValues::Vec2(positions)) => {
-                self.bounds = Bounds::from(positions.as_slice());
+                self.bounds = Aabb::from(positions.as_slice());
                 self.dirty.remove(MeshDirty::BOUNDS);
             }
             (true, MeshAttributeValues::Vec4(positions)) => {
-                self.bounds = Bounds::from(positions.as_slice());
+                self.bounds = Aabb::from(positions.as_slice());
                 self.dirty.remove(MeshDirty::BOUNDS);
             }
             _ => (),
@@ -749,7 +748,7 @@ pub struct RenderMesh {
     layout: MeshLayout,
     vertex_count: u32,
     format: MeshFormat,
-    bounds: Bounds,
+    bounds: Aabb,
 }
 
 impl RenderMesh {
@@ -783,7 +782,7 @@ impl RenderMesh {
         }
     }
 
-    pub fn bounds(&self) -> &Bounds {
+    pub fn bounds(&self) -> &Aabb {
         &self.bounds
     }
 }
