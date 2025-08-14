@@ -1,8 +1,8 @@
 use ecs::App;
-use render::plugins::RenderPlugin;
+use crate::plugin::ExamplePlugin;
 
 mod plugin;
 
 fn main() {
-    App::new().add_plugins(RenderPlugin).run();
+    App::new().add_plugins(ExamplePlugin).run();
 }

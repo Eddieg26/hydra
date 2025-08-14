@@ -79,8 +79,6 @@ impl AssetImporter for Texture2dImporter {
             }
         };
 
-        let pixel_count = pixels.len();
-
         let texture = Texture::new(
             wgpu::Extent3d {
                 width,
@@ -90,7 +88,6 @@ impl AssetImporter for Texture2dImporter {
             TextureDimension::D2,
             metadata.format.into(),
             pixels,
-            vec![0..pixel_count],
         );
 
         Ok(texture)

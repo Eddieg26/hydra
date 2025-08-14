@@ -2,7 +2,7 @@ use super::{Label, RenderAsset};
 use crate::device::RenderDevice;
 use asset::{Asset, AssetId};
 use ecs::system::unlifetime::Read;
-use std::{ops::Range, sync::Arc};
+use std::sync::Arc;
 use wgpu::{TextureAspect, TextureFormat};
 
 pub mod fallbacks;
@@ -99,7 +99,6 @@ pub struct Texture {
     pub wrap: WrapMode,
     pub usage: wgpu::TextureUsages,
     pub pixels: Vec<u8>,
-    pub layers: Vec<Range<usize>>,
 }
 
 impl Texture {
@@ -108,7 +107,6 @@ impl Texture {
         dimension: TextureDimension,
         format: wgpu::TextureFormat,
         pixels: Vec<u8>,
-        layers: Vec<Range<usize>>,
     ) -> Self {
         Self {
             label: None,
@@ -124,7 +122,6 @@ impl Texture {
                 | wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::COPY_SRC,
             pixels,
-            layers,
         }
     }
 
@@ -139,7 +136,6 @@ impl Texture {
                 TextureDimension::D1,
                 wgpu::TextureFormat::Rgba8Unorm,
                 vec![255, 255, 255, 255],
-                vec![0..4],
             ),
             TextureDimension::D2 => Self::new(
                 wgpu::Extent3d {
@@ -150,7 +146,6 @@ impl Texture {
                 TextureDimension::D2,
                 wgpu::TextureFormat::Rgba8Unorm,
                 vec![255, 255, 255, 255],
-                vec![0..4],
             ),
             TextureDimension::D2Array => Self::new(
                 wgpu::Extent3d {
@@ -161,7 +156,6 @@ impl Texture {
                 TextureDimension::D2Array,
                 wgpu::TextureFormat::Rgba8Unorm,
                 vec![255, 255, 255, 255],
-                vec![0..4],
             ),
             TextureDimension::D3 => Self::new(
                 wgpu::Extent3d {
@@ -172,7 +166,6 @@ impl Texture {
                 TextureDimension::D3,
                 wgpu::TextureFormat::Rgba8Unorm,
                 vec![255, 255, 255, 255],
-                vec![0..4],
             ),
             TextureDimension::Cube => Self::new(
                 wgpu::Extent3d {
@@ -183,7 +176,6 @@ impl Texture {
                 TextureDimension::Cube,
                 wgpu::TextureFormat::Rgba8Unorm,
                 vec![[255u8, 255, 255, 255]; 6].concat(),
-                (0..6).map(|i| i * 4..(i + 1) * 4).collect(),
             ),
             TextureDimension::CubeArray => Self::new(
                 wgpu::Extent3d {
@@ -194,7 +186,6 @@ impl Texture {
                 TextureDimension::CubeArray,
                 wgpu::TextureFormat::Rgba8Unorm,
                 vec![[255u8, 255, 255, 255]; 6].concat(),
-                (0..6).map(|i| i * 4..(i + 1) * 4).collect(),
             ),
         }
     }
@@ -289,7 +280,7 @@ impl GpuTexture {
         });
 
         let block_size = format.block_copy_size(None).unwrap_or(0);
-        for (layer, range) in texture.layers.iter().enumerate() {
+        for layer in 0..texture.depth_or_layers {
             device.queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
                     texture: &created,
@@ -297,11 +288,14 @@ impl GpuTexture {
                     origin: wgpu::Origin3d {
                         x: 0,
                         y: 0,
-                        z: layer as u32,
+                        z: layer,
                     },
                     aspect: TextureAspect::All,
                 },
-                &texture.pixels[range.clone()],
+                &texture.pixels[(layer as usize
+                    * texture.width as usize
+                    * texture.height as usize
+                    * block_size as usize)..],
                 wgpu::TexelCopyBufferLayout {
                     bytes_per_row: Some(block_size * size.width),
                     rows_per_image: Some(size.height),

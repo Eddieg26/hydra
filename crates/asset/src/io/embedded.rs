@@ -318,6 +318,10 @@ impl FileSystem for EmbeddedFs {
     }
 }
 
+/// Macro to embed an asset with its settings
+/// Usage: `embed_asset!(assets, id, "path/to/asset.ext", settings)`
+/// The `id` should be an `AssetId` of the asset type, and `settings` should be an instance of the settings type for that asset.
+/// The macro will automatically handle the serialization of the settings and the embedding of the asset data.
 #[macro_export]
 macro_rules! embed_asset {
     ($assets:expr, $id:expr, $path:expr, $settings:expr) => {
@@ -325,6 +329,11 @@ macro_rules! embed_asset {
     };
 }
 
+/// Macro to embed an asset with a new path and settings
+/// Usage: `embed_asset_with_path!(assets, id, "path/to/asset.ext", "new/path/to/asset.ext", settings)`
+/// The `id` should be an `AssetId` of the asset type, and `settings` should be an instance of the settings type for that asset.
+/// The macro will embed the asset data at the specified new path and handle the serialization of the settings.
+/// This is useful for when you want to change the path of the asset in the embedded filesystem
 #[macro_export]
 macro_rules! embed_asset_with_path {
     ($assets:expr, $id:expr, $path:expr, $new_path:expr, $settings:expr) => {
