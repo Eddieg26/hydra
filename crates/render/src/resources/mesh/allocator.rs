@@ -1,6 +1,6 @@
-use crate::{Buffer, ExtractInfo, Mesh, Process, RenderDevice, RenderMesh};
+use crate::{Buffer, ExtractInfo, Mesh, RenderDevice, RenderMesh};
 use asset::AssetId;
-use ecs::{Plugin, Resource};
+use ecs::Resource;
 use offset_allocator::{Allocation, Allocator};
 use std::{
     collections::{HashMap, HashSet},
@@ -427,7 +427,7 @@ impl MeshAllocator {
         }
     }
 
-    fn update(allocator: &mut Self, device: &RenderDevice, extracted: &ExtractInfo<RenderMesh>) {
+    pub(crate) fn update(allocator: &mut Self, device: &RenderDevice, extracted: &ExtractInfo<RenderMesh>) {
         allocator.release(&extracted.removed);
         allocator.allocate(device, extracted.extracted.iter());
     }
@@ -444,20 +444,5 @@ pub struct MeshBufferSlice<'a> {
 impl<'a> MeshBufferSlice<'a> {
     pub fn new(buffer: &'a Buffer, range: Range<u32>) -> Self {
         Self { buffer, range }
-    }
-}
-pub(crate) struct MeshAllocatorPlugin;
-
-impl Plugin for MeshAllocatorPlugin {
-    fn setup(&mut self, app: &mut ecs::AppBuilder) {
-        app.add_resource(MeshAllocatorConfig::default());
-    }
-
-    fn finish(&mut self, app: &mut ecs::AppBuilder) {
-        let config = app
-            .remove_resource::<MeshAllocatorConfig>()
-            .unwrap_or_default();
-        app.add_resource(MeshAllocator::new(config));
-        app.add_systems(Process, MeshAllocator::update);
     }
 }

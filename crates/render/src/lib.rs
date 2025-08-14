@@ -1,5 +1,4 @@
-pub mod app;
-pub mod constants;
+pub mod phases;
 pub mod device;
 pub mod plugins;
 pub mod primitives;
@@ -7,7 +6,7 @@ pub mod renderer;
 pub mod resources;
 pub mod surface;
 
-pub use app::*;
+pub use phases::*;
 pub use device::*;
 pub use primitives::*;
 pub use renderer::*;

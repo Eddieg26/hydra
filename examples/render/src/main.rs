@@ -1,3 +1,8 @@
+use ecs::App;
+use render::plugins::RenderPlugin;
+
 mod plugin;
 
-fn main() {}
+fn main() {
+    App::new().add_plugins(RenderPlugin).run();
+}

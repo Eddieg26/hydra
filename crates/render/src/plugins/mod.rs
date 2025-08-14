@@ -1,21 +1,25 @@
 use crate::{
-    ActiveCamera, Camera, CameraAttachments, CameraPhase, CameraSortOrder, ExtractError,
-    GlobalShaderConstant, GlobalShaderConstants, GpuShader, GpuTexture, ObjImporter, ProcessAssets,
-    QueueDraws, QueueViews, RenderDevice, RenderMesh, RenderTarget, SubMesh, Texture2dImporter,
-    allocator::MeshAllocatorPlugin,
-    app::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
+    ExtractError, GlobalShaderConstant, GlobalShaderConstants, GpuShader, GpuTexture,
+    ProcessAssets, QueueDraws, QueueViews, RenderDevice, RenderMesh, RenderTarget,
+    phases::{PostRender, PreRender, Present, Process, Queue, Render, RenderApp},
     resources::{
-        AssetExtractors, ExtractInfo, Fallbacks, Mesh, PipelineCache, RenderAsset, RenderAssets,
+        AssetExtractors, ExtractInfo, Fallbacks, PipelineCache, RenderAsset, RenderAssets,
         RenderResource, ResourceExtractors, Shader,
     },
     surface::{RenderSurface, RenderSurfaceTexture},
 };
 use asset::plugin::{AssetAppExt, AssetPlugin};
-use ecs::{
-    AppBuilder, Extract, Init, IntoSystemConfig, Phase, Plugin, Run, app::sync::SyncComponentPlugin,
-};
+use ecs::{AppBuilder, Extract, Init, IntoSystemConfig, Phase, Plugin, Run};
 use transform::GlobalTransform;
 use window::{Window, plugin::WindowPlugin};
+
+mod camera;
+mod mesh;
+mod texture;
+
+pub use camera::*;
+pub use mesh::*;
+pub use texture::*;
 
 pub struct RenderPlugin;
 
@@ -24,7 +28,6 @@ impl Plugin for RenderPlugin {
         app.add_plugins((WindowPlugin, AssetPlugin))
             .register::<GlobalTransform>()
             .sub_app_mut(RenderApp)
-            .add_plugins(MeshAllocatorPlugin)
             .add_sub_phase(Run, Process)
             .add_sub_phase(Process, ProcessAssets)
             .add_sub_phase(Run, Queue)
@@ -48,12 +51,7 @@ impl Plugin for RenderPlugin {
             .add_render_asset::<RenderMesh>()
             .add_render_asset::<GpuTexture>()
             .add_render_asset::<RenderTarget>()
-            .add_render_asset::<SubMesh>()
             .add_importer::<Shader>()
-            .add_importer::<ObjImporter>()
-            .add_importer::<Texture2dImporter>()
-            .add_loader::<SubMesh>()
-            .set_default_processor::<Mesh>()
             .set_default_processor::<Shader>();
     }
 
@@ -160,22 +158,5 @@ impl RenderAppExt for AppBuilder {
         app.register_event::<ExtractError<R>>();
 
         self
-    }
-}
-
-pub struct CameraPlugin;
-impl Plugin for CameraPlugin {
-    fn setup(&mut self, app: &mut AppBuilder) {
-        app.add_plugins((
-            SyncComponentPlugin::<Camera, RenderApp>::new(),
-            RenderPlugin,
-        ))
-        .sub_app_mut(RenderApp)
-        .add_sub_phase(Render, CameraPhase)
-        .register::<CameraAttachments>()
-        .register::<ActiveCamera>()
-        .add_resource(CameraSortOrder::default())
-        .add_systems(PreRender, CameraAttachments::queue)
-        .add_systems(PostRender, CameraAttachments::cleanup);
     }
 }
