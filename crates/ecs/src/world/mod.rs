@@ -40,7 +40,7 @@ pub struct World {
     pub(crate) resources: Resources,
     pub(crate) entities: Entities,
     pub(crate) events: EventRegistry,
-    pub(crate) modes: WorldModes,
+    pub(crate) modes: WorldModeCategories,
     pub(crate) frame: Frame,
 }
 
@@ -52,7 +52,7 @@ impl World {
             resources: Resources::new(),
             entities: Entities::new(),
             events: EventRegistry::new(),
-            modes: WorldModes::new(),
+            modes: WorldModeCategories(HashMap::new()),
             frame: Frame(1),
         }
     }
@@ -110,7 +110,10 @@ impl World {
     }
 
     pub fn add_mode<M: WorldMode>(&mut self) -> ModeId {
-        self.modes.add_mode::<M>()
+        self.modes
+            .entry(M::CATEGORY)
+            .or_insert(WorldModes::new())
+            .add_mode::<M>()
     }
 
     pub fn add_resource<R: Resource + Send>(&mut self, resource: R) -> ResourceId {
@@ -331,31 +334,42 @@ impl World {
     }
 
     pub fn enter<M: WorldMode>(&mut self) -> Option<ModeId> {
-        let current = self.modes.add_mode::<M>();
+        let mut modes = self.modes.remove(M::CATEGORY)?;
+        let current = modes.add_mode::<M>();
 
-        if self.modes.current != Some(current) {
-            if let Some(prev) = self.modes.current {
-                self.modes.get(prev).exit(self);
-                self.modes[prev].set_frame(self.frame);
+        let id = if modes.current != Some(current) {
+            if let Some(prev) = modes.current {
+                modes.get(prev).exit(self);
+                modes[prev].set_frame(self.frame);
             }
 
-            self.modes.get(current).enter(self);
-            self.modes[current].set_frame(self.frame);
-            self.modes.current.replace(current)
+            modes.get(current).enter(self);
+            modes[current].set_frame(self.frame);
+            modes.current.replace(current)
         } else {
             None
-        }
+        };
+
+        self.modes.insert(M::CATEGORY, modes);
+        id
     }
 
-    pub fn exit(&mut self) -> bool {
-        if let Some(prev) = self.modes.current {
-            self.modes.get(prev).exit(self);
-            self.modes.current = None;
-            self.modes[prev].set_frame(self.frame);
+    pub fn exit(&mut self, category: &str) -> bool {
+        let Some((category, mut modes)) = self.modes.remove_entry(category) else {
+            return false;
+        };
+
+        let exited = if let Some(prev) = modes.current {
+            modes.get(prev).exit(self);
+            modes.current = None;
+            modes[prev].set_frame(self.frame);
             true
         } else {
             false
-        }
+        };
+
+        self.modes.insert(category, modes);
+        exited
     }
 
     pub fn update(&mut self) {
@@ -426,6 +440,8 @@ impl<'w> EntityMut<'w> {
 }
 
 pub trait WorldMode: Send + Sync + 'static {
+    const CATEGORY: &'static str;
+
     fn enter(_: &mut World) {}
     fn exit(_: &mut World) {}
 }
@@ -464,6 +480,30 @@ impl BoxedMode {
 
     pub(super) fn exit(&self, world: &mut World) {
         (self.exit)(world);
+    }
+}
+
+pub struct WorldModeCategories(HashMap<&'static str, WorldModes>);
+
+impl WorldModeCategories {
+    pub fn update(&mut self, frame: Frame) {
+        for modes in self.0.values_mut() {
+            modes.update(frame);
+        }
+    }
+}
+
+impl std::ops::Deref for WorldModeCategories {
+    type Target = HashMap<&'static str, WorldModes>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for WorldModeCategories {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

@@ -439,18 +439,24 @@ impl<T: Condition> Condition for Not<T> {
 pub struct CurrentMode<M: WorldMode>(std::marker::PhantomData<M>);
 impl<M: WorldMode> Condition for CurrentMode<M> {
     fn evaluate(world: &World, _: &SystemMeta) -> bool {
-        let id = world.modes.id::<M>();
+        let Some(modes) = world.modes.get(M::CATEGORY) else {
+            return false;
+        };
 
-        world.modes.current() == id
+        modes.current.is_some() && modes.current() == modes.id::<M>()
     }
 }
 
 pub struct Entered<M: WorldMode>(std::marker::PhantomData<M>);
 impl<M: WorldMode> Condition for Entered<M> {
     fn evaluate(world: &World, system: &SystemMeta) -> bool {
-        world.modes.id::<M>().is_some_and(|id| {
-            let entered = world.modes[id].frame();
-            world.modes.current() == Some(id) && entered.is_newer(world.frame, system.frame)
+        let Some(modes) = world.modes.get(M::CATEGORY) else {
+            return false;
+        };
+
+        modes.id::<M>().is_some_and(|id| {
+            let entered = modes[id].frame();
+            modes.current() == Some(id) && entered.is_newer(world.frame, system.frame)
         })
     }
 }
@@ -458,9 +464,13 @@ impl<M: WorldMode> Condition for Entered<M> {
 pub struct Exited<M: WorldMode>(std::marker::PhantomData<M>);
 impl<M: WorldMode> Condition for Exited<M> {
     fn evaluate(world: &World, system: &SystemMeta) -> bool {
-        world.modes.id::<M>().is_some_and(|id| {
-            let exited = world.modes[id].frame();
-            world.modes.current() != Some(id) && exited.is_newer(world.frame, system.frame)
+        let Some(modes) = world.modes.get(M::CATEGORY) else {
+            return false;
+        };
+
+        modes.id::<M>().is_some_and(|id| {
+            let exited = modes[id].frame();
+            modes.current() != Some(id) && exited.is_newer(world.frame, system.frame)
         })
     }
 }
@@ -565,7 +575,9 @@ mod tests {
     impl Resource for Ghost {}
 
     pub struct TestMode;
-    impl WorldMode for TestMode {}
+    impl WorldMode for TestMode {
+        const CATEGORY: &'static str = "test";
+    }
 
     #[test]
     fn test_resource_exists() {
@@ -672,7 +684,7 @@ mod tests {
         world.add_mode::<TestMode>();
 
         world.enter::<TestMode>();
-        world.exit();
+        world.exit(TestMode::CATEGORY);
 
         let system = SystemMeta::default();
         assert!(Exited::<TestMode>::evaluate(&world, &system))

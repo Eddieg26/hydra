@@ -1,12 +1,11 @@
-use derive_ecs::Resource;
-
 use super::{IntoSystemConfig, SystemConfig, SystemMeta};
 use crate::{
-    Event, EventReader, EventWriter, Events, ModeId, WorldAccess,
+    Event, EventReader, EventWriter, Events, WorldAccess,
     world::{
         Cloned, Entities, EventStorage, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell,
     },
 };
+use derive_ecs::Resource;
 use std::any::Any;
 
 #[allow(unused_variables)]
@@ -516,26 +515,6 @@ unsafe impl<E: Event> SystemArg for EventWriter<'_, E> {
         }
     }
 }
-
-unsafe impl SystemArg for Option<ModeId> {
-    type Item<'world, 'state> = Option<ModeId>;
-
-    type State = ();
-
-    fn init(_: &mut World, _: &mut WorldAccess) -> Self::State {
-        ()
-    }
-
-    unsafe fn get<'world, 'state>(
-        _: &'state mut Self::State,
-        world: WorldCell<'world>,
-        _system: &'world SystemMeta,
-    ) -> Self::Item<'world, 'state> {
-        unsafe { world.get() }.modes.current()
-    }
-}
-
-unsafe impl ReadOnly for Option<ModeId> {}
 
 unsafe impl SystemArg for &SystemMeta {
     type Item<'world, 'state> = &'world SystemMeta;

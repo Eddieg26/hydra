@@ -222,10 +222,10 @@ impl<M: WorldMode> Command for EnterMode<M> {
     }
 }
 
-pub struct ExitMode;
+pub struct ExitMode(String);
 impl Command for ExitMode {
     fn execute(self, world: &mut World) {
-        world.exit();
+        world.exit(&self.0);
     }
 }
 
