@@ -5,7 +5,9 @@ use crate::{
     keyboard::{Key, KeyCode},
     mouse::MouseButton,
 };
-use ecs::{Commands, Component, Entity, Event, Events, Query, Resource, World, query::With};
+use ecs::{
+    Commands, Component, Entity, Event, Events, Query, Resource, World, WorldMode, query::With,
+};
 use std::{any::TypeId, collections::HashMap};
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, Component)]
@@ -14,6 +16,11 @@ pub enum InputDevice {
     Any,
     Keyboard,
     Gamepad(GamepadId),
+}
+
+pub struct InputMode<I: InputReceiver>(std::marker::PhantomData<I>);
+impl<I: InputReceiver> WorldMode for InputMode<I> {
+    const CATEGORY: &'static str = "input";
 }
 
 pub trait InputReceiver: Component {}

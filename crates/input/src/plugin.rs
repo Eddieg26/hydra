@@ -1,9 +1,9 @@
 use crate::{
-    ActionRegistry, Actions, Buttons, DoubleTapGesture, GamepadEvent, Gamepads, InputReceiver, Key,
-    KeyCode, KeyboardInput, MouseButton, MouseInput, MouseScroll, PinchGesture, RotationGesture,
-    TouchInput, TouchpadPressure,
+    ActionRegistry, Actions, Buttons, DoubleTapGesture, GamepadEvent, Gamepads, InputMode,
+    InputReceiver, Key, KeyCode, KeyboardInput, MouseButton, MouseInput, MouseScroll, PinchGesture,
+    RotationGesture, TouchInput, TouchpadPressure,
 };
-use ecs::{AppBuilder, Plugin, Start, app::PreUpdate};
+use ecs::{AppBuilder, IntoSystemConfig, Plugin, Start, app::PreUpdate, system::CurrentMode};
 
 pub struct InputPlugin;
 
@@ -64,7 +64,10 @@ impl<R: InputReceiver> Plugin for InputReceiverPlugin<R> {
             .register::<R>()
             .resource_mut::<ActionRegistry>()
             .register::<R>(std::mem::take(&mut self.0));
-        app.add_systems(PreUpdate, ActionRegistry::send_action_events::<R>);
+        app.add_systems(
+            PreUpdate,
+            ActionRegistry::send_action_events::<R>.when::<CurrentMode<InputMode<R>>>(),
+        );
     }
 }
 
