@@ -23,53 +23,62 @@ const MATERIAL_ID: AssetId<Material> = AssetId::from_u128(0x1a2b3c4d5e6f708192a0
 
 const QUAD_POSITIONS: &[Vec2] = &[
     Vec2::new(-0.5, -0.5), // Bottom-left
-    Vec2::new(0.5, -0.5),  // Bottom-right
     Vec2::new(-0.5, 0.5),  // Top-left
     Vec2::new(0.5, -0.5),  // Bottom-right
+    Vec2::new(0.5, -0.5),  // Bottom-right
+    Vec2::new(-0.5, 0.5),  // Top-left
     Vec2::new(0.5, 0.5),   // Top-right
-    Vec2::new(-0.5, 0.5),  // Top-left
 ];
 
 const QUAD_TEX_COORDS: &[Vec2] = &[
     Vec2::new(0.0, 1.0), // Bottom-left
-    Vec2::new(1.0, 1.0), // Bottom-right
     Vec2::new(0.0, 0.0), // Top-left
     Vec2::new(1.0, 1.0), // Bottom-right
+    Vec2::new(1.0, 1.0), // Bottom-right
+    Vec2::new(0.0, 0.0), // Top-left
     Vec2::new(1.0, 0.0), // Top-right
-    Vec2::new(0.0, 0.0), // Top-left
 ];
+
 
 use asset::{Asset, AssetId, embed_asset, io::EmbeddedFs, plugin::AssetAppExt};
 use ecs::{
-    Component, Plugin, Resource,
+    AddComponent, Commands, Component, Entity, Init, Plugin, Query, Resource, Spawner,
+    app::sync::SyncComponentPlugin,
     query::{Single, With},
     unlifetime::Read,
 };
-use math::{Mat4, Vec2};
+use math::{Mat4, Size, Vec2, Vec3};
 use render::{
     ActiveCamera, AsBinding, BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder,
-    CameraAttachments, CameraPhase, FragmentState, Mesh, MeshAttribute, MeshAttributeValues,
-    PipelineCache, PipelineId, Projection, RenderApp, RenderAsset, RenderAssets,
-    RenderCommandEncoder, RenderDevice, RenderPipelineDesc, RenderState, RenderSurface, Shader,
-    ShaderType, Texture, VertexState,
+    Camera, CameraAttachments, CameraPhase, FragmentState, Mesh, MeshAttribute,
+    MeshAttributeValues, MeshLayout, PipelineCache, PipelineId, Projection, Queue, RenderApp,
+    RenderAsset, RenderAssets, RenderCommandEncoder, RenderDevice, RenderPipelineDesc, RenderState,
+    RenderSurface, Shader, ShaderSettings, ShaderType, Texture, VertexState,
     allocator::MeshAllocator,
-    plugins::{CameraPlugin, MeshPlugin, RenderPlugin, Texture2dPlugin, Texture2dSettings},
+    plugins::{CameraPlugin, MeshPlugin, RenderAppExt, Texture2dPlugin, Texture2dSettings},
     storage::StorageBufferArray,
     uniform::UniformBufferArray,
     wgpu::{
         BlendState, ColorTargetState, ColorWrites, CompareFunction, DepthStencilState, Face,
         LoadOp, Operations, PrimitiveState, RenderPassColorAttachment,
         RenderPassDepthStencilAttachment, RenderPassDescriptor, SamplerBindingType, ShaderStages,
-        StoreOp, TextureSampleType, TextureViewDimension,
+        StoreOp, TextureSampleType, TextureViewDimension, VertexFormat, VertexStepMode,
     },
 };
-use transform::GlobalTransform;
+use transform::{GlobalTransform, Transform, plugin::TransformPlugin};
 
 pub struct ExamplePlugin;
 
 impl Plugin for ExamplePlugin {
     fn setup(&mut self, app: &mut ecs::AppBuilder) {
         let assets = EmbeddedFs::new();
+
+        embed_asset!(
+            assets,
+            DRAW_SPRITE_SHADER,
+            "shaders/draw-sprite.wgsl",
+            ShaderSettings::default()
+        );
 
         embed_asset!(
             assets,
@@ -88,92 +97,70 @@ impl Plugin for ExamplePlugin {
                 MeshAttributeValues::Vec2(QUAD_TEX_COORDS.to_vec()),
             ));
 
-        app.add_plugins((CameraPlugin, MeshPlugin, Texture2dPlugin))
-            .add_source("example", assets)
-            .load_asset::<Texture>(GENGAR_ID)
-            .add_asset::<Mesh>(QUAD, quad)
-            .sub_app_mut(RenderApp)
-            .add_systems(
-                CameraPhase,
-                |camera: Single<(&GlobalTransform, &CameraAttachments), With<ActiveCamera>>,
-                 surface: &RenderSurface,
-                 pipelines: &PipelineCache,
-                 meshes: &MeshAllocator,
-                 materials: &RenderAssets<MaterialBinding>,
-                 pipeline_data: &mut DrawPipeline,
-                 mut encoder: RenderCommandEncoder| {
-                    let Some(material) = materials.get(&MATERIAL_ID) else {
-                        return;
-                    };
+        app.add_plugins((
+            CameraPlugin,
+            MeshPlugin,
+            Texture2dPlugin,
+            TransformPlugin::<Transform>::new(),
+            SyncComponentPlugin::<View2d, RenderApp>::new(),
+            SyncComponentPlugin::<DrawSprite, RenderApp>::new(),
+            SyncComponentPlugin::<GlobalTransform, RenderApp>::new(),
+        ))
+        .add_source("example", assets)
+        .load_asset::<Texture>(GENGAR_ID)
+        .load_asset::<Shader>(DRAW_SPRITE_SHADER)
+        .add_asset::<Mesh>(QUAD, quad)
+        .add_asset::<Material>(MATERIAL_ID, Material { texture: GENGAR_ID })
+        .add_systems(Init, |mut spawner: Spawner| {
+            spawner
+                .spawn()
+                .with_component(Transform::default().with_translation(Vec3::NEG_Z * 1.0))
+                .with_component(GlobalTransform::default())
+                .with_component(View2d::default())
+                .with_component(Camera::default())
+                .finish();
 
-                    let Some(pipeline) = pipelines.get_render_pipeline(&pipeline_data.id) else {
-                        return;
-                    };
+            spawner
+                .spawn()
+                .with_component(GlobalTransform::default())
+                .with_component(DrawSprite)
+                .finish();
+        })
+        .add_render_asset::<MaterialBinding>()
+        .sub_app_mut(RenderApp)
+        .add_systems(Queue, DrawPipeline::queue)
+        .add_systems(CameraPhase, DrawPipeline::draw);
+    }
 
-                    let (transform, attachments) = *camera;
+    fn build(&mut self, app: &mut ecs::AppBuilder) {
+        let app = app.sub_app_mut(RenderApp);
+        let pipeline = {
+            let device = app.resource::<RenderDevice>();
+            let surface = app.resource::<RenderSurface>();
+            let pipelines = unsafe { app.world().cell().get_mut() }.resource_mut::<PipelineCache>();
 
-                    let Some(color) = attachments.color.as_ref() else {
-                        return;
-                    };
+            DrawPipeline::new(device, surface, pipelines)
+        };
 
-                    let Some(mesh) = meshes.vertex_slice(&QUAD) else {
-                        return;
-                    };
-
-                    let data = ViewData::new(
-                        transform,
-                        &View2d {
-                            near: 0.1,
-                            far: 100.0,
-                            size: 5.0,
-                        },
-                        surface.width() as f32,
-                        surface.height() as f32,
-                    );
-
-                    let offset = pipeline_data.views.push(&data);
-                    pipeline_data.objects.push(&Mat4::IDENTITY);
-
-                    let pass = encoder.begin_render_pass(&RenderPassDescriptor {
-                        label: None,
-                        color_attachments: &vec![Some(RenderPassColorAttachment {
-                            view: color,
-                            resolve_target: None,
-                            ops: Operations {
-                                load: LoadOp::Load,
-                                store: StoreOp::Store,
-                            },
-                        })],
-                        depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                            view: &attachments.depth,
-                            depth_ops: Some(Operations {
-                                load: LoadOp::Clear(1.0),
-                                store: StoreOp::Store,
-                            }),
-                            stencil_ops: None,
-                        }),
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                    });
-
-                    let mut state = RenderState::new(pass);
-
-                    state.set_pipeline(pipeline);
-                    state.set_vertex_buffer(0, mesh.buffer.slice(..));
-                    state.set_bind_group(0, &pipeline_data.view_binding, &[offset]);
-                    state.set_bind_group(1, &pipeline_data.object_binding, &[]);
-                    state.set_bind_group(2, &material.0, &[]);
-
-                    state.draw(mesh.range, 0..1);
-                },
-            );
+        app.add_resource(pipeline);
     }
 }
 
+#[derive(Clone, Component)]
 pub struct View2d {
     near: f32,
     far: f32,
     size: f32,
+}
+
+impl Default for View2d {
+    fn default() -> Self {
+        Self {
+            near: 0.2,
+            far: 100.0,
+            size: 1.0,
+        }
+    }
 }
 
 #[derive(Clone, ShaderType)]
@@ -197,6 +184,9 @@ impl ViewData {
         }
     }
 }
+
+#[derive(Component)]
+pub struct ViewInstance(u32);
 
 #[derive(Resource)]
 pub struct DrawPipeline {
@@ -249,6 +239,12 @@ impl DrawPipeline {
             .with_sampler(1, ShaderStages::FRAGMENT, SamplerBindingType::NonFiltering)
             .build(device);
 
+        let layout = MeshLayout::into_vertex_buffer_layout(
+            0,
+            &[VertexFormat::Float32x2, VertexFormat::Float32x2],
+            VertexStepMode::Vertex,
+        );
+
         let id = pipelines.queue_render_pipeline(RenderPipelineDesc {
             label: None,
             layout: vec![
@@ -259,14 +255,14 @@ impl DrawPipeline {
             vertex: VertexState {
                 shader: *DRAW_SPRITE_SHADER.as_ref(),
                 entry: "vs_main".into(),
-                buffers: vec![],
+                buffers: vec![layout],
             },
             fragment: Some(FragmentState {
                 shader: *DRAW_SPRITE_SHADER.as_ref(),
                 entry: "fs_main".into(),
                 targets: vec![Some(ColorTargetState {
                     format: surface.format(),
-                    blend: Some(BlendState::REPLACE),
+                    blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
                 })],
             }),
@@ -296,12 +292,115 @@ impl DrawPipeline {
             id,
         }
     }
+
+    fn queue(
+        pipeline: &mut Self,
+        views: Query<(Entity, &GlobalTransform, &View2d, Option<&mut ViewInstance>), With<Camera>>,
+        objects: Query<&GlobalTransform, With<DrawSprite>>,
+        device: &RenderDevice,
+        surface: &RenderSurface,
+        mut commands: Commands,
+    ) {
+        pipeline.views.clear();
+        pipeline.objects.clear();
+
+        let Size { width, height } = surface.size();
+        for (entity, transform, view, instance) in views.iter() {
+            let data = ViewData::new(transform, &view, width as f32, height as f32);
+            if let Some(instance) = instance {
+                instance.0 = pipeline.views.push(&data);
+            } else {
+                let instance = ViewInstance(pipeline.views.push(&data));
+                commands.add(AddComponent::new(entity, instance));
+            }
+        }
+
+        for transform in objects.iter() {
+            pipeline.objects.push(&transform.matrix());
+        }
+
+        if pipeline.views.update(device).is_some() {
+            pipeline.view_binding = BindGroupBuilder::new(&pipeline.view_bind_group_layout)
+                .with_uniform(0, pipeline.views.as_ref(), 0, None)
+                .build(device);
+        }
+
+        if pipeline.objects.update(device).is_some() {
+            pipeline.object_binding = BindGroupBuilder::new(&pipeline.object_bind_group_layout)
+                .with_uniform(0, pipeline.objects.as_ref(), 0, None)
+                .build(device);
+        }
+    }
+
+    fn draw(
+        camera: Single<(&CameraAttachments, &ViewInstance), With<ActiveCamera>>,
+        pipelines: &PipelineCache,
+        meshes: &MeshAllocator,
+        materials: &RenderAssets<MaterialBinding>,
+        pipeline_data: &mut DrawPipeline,
+        mut encoder: RenderCommandEncoder,
+    ) {
+        let Some(material) = materials.get(&MATERIAL_ID) else {
+            return;
+        };
+
+        let Some(pipeline) = pipelines.get_render_pipeline(&pipeline_data.id) else {
+            return;
+        };
+
+        let (attachments, instance) = *camera;
+
+        let Some(color) = attachments.color.as_ref() else {
+            return;
+        };
+
+        let Some(mesh) = meshes.vertex_slice(&QUAD) else {
+            return;
+        };
+
+        let pass = encoder.begin_render_pass(&RenderPassDescriptor {
+            label: None,
+            color_attachments: &vec![Some(RenderPassColorAttachment {
+                view: color,
+                resolve_target: None,
+                ops: Operations {
+                    load: LoadOp::Load,
+                    store: StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                view: &attachments.depth,
+                depth_ops: Some(Operations {
+                    load: LoadOp::Clear(1.0),
+                    store: StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        let mut state = RenderState::new(pass);
+
+        state.set_pipeline(pipeline);
+        state.set_vertex_buffer(0, mesh.buffer.slice(..));
+        state.set_bind_group(0, &pipeline_data.view_binding, &[instance.0]);
+        state.set_bind_group(1, &pipeline_data.object_binding, &[]);
+        state.set_bind_group(2, &material.0, &[]);
+
+        let instances = 0..pipeline_data.objects.len() as u32;
+        state.draw(mesh.range, instances);
+    }
 }
+
+#[derive(Clone, Component)]
+pub struct DrawSprite;
 
 #[derive(Asset, Clone, AsBinding)]
 pub struct Material {
     #[texture(0)]
     #[sampler(1)]
+    #[dependency]
     texture: AssetId<Texture>,
 }
 
@@ -325,5 +424,9 @@ impl RenderAsset for MaterialBinding {
             .create_bind_group(device, &pipeline_data.material_bind_group_layout, arg)
             .map_err(|_| render::ExtractError::Retry(asset))?;
         Ok(Self(bind_group))
+    }
+
+    fn usage(_: &Self::Source) -> render::AssetUsage {
+        render::AssetUsage::Keep
     }
 }

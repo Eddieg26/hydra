@@ -175,7 +175,7 @@ impl<T: ShaderType> UniformBufferArray<T> {
     /// Returns the number of elements in the buffer.
     /// The size is calculated based on the alignment.
     pub fn len(&self) -> usize {
-        self.data.as_ref().len() / self.alignment as usize
+        self.data.as_ref().len().div_ceil(self.alignment as usize)
     }
 
     /// Updates the buffer if it is dirty or if the size exceeds the current buffer size.

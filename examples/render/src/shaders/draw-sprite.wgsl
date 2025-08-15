@@ -30,7 +30,7 @@ fn vs_main(
 ) -> VertexOutput {
     let model = objects[instance_index].model;
 
-    let output: VertexOutput;
+    var output: VertexOutput;
     output.position = camera.projection * camera.view * model * vec4<f32>(position, 0.0, 1.0);
     output.uv = uv;
 
