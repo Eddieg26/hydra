@@ -15,6 +15,7 @@ use std::{
 pub mod defaults;
 pub mod plugin;
 pub mod sync;
+pub mod time;
 
 pub use plugin::*;
 

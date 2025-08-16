@@ -1,5 +1,5 @@
-use ecs::App;
 use crate::plugin::ExamplePlugin;
+use ecs::App;
 
 mod plugin;
 

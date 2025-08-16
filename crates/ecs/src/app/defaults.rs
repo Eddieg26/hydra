@@ -1,6 +1,6 @@
 use crate::{
     AppBuilder, Despawned, End, Extract, Init, Plugin, Resource, Run, Shutdown, Start, Update,
-    app::{PostUpdate, PreUpdate},
+    app::{PostUpdate, PreUpdate, time::TimePlugin},
     core::task::TaskPoolSettings,
 };
 use derive_ecs::PluginKit;
@@ -57,4 +57,5 @@ pub struct DefaultPlugins {
     task_pool: TaskPoolPlugin,
     phases: DefaultPhases,
     events: DefaultEvents,
+    time: TimePlugin,
 }
