@@ -189,6 +189,13 @@ pub trait IntoSystemConfig<M>: Sized {
         config.condition = C::evaluate;
         config
     }
+
+    fn id(&self) -> SystemId
+    where
+        Self: Sized + 'static,
+    {
+        SystemType::<Self>::new().identify()
+    }
 }
 
 impl<M, I: IntoSystemConfig<M>> IntoSystemConfigs<M> for I {
