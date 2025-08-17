@@ -5,6 +5,7 @@ use super::{
 use crate::{
     core::{ImmutableIndexDag, IndexDag},
     ext::{self},
+    system::SystemNode,
     world::{World, WorldCell},
 };
 use std::collections::HashMap;
@@ -79,14 +80,64 @@ impl PhaseConfig {
 
     pub fn build(self, world: &mut World, mode: RunMode) -> PhaseNode {
         let mut systems = IndexDag::new();
+        let mut map = HashMap::new();
         for config in self.configs {
-            systems.add_node(config.into_node(world));
+            let id = config.id();
+            let node = systems.add_node(config.into_node(world));
+            map.insert(id, node);
         }
 
-        for index in (0..systems.nodes().len()).rev() {
-            for dep_index in (0..systems.nodes().len()).take(index) {
-                if systems.nodes()[index].has_dependency(&systems.nodes()[dep_index]) {
-                    systems.add_dependency(dep_index, index);
+        // Checks if this system node has a dependency on another system node.
+        // Returns `Some(true)` if it is a dependency, `Some(false)` if it is a dependent,
+        // or `None` if there is no relationship.
+        let has_edge = |node: &SystemNode, other: &SystemNode| {
+            if let Some(set) = other.config.set.as_ref() {
+                if node.config.dependencies.contains(set) {
+                    return Some(true);
+                } else if node.config.dependents.contains(set) {
+                    return Some(false);
+                }
+            }
+
+            if let Some(set) = node.config.set.as_ref() {
+                if other.config.dependencies.contains(set) {
+                    return Some(false);
+                } else if other.config.dependents.contains(set) {
+                    return Some(true);
+                }
+            }
+
+            if node.access.conflicts(&other.access).is_err() {
+                Some(true)
+            } else {
+                None
+            }
+        };
+
+        for node in 0..systems.nodes().len() {
+            let dependencies = std::mem::take(&mut systems.nodes_mut()[node].config.dependencies);
+            for dependency in dependencies {
+                if let Some(dep) = map.get(&dependency).copied() {
+                    systems.add_dependency(dep, node);
+                }
+            }
+
+            let dependents = std::mem::take(&mut systems.nodes_mut()[node].config.dependents);
+            for dependent in dependents {
+                if let Some(dep) = map.get(&dependent).copied() {
+                    systems.add_dependency(node, dep);
+                }
+            }
+
+            for other in (node + 1)..systems.nodes().len() {
+                let edge =
+                    has_edge(&systems.nodes()[node], &systems.nodes()[other]).map(|v| match v {
+                        true => (node, other),
+                        false => (other, node),
+                    });
+
+                if let Some((index, dependency)) = edge {
+                    systems.add_dependency(dependency, index);
                 }
             }
         }
@@ -95,13 +146,7 @@ impl PhaseConfig {
             let systems = error
                 .0
                 .iter()
-                .map(|i| {
-                    systems.nodes()[*i]
-                        .config
-                        .name()
-                        .cloned()
-                        .unwrap_or("anonymous".into())
-                })
+                .map(|i| systems.nodes()[*i].config.name())
                 .collect::<Vec<_>>();
 
             let phase = self.phase.name();

@@ -11,6 +11,22 @@ pub struct TimeInfo {
 }
 
 impl TimeInfo {
+    pub fn value(&self) -> Duration {
+        self.value
+    }
+
+    pub fn unscaled(&self) -> Duration {
+        self.unscaled
+    }
+
+    pub fn as_f32(&self) -> f32 {
+        self.as_f32
+    }
+
+    pub fn as_f64(&self) -> f64 {
+        self.as_f64
+    }
+
     pub fn set(&mut self, value: Duration, scale: f32) {
         self.value = value.mul_f32(scale);
         self.as_f32 = self.value.as_secs_f32();

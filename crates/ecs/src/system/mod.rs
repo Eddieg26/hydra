@@ -11,31 +11,20 @@ pub mod config;
 pub mod executor;
 pub mod query;
 pub mod schedule;
+pub mod set;
 
 pub use arg::*;
 pub use config::*;
 pub use executor::*;
 pub use query::*;
 pub use schedule::*;
+pub use set::*;
 
 pub type SystemName = &'static str;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SystemId(u32);
-impl SystemId {
-    fn new() -> Self {
-        static mut ID: u32 = 0;
-        unsafe {
-            let id = ID;
-            ID += 1;
-            SystemId(id)
-        }
-    }
-}
-
 pub struct SystemMeta {
     pub id: SystemId,
-    pub name: Option<SystemName>,
+    pub name: SystemName,
     /// Components that the system accesses.
     pub components: FixedBitSet,
     /// Resources that the system accesses.
@@ -51,8 +40,8 @@ pub struct SystemMeta {
 impl Default for SystemMeta {
     fn default() -> Self {
         Self {
-            id: SystemId::new(),
-            name: None,
+            id: SystemType::<()>::new().identify(),
+            name: "default",
             components: FixedBitSet::new(),
             resources: FixedBitSet::new(),
             send: true,

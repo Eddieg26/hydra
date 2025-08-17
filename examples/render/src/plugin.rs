@@ -39,11 +39,10 @@ const QUAD_TEX_COORDS: &[Vec2] = &[
     Vec2::new(1.0, 0.0), // Top-right
 ];
 
-
 use asset::{Asset, AssetId, embed_asset, io::EmbeddedFs, plugin::AssetAppExt};
 use ecs::{
-    AddComponent, Commands, Component, Entity, Init, Plugin, Query, Resource, Spawner,
-    app::sync::SyncComponentPlugin,
+    AddComponent, Commands, Component, Entity, Init, Plugin, Query, Resource, Spawner, Update,
+    app::{sync::SyncComponentPlugin, time::Time},
     query::{Single, With},
     unlifetime::Read,
 };
@@ -122,10 +121,19 @@ impl Plugin for ExamplePlugin {
 
             spawner
                 .spawn()
+                .with_component(Transform::default())
                 .with_component(GlobalTransform::default())
                 .with_component(DrawSprite)
                 .finish();
         })
+        .add_systems(
+            Update,
+            |sprites: Query<&mut Transform, With<DrawSprite>>, time: &Time| {
+                for transform in sprites {
+                    transform.translation += Vec3::Y * time.delta().as_f32() * 0.5;
+                }
+            },
+        )
         .add_render_asset::<MaterialBinding>()
         .sub_app_mut(RenderApp)
         .add_systems(Queue, DrawPipeline::queue)

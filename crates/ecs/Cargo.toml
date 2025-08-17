@@ -8,7 +8,10 @@ derive-ecs = { path = "../macros/derive-ecs" }
 variadics = { path = "../macros/variadics" }
 fixedbitset = { workspace = true }
 indexmap = { workspace = true }
+downcast-rs = { workspace = true }
+foldhash = { workspace = true }
 smol = { workspace = true }
+hashbrown = { workspace = true }
 threadpool = "1.8.1"
 concurrent-queue = "2.5.0"
 async-task = "4.7.1"

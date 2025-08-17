@@ -1,4 +1,4 @@
-use super::{IntoSystemConfig, SystemConfig, SystemMeta};
+use super::{IntoSystemConfig, SystemConfig, SystemMeta, SystemType, SystemSet};
 use crate::{
     Event, EventReader, EventWriter, Events, WorldAccess,
     world::{
@@ -644,6 +644,7 @@ macro_rules! impl_into_system_configs {
             for<'world, 'state> F: Fn($($arg),*) + Fn($(ArgItem<'world,'state, $arg>),*) -> O + Send + Sync + 'static,
         {
             fn config(self) -> SystemConfig {
+                let id = SystemType::<F>::new().identify();
                 let name = std::any::type_name::<F>();
 
                 let init = |world: &mut World, access: &mut WorldAccess| {
@@ -671,7 +672,7 @@ macro_rules! impl_into_system_configs {
                 let send = ($($arg::send() &&)* true);
                 let exclusive = ($($arg::exclusive() ||)* false);
 
-                SystemConfig::new(Some(name), exclusive, send, init, update, Box::new(run), |_, _| true)
+                SystemConfig::new(id, name, exclusive, send, init, update, Box::new(run), |_, _| true)
             }
         }
 

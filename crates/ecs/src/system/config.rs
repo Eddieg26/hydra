@@ -1,16 +1,21 @@
 use super::{
-    System, SystemCell, SystemCondition, SystemId, SystemInit, SystemMeta, SystemName, SystemRun,
+    System, SystemCell, SystemCondition, SystemInit, SystemMeta, SystemName, SystemRun,
     SystemState, SystemUpdate,
 };
-use crate::{AccessError, Frame, Resource, SystemArg, World, WorldAccess, WorldMode};
+use crate::{
+    AccessError, Frame, Resource, SystemArg, World, WorldAccess, WorldMode,
+    system::{SystemId, SystemSet, SystemType},
+};
 use std::{cell::UnsafeCell, collections::HashSet};
 
 pub struct SystemConfig {
-    id: SystemId,
-    name: Option<SystemName>,
-    exclusive: bool,
-    send: bool,
-    dependencies: HashSet<SystemId>,
+    pub(crate) id: SystemId,
+    pub(crate) name: SystemName,
+    pub(crate) set: Option<SystemId>,
+    pub(crate) exclusive: bool,
+    pub(crate) send: bool,
+    pub(crate) dependencies: HashSet<SystemId>,
+    pub(crate) dependents: HashSet<SystemId>,
     init: SystemInit,
     run: SystemRun,
     update: SystemUpdate,
@@ -19,7 +24,8 @@ pub struct SystemConfig {
 
 impl SystemConfig {
     pub fn new(
-        name: Option<impl Into<SystemName>>,
+        id: SystemId,
+        name: impl Into<SystemName>,
         exclusive: bool,
         send: bool,
         init: SystemInit,
@@ -28,11 +34,13 @@ impl SystemConfig {
         condition: SystemCondition,
     ) -> Self {
         Self {
-            id: SystemId::new(),
-            name: name.map(|name| name.into()),
+            id,
+            name: name.into(),
+            set: None,
             exclusive,
             send,
             dependencies: HashSet::new(),
+            dependents: HashSet::new(),
             init,
             run,
             update,
@@ -44,8 +52,8 @@ impl SystemConfig {
         self.id
     }
 
-    pub fn name(&self) -> Option<&SystemName> {
-        self.name.as_ref()
+    pub fn name(&self) -> SystemName {
+        self.name
     }
 
     pub fn exclusive(&self) -> bool {
@@ -60,8 +68,16 @@ impl SystemConfig {
         &self.dependencies
     }
 
+    pub fn dependents(&self) -> &HashSet<SystemId> {
+        &self.dependents
+    }
+
     pub fn add_dependency(&mut self, id: SystemId) {
         self.dependencies.insert(id);
+    }
+
+    pub fn add_dependent(&mut self, id: SystemId) {
+        self.dependents.insert(id);
     }
 
     pub fn into_node(self, world: &mut World) -> SystemNode {
@@ -101,16 +117,6 @@ pub struct SystemNode {
     pub config: SystemConfig,
     pub state: SystemState,
     pub access: WorldAccess,
-}
-
-impl SystemNode {
-    pub fn has_dependency(&self, other: &SystemNode) -> bool {
-        if self.config.dependencies.contains(&other.config.id) {
-            return true;
-        }
-
-        self.access.conflicts(&other.access).is_err()
-    }
 }
 
 pub enum SystemConfigs {
@@ -238,6 +244,62 @@ pub trait IntoSystemConfigs<M> {
             }
         }
     }
+
+    fn in_set<T: SystemSet>(self, set: T) -> SystemConfigs
+    where
+        Self: Sized,
+    {
+        match self.configs() {
+            SystemConfigs::Config(mut config) => {
+                config.set = Some(set.identify());
+                SystemConfigs::Config(config)
+            }
+            SystemConfigs::Configs(mut configs) => {
+                configs
+                    .iter_mut()
+                    .for_each(|c| c.set = Some(set.identify()));
+                SystemConfigs::Configs(configs)
+            }
+        }
+    }
+
+    fn before_set<T: SystemSet>(self, set: T) -> SystemConfigs
+    where
+        Self: Sized,
+    {
+        match self.configs() {
+            SystemConfigs::Config(mut config) => {
+                config.dependents.insert(set.identify());
+                SystemConfigs::Config(config)
+            }
+            SystemConfigs::Configs(mut configs) => {
+                for config in configs.iter_mut() {
+                    config.dependents.insert(set.identify());
+                }
+
+                SystemConfigs::Configs(configs)
+            }
+        }
+    }
+
+    fn after_set<T: SystemSet>(self, set: T) -> SystemConfigs
+    where
+        Self: Sized,
+    {
+        match self.configs() {
+            SystemConfigs::Config(mut config) => {
+                config.dependencies.insert(set.identify());
+                SystemConfigs::Config(config)
+            }
+            SystemConfigs::Configs(mut configs) => {
+                for config in configs.iter_mut() {
+                    config.dependencies.insert(set.identify());
+                }
+
+                SystemConfigs::Configs(configs)
+            }
+        }
+    }
 }
 
 impl IntoSystemConfigs<()> for SystemConfigs {
@@ -279,11 +341,13 @@ impl IntoSystemConfigs<()> for SystemConfigs {
 impl<F: Fn() + Send + Sync + 'static> IntoSystemConfig<()> for F {
     fn config(self) -> SystemConfig {
         SystemConfig {
-            id: SystemId::new(),
-            name: None,
+            id: SystemType::<F>::new().identify(),
+            name: std::any::type_name::<F>(),
+            set: None,
             exclusive: false,
             send: true,
             dependencies: HashSet::new(),
+            dependents: HashSet::new(),
             init: |_, _| Box::new(()),
             run: Box::new(move |_, _, _| {
                 self();
