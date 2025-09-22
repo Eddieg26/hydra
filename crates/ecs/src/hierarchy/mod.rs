@@ -113,9 +113,9 @@ impl Component for Children {}
 
 pub trait HierarchyExt<Q: BaseQuery, F: BaseFilter> {
     fn parent(&self, entity: Entity) -> Option<Q::Item<'_>>;
-    fn children(&self, entity: Entity) -> ChildIter<Q, F>;
-    fn ancestors(&self, entity: Entity) -> AncestorIter<Q, F>;
-    fn descendents(&self, entity: Entity) -> DescendentIter<Q, F>;
+    fn children(&'_ self, entity: Entity) -> ChildIter<'_, Q, F>;
+    fn ancestors(&'_ self, entity: Entity) -> AncestorIter<'_, Q, F>;
+    fn descendents(&'_ self, entity: Entity) -> DescendentIter<'_, Q, F>;
 }
 
 impl<'w, 's, Q: BaseQuery, F: BaseFilter> HierarchyExt<Q, F> for Query<'w, 's, Q, F> {
@@ -126,15 +126,15 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> HierarchyExt<Q, F> for Query<'w, 's, Q
         self.get_item(parent)
     }
 
-    fn children(&self, entity: Entity) -> ChildIter<Q, F> {
+    fn children(&'_ self, entity: Entity) -> ChildIter<'_, Q, F> {
         ChildIter::new(entity, self)
     }
 
-    fn ancestors(&self, entity: Entity) -> AncestorIter<Q, F> {
+    fn ancestors(&'_ self, entity: Entity) -> AncestorIter<'_, Q, F> {
         AncestorIter::new(entity, self)
     }
 
-    fn descendents(&self, entity: Entity) -> DescendentIter<Q, F> {
+    fn descendents(&'_ self, entity: Entity) -> DescendentIter<'_, Q, F> {
         DescendentIter::new(entity, self)
     }
 }

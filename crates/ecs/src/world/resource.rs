@@ -362,6 +362,7 @@ mod tests {
     use crate::core::Frame;
     use std::rc::Rc;
 
+    #[allow(dead_code)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Value(u32);
     impl Resource for Value {}

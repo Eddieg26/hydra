@@ -83,7 +83,7 @@ impl Buffer {
         &self.label
     }
 
-    pub fn slice<S: RangeBounds<u64>>(&self, bounds: S) -> BufferSlice {
+    pub fn slice<S: RangeBounds<u64>>(&'_ self, bounds: S) -> BufferSlice<'_> {
         BufferSlice::new(self, bounds)
     }
 

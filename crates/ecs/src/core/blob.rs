@@ -4,12 +4,20 @@ use std::{
     ptr::{self},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct TypeMeta {
     pub name: &'static str,
     pub layout: Layout,
     pub drop: Option<fn(data: *mut u8)>,
 }
+
+impl PartialEq for TypeMeta {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.layout == other.layout
+    }
+}
+
+impl Eq for TypeMeta {}
 
 impl TypeMeta {
     pub fn new<T: 'static>() -> Self {

@@ -51,7 +51,7 @@ impl<T: ShaderType + WriteInto> UniformBuffer<T> {
         &self.buffer
     }
 
-    pub fn binding(&self) -> BindingResource {
+    pub fn binding(&'_ self) -> BindingResource<'_> {
         self.buffer.as_entire_binding()
     }
 
@@ -156,7 +156,7 @@ impl<T: ShaderType> UniformBufferArray<T> {
         &self.buffer
     }
 
-    pub fn binding(&self) -> BindingResource {
+    pub fn binding(&'_ self) -> BindingResource<'_> {
         self.buffer.as_entire_binding()
     }
 

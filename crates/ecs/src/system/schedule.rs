@@ -32,7 +32,7 @@ impl<'a> PhaseContext<'a> {
         }
     }
 
-    pub unsafe fn world(&self) -> WorldCell {
+    pub unsafe fn world(&'_ self) -> WorldCell<'_> {
         self.world
     }
 

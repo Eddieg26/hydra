@@ -2486,10 +2486,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "render-2d"
-version = "0.1.0"
-
-[[package]]
 name = "render-example"
 version = "0.1.0"
 dependencies = [
@@ -2653,14 +2649,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95890f873bec569a0362c235787f3aca6e1e887302ba4840839bcc6459c42da6"
 dependencies = [
  "quote",
-]
-
-[[package]]
-name = "simple"
-version = "0.1.0"
-dependencies = [
- "ecs",
- "smol",
 ]
 
 [[package]]

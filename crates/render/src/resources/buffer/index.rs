@@ -123,7 +123,7 @@ impl IndexBuffer {
         self.buffer.size()
     }
 
-    pub fn slice<S: RangeBounds<u64>>(&self, range: S) -> IndexSlice {
+    pub fn slice<S: RangeBounds<u64>>(&'_ self, range: S) -> IndexSlice<'_> {
         IndexSlice {
             format: self.format,
             slice: self.buffer.slice(range),

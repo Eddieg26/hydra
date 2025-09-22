@@ -224,7 +224,7 @@ impl World {
         self.resources.remove_by_id(id, self.frame)
     }
 
-    pub unsafe fn cell(&self) -> WorldCell {
+    pub unsafe fn cell(&'_ self) -> WorldCell<'_> {
         unsafe { WorldCell::new(self) }
     }
 }
@@ -328,7 +328,7 @@ impl World {
         }
     }
 
-    pub fn entity_mut(&mut self, entity: Entity) -> EntityMut {
+    pub fn entity_mut(&'_ mut self, entity: Entity) -> EntityMut<'_> {
         let index = self.archetypes.get_entity(entity).unwrap();
         EntityMut::new(self, entity, index)
     }

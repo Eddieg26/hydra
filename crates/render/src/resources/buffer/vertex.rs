@@ -47,7 +47,7 @@ impl VertexBuffer {
         &self.buffer
     }
 
-    pub fn slice<S: RangeBounds<BufferAddress>>(&self, bounds: S) -> BufferSlice {
+    pub fn slice<S: RangeBounds<BufferAddress>>(&'_ self, bounds: S) -> BufferSlice<'_> {
         self.buffer.slice(bounds)
     }
 

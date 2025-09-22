@@ -45,11 +45,11 @@ impl<E: Event> Events<E> {
         self.read = std::mem::take(&mut self.write);
     }
 
-    pub fn writer(&mut self) -> EventWriter<E> {
+    pub fn writer(&'_ mut self) -> EventWriter<'_, E> {
         EventWriter::new(&mut self.write)
     }
 
-    pub fn reader(&self) -> EventReader<E> {
+    pub fn reader(&'_ self) -> EventReader<'_, E> {
         EventReader::new(self)
     }
 
