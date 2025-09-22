@@ -16,10 +16,8 @@ members = [
     "crates/math",
     "crates/gilrs",
     "crates/render",
-    "crates/render-2d",
     "crates/transform",
     "crates/window",
-    "examples/ecs/*",
     "examples/window",
     "examples/render",
 ]
