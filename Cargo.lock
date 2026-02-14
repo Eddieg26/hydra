@@ -699,6 +699,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive-reflect"
+version = "0.1.0"
+dependencies = [
+ "encase_derive_impl 0.11.0",
+ "macro-utils",
+]
+
+[[package]]
 name = "derive-render"
 version = "0.1.0"
 dependencies = [
@@ -2457,6 +2465,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "928fca9cf2aa042393a8325b9ead81d2f0df4cb12e1e24cef072922ccd99c5af"
 dependencies = [
  "bitflags 2.9.1",
+]
+
+[[package]]
+name = "reflection"
+version = "0.1.0"
+dependencies = [
+ "derive-reflect",
 ]
 
 [[package]]

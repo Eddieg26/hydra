@@ -85,7 +85,7 @@ impl<S: Settings> ErasedAssetSettings for AssetSettings<S> {
     }
 }
 
-#[allow(unused_imports)]
+#[cfg(test)]
 mod tests {
     use crate::{
         ext::{DeserializeExt, SerializeExt},

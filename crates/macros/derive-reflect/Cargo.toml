@@ -1,0 +1,12 @@
+[package]
+name = "derive-reflect"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "derive_reflect"
+proc-macro = true
+
+[dependencies]
+encase_derive_impl = "0.11.0"
+macro-utils = { path = "../utils" }

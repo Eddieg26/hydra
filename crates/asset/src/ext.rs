@@ -28,7 +28,7 @@ impl<T: DeserializeOwned> DeserializeExt for T {
 pub trait PathExt {
     fn ext(&self) -> Option<&str>;
     fn append_ext(&self, ext: &str) -> PathBuf;
-    fn with_prefix(&self, prefix: impl AsRef<Path>) -> Cow<Path>;
+    fn with_prefix(&'_ self, prefix: impl AsRef<Path>) -> Cow<'_, Path>;
     fn without_prefix(&self, prefix: impl AsRef<Path>) -> &Path;
 }
 
@@ -41,7 +41,7 @@ impl<T: AsRef<Path>> PathExt for T {
         format!("{}.{}", path.display(), ext).into()
     }
 
-    fn with_prefix(&self, prefix: impl AsRef<Path>) -> Cow<Path> {
+    fn with_prefix(&'_ self, prefix: impl AsRef<Path>) -> Cow<'_, Path> {
         match self.as_ref().starts_with(prefix.as_ref()) {
             false => Cow::Owned(prefix.as_ref().join(self)),
             true => Cow::Borrowed(self.as_ref()),

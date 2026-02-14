@@ -1017,14 +1017,10 @@ macro_rules! impl_base_filter_for_tuples {
 
 variadics::variable_impl!(impl_base_filter_for_tuples, P, 2, 16);
 
-#[allow(unused_imports, dead_code)]
+#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        ComponentKit, Components, WorldAccess,
-        system::SystemMeta,
-        world::{ComponentRemover, ComponentWriter},
-    };
+    use crate::ComponentKit;
 
     #[derive(Debug, Default, PartialEq, Eq)]
     struct Age(u32);
