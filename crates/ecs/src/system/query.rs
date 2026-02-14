@@ -993,7 +993,22 @@ macro_rules! impl_base_filter_for_tuples {
             type Data = ($($name::Data), *);
 
             fn init(world: &mut World, access: &mut ArchetypeAccess) -> Self::Data {
-                ($($name::init(world, access),)*)
+                // For Or filters, we need to register component access for safety
+                // but NOT add them to includes, since we want ANY condition, not ALL.
+                // Each condition is initialized with a temporary access, then we copy
+                // only the read/write tracking to the main access using read_optional/write_optional.
+                $(
+                    let mut temp_access = ArchetypeAccess::new();
+                    let $name = $name::init(world, &mut temp_access);
+                    // Copy access tracking (read/write) for safety, but not includes
+                    for component_idx in temp_access.reads().ones() {
+                        access.read_optional(ComponentId::from_usize(component_idx));
+                    }
+                    for component_idx in temp_access.writes().ones() {
+                        access.write_optional(ComponentId::from_usize(component_idx));
+                    }
+                )*
+                ($($name,)*)
             }
 
             fn state<'w>(data: Self::Data, world: WorldCell<'w>, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
@@ -1187,6 +1202,7 @@ mod tests {
             &mut world,
             &mut ArchetypeAccess::new(),
         );
+        state.update(&mut world); // Add this line to update the archetypes list
         let query = Query::new(unsafe { world.cell() }, &mut state);
 
         assert!(query.contains(entity_a));
@@ -1219,4 +1235,44 @@ mod tests {
 
         assert!(!access.is_disjoint(&other))
     }
+
+    // Feature: fix-ecs-query-filters, Property 1: Added filter matches newly added components
+    // **Validates: Requirements 1.2, 2.1**
+    #[quickcheck_macros::quickcheck]
+    fn prop_added_filter_matches_new_components(age_values: Vec<u32>) -> bool {
+        // Limit the number of entities to avoid excessive test time
+        let age_values: Vec<u32> = age_values.into_iter().take(50).collect();
+        
+        if age_values.is_empty() {
+            return true;
+        }
+
+        let mut world = World::new();
+        world.register::<Age>();
+        world.register::<Name>();
+
+        // Generate random entities and add components
+        let mut entities = Vec::new();
+        for age_value in &age_values {
+            let entity = world.spawn();
+            world.add_component(entity, Age(*age_value));
+            world.add_component(entity, Name("Test"));
+            entities.push(entity);
+        }
+
+        // Query with Added<Name> filter - should match all entities since Name was just added
+        let mut state =
+            QueryState::<&Age, Added<Name>>::new(&mut world, &mut ArchetypeAccess::new());
+        let query = Query::new(unsafe { world.cell() }, &mut state);
+
+        // Verify all entities are matched by the Added<Name> filter
+        for entity in entities {
+            if !query.contains(entity) {
+                return false;
+            }
+        }
+
+        true
+    }
 }
+

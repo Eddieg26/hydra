@@ -262,7 +262,7 @@ impl World {
 
     pub fn add_component<C: Component>(&mut self, entity: Entity, component: C) -> EntityIndex {
         self.archetypes
-            .add_component(entity, component, self.frame + Frame(1))
+            .add_component(entity, component, self.frame)
     }
 
     pub fn remove_component<C: Component>(&mut self, entity: Entity) -> Option<EntityIndex> {
