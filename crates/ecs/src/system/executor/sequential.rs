@@ -26,7 +26,7 @@ impl SequentialExecutor {
 impl SystemExecutor for SequentialExecutor {
     fn execute(&self, mut world: crate::world::WorldCell) {
         let mut set = FixedBitSet::with_capacity(self.systems.len());
-        for index in &self.order {
+        for index in self.order.iter() {
             let system = &self.systems[*index];
             unsafe {
                 let ran = system.cast_mut().run(world);

@@ -232,6 +232,13 @@ impl AppAccess {
             return Err(AccessError::from(ComponentId::from_usize(conflict)));
         }
 
+        // Check for conflicts between component access and archetype accesses
+        for access in &self.archetypes {
+            if let Err(conflict) = access.access.conflicts(&self.components) {
+                return Err(AccessError::from(ComponentId::from_usize(conflict)));
+            }
+        }
+
         for (index, access) in self.archetypes.iter().enumerate() {
             for other in self.archetypes.iter().skip(index + 1) {
                 if let Err(conflict) = access.conflicts(other) {

@@ -107,8 +107,17 @@ impl PhaseConfig {
                 }
             }
 
+            // Exclusive systems conflict with all other systems.
+            // The earlier system (node) should run first, so the later system (other) depends on node.
+            if node.config.exclusive || other.config.exclusive {
+                return Some(false);
+            }
+
+            // When there's a conflict, the earlier system (node) should run first,
+            // so the later system (other) depends on the earlier system (node).
+            // Return Some(false) to indicate that other depends on node.
             if node.access.conflicts(&other.access).is_err() {
-                Some(true)
+                Some(false)
             } else {
                 None
             }

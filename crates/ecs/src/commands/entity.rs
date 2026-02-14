@@ -506,9 +506,9 @@ impl EntityCommands<'_> {
 #[allow(unused_imports, dead_code)]
 mod tests {
     use super::{
-        AddChild, AddChildren, Despawn, RemoveAllChildren, RemoveChild, RemoveChildren, Spawner,
+        AddChild, AddChildren, Despawn, Despawned, RemoveAllChildren, RemoveChild, RemoveChildren, Spawner,
     };
-    use crate::{Children, Command, CommandBuffer, Component, Parent, SystemArg, World};
+    use crate::{Children, Command, CommandBuffer, Component, Events, Parent, SystemArg, World};
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct Age(u32);
@@ -570,6 +570,7 @@ mod tests {
         let mut world = World::new();
         world.register::<Parent>();
         world.register::<Children>();
+        world.add_resource(Events::<Despawned>::new());
 
         let mut commands = CommandBuffer::new();
         let mut spawner = Spawner::new(&mut world, &mut commands);
