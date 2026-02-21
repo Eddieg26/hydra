@@ -6,10 +6,7 @@ use super::{
 use crate::{Aabb, RenderAssetType, primitives::Color};
 use asset::{Asset, AssetId};
 use ecs::{Component, IndexMap, system::ArgItem};
-use std::{
-    hash::{DefaultHasher, Hash, Hasher},
-    ops::Range,
-};
+use std::{hash::Hash, ops::Range};
 use wgpu::{IndexFormat, VertexStepMode};
 
 pub mod allocator;
@@ -443,6 +440,22 @@ impl Mesh {
         }
     }
 
+    pub fn flags(&self) -> MeshFlags {
+        let mut flags = MeshFlags::empty();
+        for attribute in &self.attributes {
+            match attribute.ty {
+                MeshAttributeType::Position => flags.set(MeshFlags::POSITION, true),
+                MeshAttributeType::Normal => flags.set(MeshFlags::NORMAL, true),
+                MeshAttributeType::TexCoord0 => flags.set(MeshFlags::UV0, true),
+                MeshAttributeType::TexCoord1 => flags.set(MeshFlags::UV1, true),
+                MeshAttributeType::Tangent => flags.set(MeshFlags::TANGENT, true),
+                MeshAttributeType::Color => flags.set(MeshFlags::COLOR, true),
+            }
+        }
+
+        flags
+    }
+
     pub fn layout(&self) -> MeshLayout {
         MeshLayout::from(
             self.attributes
@@ -492,12 +505,12 @@ impl Mesh {
             .collect::<Vec<_>>();
 
         let layout = MeshLayout::from(attributes);
-        let key = MeshKey::from(&layout);
+        let key = MeshFlags::from(&layout);
 
         self.calculate_bounds();
 
         RenderMesh {
-            key,
+            flags: key,
             layout: layout.into(),
             vertex_count: self.vertex_count() as u32,
             format: match self.indices {
@@ -597,27 +610,34 @@ impl MeshAttributeLayout {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeshLayout(Box<[MeshAttributeLayout]>);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MeshKey(u64);
-impl From<&MeshLayout> for MeshKey {
-    fn from(value: &MeshLayout) -> Self {
-        let mut hasher = DefaultHasher::new();
-        for attribute in &value.0 {
-            attribute.format.hash(&mut hasher);
-        }
-
-        Self(hasher.finish())
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct MeshFlags: u64 {
+        const POSITION      = 1 << 0;
+        const NORMAL        = 1 << 1;
+        const UV0           = 1 << 2;
+        const UV1           = 1 << 3;
+        const TANGENT       = 1 << 4;
+        const COLOR         = 1 << 5;
+        const SKINNING      = 1 << 6;
     }
 }
 
-impl<'a, I: IntoIterator<Item = &'a wgpu::VertexFormat>> From<I> for MeshKey {
-    fn from(value: I) -> Self {
-        let mut hasher = DefaultHasher::new();
-        for format in value {
-            format.hash(&mut hasher);
+impl From<&MeshLayout> for MeshFlags {
+    fn from(value: &MeshLayout) -> Self {
+        let mut key = MeshFlags::empty();
+        for attribute in &value.0 {
+            match attribute.ty {
+                MeshAttributeType::Position => key.set(MeshFlags::POSITION, true),
+                MeshAttributeType::Normal => key.set(MeshFlags::NORMAL, true),
+                MeshAttributeType::TexCoord0 => key.set(MeshFlags::UV0, true),
+                MeshAttributeType::TexCoord1 => key.set(MeshFlags::UV1, true),
+                MeshAttributeType::Tangent => key.set(MeshFlags::TANGENT, true),
+                MeshAttributeType::Color => key.set(MeshFlags::COLOR, true),
+            }
         }
 
-        Self(hasher.finish())
+        key
     }
 }
 
@@ -699,7 +719,7 @@ pub enum MeshFormat {
 }
 
 pub struct RenderMesh {
-    key: MeshKey,
+    flags: MeshFlags,
     layout: MeshLayout,
     vertex_count: u32,
     format: MeshFormat,
@@ -707,8 +727,8 @@ pub struct RenderMesh {
 }
 
 impl RenderMesh {
-    pub fn key(&self) -> MeshKey {
-        self.key
+    pub fn flags(&self) -> MeshFlags {
+        self.flags
     }
 
     pub fn layout(&self) -> &MeshLayout {

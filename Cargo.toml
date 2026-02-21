@@ -15,11 +15,13 @@ members = [
     "crates/input",
     "crates/math",
     "crates/gilrs",
+    "crates/reflection",
     "crates/render",
+    "crates/render-3d",
     "crates/transform",
     "crates/window",
     "examples/window",
-    "examples/render", "crates/reflection",
+    "examples/render",
 ]
 
 

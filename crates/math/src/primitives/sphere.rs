@@ -1,3 +1,4 @@
+use glam::{Mat4, Vec4};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -21,6 +22,19 @@ impl Sphere {
 
     pub fn contains_point(&self, point: glam::Vec3) -> bool {
         (point - self.center).length_squared() <= self.radius.powi(2)
+    }
+
+    pub fn transform(&self, matrix: Mat4) -> Sphere {
+        Sphere {
+            center: matrix.transform_point3(self.center),
+            radius: matrix.transform_vector3(self.center).length(),
+        }
+    }
+}
+
+impl Into<Vec4> for Sphere {
+    fn into(self) -> Vec4 {
+        Vec4::new(self.center.x, self.center.y, self.center.z, self.radius)
     }
 }
 

@@ -1,4 +1,5 @@
 use crate::{
+    AssetId,
     asset::{Asset, AssetType, ErasedAsset, ErasedId},
     database::{
         library::AssetLibrary,
@@ -91,6 +92,24 @@ impl AssetDatabase {
 
     pub fn sources(&self) -> &AssetSources {
         self.config.sources()
+    }
+
+    pub fn asset_id<A: Asset>(&self, path: &AssetPath<'static>) -> Option<AssetId<A>> {
+        let id = {
+            let library = self.library.read_blocking();
+            library.get(path).copied()
+        };
+
+        return id.map(AssetId::<A>::from);
+    }
+
+    pub fn asset_path(&self, id: &ErasedId) -> Option<AssetPath<'static>> {
+        let path = {
+            let library = self.library.read_blocking();
+            library.path(id).cloned()
+        };
+
+        path
     }
 
     pub async fn send_event(&self, event: impl Into<AssetDatabaseEvent>) {

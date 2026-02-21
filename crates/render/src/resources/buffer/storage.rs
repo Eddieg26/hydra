@@ -83,6 +83,14 @@ impl<T: ShaderType + WriteInto> StorageBuffer<T> {
     }
 }
 
+impl<T: ShaderType + WriteInto> std::ops::Deref for StorageBuffer<T> {
+    type Target = Buffer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.buffer
+    }
+}
+
 impl<T: ShaderType + WriteInto> AsRef<Buffer> for StorageBuffer<T> {
     fn as_ref(&self) -> &Buffer {
         &self.buffer
@@ -203,6 +211,14 @@ impl<T: ShaderType + WriteInto> StorageBufferArray<T> {
         self.data.write(value).unwrap() as DynamicOffset
     }
 
+    pub fn append(&mut self, values: impl IntoIterator<Item = T>) -> Vec<DynamicOffset> {
+        self.is_dirty = true;
+        values
+            .into_iter()
+            .map(|value| self.data.write(&value).unwrap() as DynamicOffset)
+            .collect()
+    }
+
     pub fn set(&mut self, index: usize, values: impl IntoIterator<Item = T>) -> Vec<DynamicOffset> {
         self.is_dirty = true;
         self.data
@@ -227,10 +243,23 @@ impl<T: ShaderType + WriteInto> StorageBufferArray<T> {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.data.set_offset(0);
+        self.is_dirty = true;
+    }
+
     pub fn clear(&mut self) {
         self.data.as_mut().clear();
         self.data.set_offset(0);
         self.is_dirty = true;
+    }
+}
+
+impl<T: ShaderType> std::ops::Deref for StorageBufferArray<T> {
+    type Target = Buffer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.buffer
     }
 }
 

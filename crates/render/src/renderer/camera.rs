@@ -325,9 +325,9 @@ impl Phase for CameraPhase {
 /// A plane is represented as a 4D vector: ax + by + cz + d = 0
 /// Where (a, b, c) is the normal and d is the distance
 #[derive(Default, Debug, Clone, Copy, ShaderType)]
-struct Plane {
-    normal: Vec3,
-    d: f32,
+pub struct Plane {
+    pub normal: Vec3,
+    pub d: f32,
 }
 
 impl Plane {
@@ -344,7 +344,7 @@ impl Plane {
 
 #[derive(Clone, Copy, ShaderType)]
 pub struct Frustum {
-    planes: [Plane; 6],
+    pub planes: [Plane; 6],
 }
 
 impl Frustum {
