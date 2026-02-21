@@ -52,15 +52,28 @@ pub struct Pipeline;
 
 pub type PipelineId = AtomicId<Pipeline>;
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PipelineKey {
+    Render {
+        vertex_shader: AssetId<GpuShader>,
+        fragment_shader: Option<AssetId<GpuShader>>,
+    },
+    Compute {
+        shader: AssetId<GpuShader>,
+    },
+}
+
 pub struct RenderPipeline {
     id: PipelineId,
+    key: PipelineKey,
     pipeline: Arc<wgpu::RenderPipeline>,
 }
 
 impl RenderPipeline {
-    pub fn new(id: PipelineId, pipeline: wgpu::RenderPipeline) -> Self {
+    pub fn new(id: PipelineId, key: PipelineKey, pipeline: wgpu::RenderPipeline) -> Self {
         Self {
             id,
+            key,
             pipeline: Arc::new(pipeline),
         }
     }
@@ -76,6 +89,11 @@ impl RenderPipeline {
         let fragment_shader = match &desc.fragment {
             Some(fragment) => Some(shaders.get(fragment.shader.as_ref())?),
             None => None,
+        };
+
+        let key = PipelineKey::Render {
+            vertex_shader: desc.vertex.shader,
+            fragment_shader: desc.fragment.as_ref().map(|f| f.shader),
         };
 
         let bind_group_layouts = desc
@@ -121,20 +139,15 @@ impl RenderPipeline {
             multiview: None,
         });
 
-        Some(Self::new(id, pipeline))
+        Some(Self::new(id, key, pipeline))
     }
 
     pub fn id(&self) -> PipelineId {
         self.id
     }
-}
 
-impl From<wgpu::RenderPipeline> for RenderPipeline {
-    fn from(pipeline: wgpu::RenderPipeline) -> Self {
-        Self {
-            id: PipelineId::new(),
-            pipeline: Arc::new(pipeline),
-        }
+    pub fn key(&self) -> &PipelineKey {
+        &self.key
     }
 }
 
@@ -161,13 +174,19 @@ pub struct ComputePipelineDesc {
 
 pub struct ComputePipeline {
     id: PipelineId,
+    shader: AssetId<GpuShader>,
     pipeline: Arc<wgpu::ComputePipeline>,
 }
 
 impl ComputePipeline {
-    pub fn new(id: PipelineId, pipeline: wgpu::ComputePipeline) -> Self {
+    pub fn new(
+        id: PipelineId,
+        shader: AssetId<GpuShader>,
+        pipeline: wgpu::ComputePipeline,
+    ) -> Self {
         Self {
             id,
+            shader,
             pipeline: Arc::new(pipeline),
         }
     }
@@ -201,19 +220,20 @@ impl ComputePipeline {
             cache: None,
         });
 
-        Some(Self::new(id, pipeline))
+        Some(Self::new(id, desc.shader, pipeline))
     }
 
     pub fn id(&self) -> PipelineId {
         self.id
     }
-}
 
-impl From<wgpu::ComputePipeline> for ComputePipeline {
-    fn from(pipeline: wgpu::ComputePipeline) -> Self {
-        Self {
-            id: PipelineId::new(),
-            pipeline: Arc::new(pipeline),
+    pub fn shader(&self) -> AssetId<GpuShader> {
+        self.shader
+    }
+
+    pub fn key(&self) -> PipelineKey {
+        PipelineKey::Compute {
+            shader: self.shader,
         }
     }
 }

@@ -253,8 +253,11 @@ impl RenderAsset for GpuShader {
             .map_err(|e| super::ExtractError::from_error(e))
     }
 
-    fn usage(_: &Self::Source) -> super::AssetUsage {
-        super::AssetUsage::Discard
+    fn usage(asset: &Self::Source) -> super::AssetUsage {
+        match asset {
+            Shader::Wgsl { .. } => super::AssetUsage::Keep,
+            _ => super::AssetUsage::Discard,
+        }
     }
 }
 

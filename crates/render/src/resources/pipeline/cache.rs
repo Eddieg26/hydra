@@ -1,5 +1,6 @@
 use super::{ComputePipeline, ComputePipelineDesc, PipelineId, RenderPipeline, RenderPipelineDesc};
 use crate::{
+    PipelineKey,
     device::RenderDevice,
     resources::{ExtractInfo, extract::RenderAssets, shader::GpuShader},
 };
@@ -25,6 +26,7 @@ pub enum QueuedPipeline {
 
 #[derive(Default)]
 pub struct PipelineCache {
+    cache: HashMap<PipelineKey, PipelineId>,
     shaders: HashMap<AssetId<GpuShader>, ShaderPipelines>,
     render_pipelines: HashMap<PipelineId, RenderPipeline>,
     compute_pipelines: HashMap<PipelineId, ComputePipeline>,
@@ -34,11 +36,16 @@ pub struct PipelineCache {
 impl PipelineCache {
     pub fn new() -> Self {
         Self {
+            cache: HashMap::new(),
             shaders: HashMap::new(),
             render_pipelines: HashMap::new(),
             compute_pipelines: HashMap::new(),
             pipeline_queue: IndexMap::new(),
         }
+    }
+
+    pub fn get_pipeline_id(&self, key: &PipelineKey) -> Option<&PipelineId> {
+        self.cache.get(key)
     }
 
     pub fn get_render_pipeline(&self, id: &PipelineId) -> Option<&RenderPipeline> {
@@ -50,6 +57,15 @@ impl PipelineCache {
     }
 
     pub fn queue_render_pipeline(&mut self, desc: RenderPipelineDesc) -> PipelineId {
+        let key = PipelineKey::Render {
+            vertex_shader: desc.vertex.shader,
+            fragment_shader: desc.fragment.as_ref().map(|f| f.shader),
+        };
+
+        if let Some(id) = self.cache.get(&key) {
+            return *id;
+        };
+
         let id = PipelineId::new();
 
         self.add_shader_dependency(&desc.vertex.shader, id);
@@ -61,10 +77,20 @@ impl PipelineCache {
         self.pipeline_queue
             .insert(id, QueuedPipeline::Render { id, desc });
 
+        self.cache.insert(key, id);
+
         id
     }
 
     pub fn queue_compute_pipeline(&mut self, desc: ComputePipelineDesc) -> PipelineId {
+        let key = PipelineKey::Compute {
+            shader: desc.shader,
+        };
+
+        if let Some(id) = self.cache.get(&key) {
+            return *id;
+        };
+
         let id = PipelineId::new();
 
         self.add_shader_dependency(&desc.shader, id);
@@ -72,11 +98,15 @@ impl PipelineCache {
         self.pipeline_queue
             .insert(id, QueuedPipeline::Compute { id, desc });
 
+        self.cache.insert(key, id);
+
         id
     }
 
     pub fn remove_render_pipeline(&mut self, id: PipelineId) -> Option<RenderPipeline> {
         let pipeline = self.render_pipelines.remove(&id);
+        pipeline.as_ref().and_then(|p| self.cache.remove(p.key()));
+
         self.pipeline_queue.shift_remove(&id);
 
         pipeline
@@ -84,6 +114,8 @@ impl PipelineCache {
 
     pub fn remove_compute_pipeline(&mut self, id: PipelineId) -> Option<ComputePipeline> {
         let pipeline = self.compute_pipelines.remove(&id);
+        pipeline.as_ref().and_then(|p| self.cache.remove(&p.key()));
+
         self.pipeline_queue.shift_remove(&id);
 
         pipeline
