@@ -18,7 +18,7 @@ members = [
     "crates/transform",
     "crates/window",
     "crates/reflection",
-    "examples/window",
+    "examples/window", "crates/renderer",
 ]
 
 
