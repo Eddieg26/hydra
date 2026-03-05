@@ -1,11 +1,17 @@
 pub fn short_type_name<T: ?Sized>() -> &'static str {
     let name = std::any::type_name::<T>();
-    let name = name.split("::").last().unwrap_or(name);
+    let bytes = name.as_bytes();
+    let mut i = bytes.len();
 
-    let start = name.find("<").unwrap_or(0);
-    let end = name.find(">").unwrap_or(name.len());
+    // Walk backwards looking for the last occurrence of "::"
+    while i >= 2 {
+        if bytes[i - 2] == b':' && bytes[i - 1] == b':' {
+            return &name[i..];
+        }
+        i -= 1;
+    }
 
-    &name[start..end]
+    name
 }
 
 pub fn align_to(value: usize, alignment: usize) -> usize {
