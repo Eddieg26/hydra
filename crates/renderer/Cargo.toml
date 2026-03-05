@@ -12,3 +12,4 @@ window = { path = "../window" }
 bytemuck = { workspace = true }
 wgpu = { workspace = true }
 encase = { version = "0.10.0", features = ["glam"] }
+wgsl-macro = "0.4.0"

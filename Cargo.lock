@@ -2059,6 +2059,7 @@ dependencies = [
  "math",
  "transform",
  "wgpu",
+ "wgsl-macro",
  "window",
 ]
 
@@ -2949,6 +2950,12 @@ dependencies = [
  "thiserror 2.0.12",
  "web-sys",
 ]
+
+[[package]]
+name = "wgsl-macro"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49570e42fcf648938ea5cc7741561592e1e48da55d0fdecfcc04c5790dc73856"
 
 [[package]]
 name = "winapi-util"
