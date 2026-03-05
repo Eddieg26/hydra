@@ -414,6 +414,12 @@ impl<T: Pod> ArrayBuffer<T> {
         &self.inner
     }
 
+    pub fn push(&mut self, value: T) -> usize {
+        let index = self.data.len();
+        self.data.push(value);
+        index
+    }
+
     pub fn clear(&mut self) {
         self.dirty = true;
         self.data.clear();
