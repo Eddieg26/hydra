@@ -1,4 +1,5 @@
-use crate::{core::RenderDevice, resources::id::GpuResourceId};
+use crate::{core::RenderDevice, types::Color};
+use asset::Asset;
 use std::{collections::HashMap, sync::Arc};
 use wgpu::{
     CompareFunction, FilterMode, Label, SamplerBorderColor, TextureFormat, TextureUsages,
@@ -128,7 +129,7 @@ pub enum TextureSampler {
     },
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Asset)]
 pub struct Texture {
     pub dimension: TextureDimension,
     pub format: TextureFormat,
@@ -139,8 +140,25 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub fn solid(dimension: TextureDimension) -> Self {
-        todo!()
+    pub fn solid(color: Color, dimension: TextureDimension) -> Self {
+        let (r, g, b, a) = color.to_bytes();
+        let pixel: &[u8; 4] = &[r, g, b, a];
+        let extent = dimension.extents();
+        let num_pixels = extent.width * extent.height * extent.depth_or_array_layers;
+        let mut pixels = Vec::new();
+
+        for _ in 0..num_pixels {
+            pixels.extend_from_slice(pixel);
+        }
+
+        Self {
+            dimension,
+            format: TextureFormat::Rgba8UnormSrgb,
+            mips: false,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            sampler: TextureSampler::Default,
+            pixels,
+        }
     }
 }
 
