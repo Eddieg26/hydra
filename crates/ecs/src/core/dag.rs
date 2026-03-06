@@ -8,7 +8,6 @@ pub struct IndexDag<N> {
     dependents: Vec<FixedBitSet>,
     dependencies: Vec<usize>,
     topology: Vec<usize>,
-    is_dirty: bool,
 }
 
 impl<N> IndexDag<N> {
@@ -18,7 +17,6 @@ impl<N> IndexDag<N> {
             dependents: vec![],
             dependencies: vec![],
             topology: vec![],
-            is_dirty: false,
         }
     }
 
@@ -51,7 +49,6 @@ impl<N> IndexDag<N> {
         self.nodes.push(node);
         self.dependencies.push(0);
         self.dependents.push(FixedBitSet::with_capacity(index));
-        self.is_dirty = true;
 
         index
     }
@@ -60,14 +57,12 @@ impl<N> IndexDag<N> {
         self.dependencies[index] += 1;
         self.dependents[dependency].grow(index + 1);
         self.dependents[dependency].set(index, true);
-        self.is_dirty = true;
     }
 
     pub fn remove_dependency(&mut self, dependency: usize, index: usize) -> bool {
         if index < self.dependents[dependency].len() && self.dependents[dependency][index] {
             self.dependents[dependency].set(index, false);
             self.dependencies[index] -= 1;
-            self.is_dirty = true;
             true
         } else {
             false
@@ -82,67 +77,19 @@ impl<N> IndexDag<N> {
             dependents: self.dependents,
             dependencies: self.dependencies,
             topology: self.topology,
-            is_dirty: self.is_dirty,
+        }
+    }
+
+    pub fn replace<M>(self, values: Vec<M>) -> IndexDag<M> {
+        IndexDag {
+            nodes: values,
+            dependents: self.dependents,
+            dependencies: self.dependencies,
+            topology: self.topology,
         }
     }
 
     pub fn build(&mut self) -> Result<&[usize], CyclicDependency> {
-        // if self.is_dirty {
-        //     let mut order = vec![];
-        //     let mut visited = vec![false; self.nodes.len()];
-        //     let mut recursion_stack = vec![false; self.nodes.len()];
-
-        //     fn visit(
-        //         index: usize,
-        //         dependents: &Vec<FixedBitSet>,
-        //         visited: &mut Vec<bool>,
-        //         recursion_stack: &mut Vec<bool>,
-        //         order: &mut Vec<usize>,
-        //     ) -> Result<(), Vec<usize>> {
-        //         if recursion_stack[index] {
-        //             return Err(vec![index]);
-        //         }
-
-        //         if visited[index] {
-        //             return Ok(());
-        //         }
-
-        //         visited[index] = true;
-        //         recursion_stack[index] = true;
-
-        //         for dependent in dependents[index].ones() {
-        //             if let Err(mut cycle) =
-        //                 visit(dependent, dependents, visited, recursion_stack, order)
-        //             {
-        //                 cycle.push(index);
-        //                 return Err(cycle);
-        //             }
-        //         }
-
-        //         recursion_stack[index] = false;
-        //         order.push(index);
-        //         Ok(())
-        //     }
-
-        //     for index in 0..self.nodes.len() {
-        //         if !visited[index] {
-        //             if let Err(mut cycle) = visit(
-        //                 index,
-        //                 &self.dependents,
-        //                 &mut visited,
-        //                 &mut recursion_stack,
-        //                 &mut order,
-        //             ) {
-        //                 cycle.reverse();
-        //                 return Err(CyclicDependency(cycle));
-        //             }
-        //         }
-        //     }
-
-        //     order.reverse();
-        //     self.topology = order;
-        // }
-
         let mut order = Vec::new();
         let mut dependencies = self.dependencies.clone();
         let mut stack = self
