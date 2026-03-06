@@ -1,8 +1,9 @@
 use crate::{
     core::{RenderDevice, RenderSurface},
     resources::{
-        ExtractError, ExtractInfo, GpuShader, GpuTexture, PipelineCache, RenderAsset,
+        ExtractError, ExtractInfo, GpuMesh, GpuShader, GpuTexture, PipelineCache, RenderAsset,
         RenderAssetRegistry, RenderAssets, ShaderVariants,
+        allocator::{MeshAllocator, MeshAllocatorConfig},
     },
 };
 use asset::plugin::{AssetAppExt, AssetPlugin};
@@ -24,6 +25,7 @@ impl Plugin for RenderPlugin {
             AssetPlugin,
             RenderAssetPlugin::<GpuShader>::new(),
             RenderAssetPlugin::<GpuTexture>::new(),
+            RenderAssetPlugin::<GpuMesh>::new(),
             SyncEventsPlugin::<WindowResized, RenderApp>::new(),
         ))
         .register::<GlobalTransform>()
@@ -33,6 +35,7 @@ impl Plugin for RenderPlugin {
         .add_sub_phase(Run, Commit)
         .add_sub_phase(Run, Render)
         .add_sub_phase(Run, Present)
+        .add_resource(MeshAllocatorConfig::default())
         .add_resource(PipelineCache::new())
         .add_resource(ShaderVariants::new());
     }
@@ -59,6 +62,11 @@ impl Plugin for RenderPlugin {
     fn finish(&mut self, app: &mut AppBuilder) {
         let app = app.sub_app_mut(RenderApp);
 
+        let config = app
+            .remove_resource::<MeshAllocatorConfig>()
+            .unwrap_or_default();
+        app.add_resource(MeshAllocator::new(config));
+
         if let Some(registry) = app.remove_resource::<RenderAssetRegistry>() {
             for config in registry.build() {
                 app.add_systems(Extract, config.extract);
@@ -68,6 +76,7 @@ impl Plugin for RenderPlugin {
 
         app.add_systems(Extract, ShaderVariants::extract);
         app.add_systems(Process, PipelineCache::process);
+        app.add_systems(Commit, MeshAllocator::commit);
     }
 }
 

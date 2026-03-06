@@ -1,7 +1,15 @@
-use crate::{resources::ReadWrite, types::Color};
+use crate::{
+    core::RenderDevice,
+    resources::{ExtractError, ReadWrite, RenderAsset, allocator::MeshAllocator},
+    types::Color,
+};
 use asset::Asset;
 use bitflags::bitflags;
+use ecs::unlifetime::{Read, Write};
 use math::{Vec2, Vec3, Vec4, bounds::Bounds};
+use wgpu::IndexFormat;
+
+pub mod allocator;
 
 #[derive(
     Default, Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
@@ -187,8 +195,31 @@ pub enum Indices {
     U32(Vec<u32>),
 }
 
+impl Indices {
+    pub fn format(&self) -> IndexFormat {
+        match self {
+            Indices::U16(_) => IndexFormat::Uint16,
+            Indices::U32(_) => IndexFormat::Uint32,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Indices::U16(items) => items.len(),
+            Indices::U32(items) => items.len(),
+        }
+    }
+
+    pub fn data(&self) -> &[u8] {
+        match self {
+            Indices::U16(items) => bytemuck::cast_slice(items),
+            Indices::U32(items) => bytemuck::cast_slice(items),
+        }
+    }
+}
+
 bitflags! {
-    #[derive(Debug, Default, Clone, Copy)]
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct MeshFlags: u16 {
         const POSITION_2D = 1;
         const POSITION_3D = 1 << 1;
@@ -199,7 +230,7 @@ bitflags! {
         const COLOR = 1 << 6;
     }
 
-    #[derive(Debug, Default, Clone, Copy)]
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct MeshDirtyFlags: u8 {
         const POSITION = 1 << 1;
         const INDICES = 1 << 2;
@@ -275,9 +306,9 @@ impl Mesh {
         }
     }
 
-    pub fn set_indices(&mut self, indices: Indices) {
+    pub fn set_indices(&mut self, indices: Option<Indices>) {
         self.dirty |= MeshDirtyFlags::INDICES;
-        self.indices = Some(indices);
+        self.indices = indices;
     }
 
     pub fn set_read_write(&mut self, read_write: ReadWrite) {
@@ -328,4 +359,51 @@ pub struct MeshVertexInfo {
     pub size: usize,
     pub count: usize,
     pub flags: MeshFlags,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MeshFormat {
+    NonIndexed,
+    Indexed {
+        format: IndexFormat,
+        index_count: u32,
+    },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct GpuMesh {
+    pub flags: MeshFlags,
+    pub format: MeshFormat,
+    pub vertex_count: u32,
+}
+
+impl RenderAsset for GpuMesh {
+    type Asset = Mesh;
+
+    type Arg = (Read<RenderDevice>, Write<MeshAllocator>);
+
+    fn extract(
+        id: asset::AssetId<Self::Asset>,
+        asset: Self::Asset,
+        (device, allocator): &mut ecs::ArgItem<Self::Arg>,
+    ) -> Result<Self, ExtractError<Self::Asset>> {
+        allocator
+            .allocate(device, &id, &asset)
+            .ok_or(ExtractError::from_str("Failed to extract mesh."))
+    }
+
+    fn removed(
+        id: &asset::AssetId<Self::Asset>,
+        _: &Self,
+        (_, allocator): &mut ecs::ArgItem<Self::Arg>,
+    ) {
+        allocator.release(id);
+    }
+
+    fn usage(asset: &Self::Asset) -> super::AssetUsage {
+        match asset.read_write() {
+            ReadWrite::Enabled => super::AssetUsage::Keep,
+            ReadWrite::Disabled => super::AssetUsage::Discard,
+        }
+    }
 }

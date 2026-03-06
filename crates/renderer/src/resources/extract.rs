@@ -24,9 +24,14 @@ pub enum ReadWrite {
 pub enum ExtractError<T: Send + Sync + 'static> {
     Retry(T),
     Error(Arc<dyn Error + Send + Sync + 'static>),
+    Custom(String),
 }
 
 impl<T: Send + Sync + 'static> ExtractError<T> {
+    pub fn from_str(value: impl ToString) -> Self {
+        Self::Custom(value.to_string())
+    }
+
     pub fn from_error<E: Error + Send + Sync + 'static>(error: E) -> Self {
         Self::Error(Arc::from(error))
     }
@@ -170,6 +175,9 @@ impl RenderAssetConfig {
                 }
                 Err(ExtractError::Error(error)) => {
                     errors.send(ExtractError::Error(error));
+                }
+                Err(ExtractError::Custom(error)) => {
+                    errors.send(ExtractError::Custom(error));
                 }
             }
         }

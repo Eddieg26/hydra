@@ -14,9 +14,9 @@ use wgpu::{
 pub type BufferId = GpuResourceId<Buffer>;
 
 pub struct BufferDesc<'a, T = ()> {
-    label: Option<&'a str>,
-    data: T,
-    usages: BufferUsages,
+    pub label: Option<&'a str>,
+    pub data: T,
+    pub usages: BufferUsages,
 }
 
 #[derive(Clone)]
