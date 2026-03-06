@@ -2,7 +2,7 @@ use bytemuck::{Pod, Zeroable};
 use encase::ShaderType;
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable, ShaderType)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable, ShaderType, serde::Serialize, serde::Deserialize)]
 pub struct Color {
     pub r: f32,
     pub g: f32,

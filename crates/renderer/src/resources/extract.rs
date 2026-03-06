@@ -5,13 +5,15 @@ use ecs::{
 };
 use std::{any::TypeId, collections::HashMap, error::Error, sync::Arc};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum AssetUsage {
     Keep,
     Discard,
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(
+    Default, Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum ReadWrite {
     Enabled,
     #[default]

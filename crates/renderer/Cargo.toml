@@ -10,7 +10,9 @@ math = { path = "../math" }
 transform = { path = "../transform" }
 window = { path = "../window" }
 encase = { version = "0.10.0", features = ["glam"] }
+bitflags = { workspace = true }
 bytemuck = { workspace = true }
 wgpu = { workspace = true }
+serde = { workspace = true }
 smol = { workspace = true }
 wgsl-macro = "0.4.0"

@@ -2053,10 +2053,12 @@ name = "renderer"
 version = "0.1.0"
 dependencies = [
  "asset",
+ "bitflags 2.9.1",
  "bytemuck",
  "ecs",
  "encase",
  "math",
+ "serde",
  "smol",
  "transform",
  "wgpu",
