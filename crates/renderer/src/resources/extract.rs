@@ -1,9 +1,9 @@
 use asset::{Asset, AssetEvent, AssetId, Assets};
 use ecs::{
-    ArgItem, Event, EventReader, EventWriter, FixedBitSet, IntoSystemConfig, Plugin, Resource,
-    SystemArg, SystemConfig, system::Main, unlifetime::StaticArg,
+    ArgItem, Event, EventReader, EventWriter, FixedBitSet, IntoSystemConfig, Resource, SystemArg,
+    SystemConfig, system::Main, unlifetime::StaticArg,
 };
-use std::{any::TypeId, collections::HashMap, error::Error, marker::PhantomData, sync::Arc};
+use std::{any::TypeId, collections::HashMap, error::Error, sync::Arc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AssetUsage {
@@ -54,13 +54,13 @@ pub trait RenderAsset: Send + Sync + Sized + 'static {
         arg: &mut ArgItem<Self::Arg>,
     ) -> Result<Self, ExtractError<Self::Asset>>;
 
-    fn removed(id: &AssetId<Self::Asset>, asset: &Self, arg: &mut ArgItem<Self::Arg>);
+    fn removed(id: &AssetId<Self::Asset>, asset: &Self, arg: &mut ArgItem<Self::Arg>) {}
+
+    fn dependencies(register: impl RenderAssetRegister) {}
 
     fn usage(asset: &Self::Asset) -> AssetUsage {
         AssetUsage::Discard
     }
-
-    fn dependencies(register: impl RenderAssetRegister) {}
 }
 
 #[derive(Resource)]
@@ -90,10 +90,19 @@ pub struct ExtractedAsset<A: Asset + Clone> {
     pub asset: A,
 }
 
-#[derive(Default, Resource)]
+#[derive(Resource)]
 pub struct ExtractInfo<R: RenderAsset> {
     pub assets: Vec<ExtractedAsset<R::Asset>>,
     pub removed: Vec<AssetId<R::Asset>>,
+}
+
+impl<R: RenderAsset> ExtractInfo<R> {
+    pub fn new() -> Self {
+        Self {
+            assets: Vec::new(),
+            removed: Vec::new(),
+        }
+    }
 }
 
 pub struct RenderAssetConfig {
@@ -220,19 +229,5 @@ impl RenderAssetRegistry {
 impl RenderAssetRegister for &mut RenderAssetRegistry {
     fn register<R: RenderAsset>(&mut self) {
         RenderAssetRegistry::register::<R>(self);
-    }
-}
-
-pub struct RenderAssetPlugin<R: RenderAsset>(PhantomData<R>);
-
-impl<R: RenderAsset> Plugin for RenderAssetPlugin<R> {
-    fn setup(&mut self, app: &mut ecs::AppBuilder) {
-        app.add_resource(RenderAssets::<R>::default());
-
-        let registry =
-            app.get_or_insert_resource::<RenderAssetRegistry>(|| RenderAssetRegistry::new());
-
-        registry.register::<R>();
-        R::dependencies(registry);
     }
 }

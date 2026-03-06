@@ -9,7 +9,8 @@ ecs = { path = "../ecs" }
 math = { path = "../math" }
 transform = { path = "../transform" }
 window = { path = "../window" }
+encase = { version = "0.10.0", features = ["glam"] }
 bytemuck = { workspace = true }
 wgpu = { workspace = true }
-encase = { version = "0.10.0", features = ["glam"] }
+smol = { workspace = true }
 wgsl-macro = "0.4.0"

@@ -1,8 +1,12 @@
-use crate::{core::RenderDevice, types::Color};
+use crate::{core::RenderDevice, resources::extract::RenderAsset, types::Color};
 use asset::Asset;
+use ecs::{
+    Resource,
+    unlifetime::{Read, Write},
+};
 use std::{collections::HashMap, sync::Arc};
 use wgpu::{
-    CompareFunction, FilterMode, Label, SamplerBorderColor, TextureFormat, TextureUsages,
+    CompareFunction, FilterMode, Label, Sampler, SamplerBorderColor, TextureFormat, TextureUsages,
     TextureView,
     util::DeviceExt,
     wgt::{TextureDataOrder, TextureDescriptor},
@@ -216,19 +220,25 @@ impl GpuTexture {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SamplerId(usize);
+impl RenderAsset for GpuTexture {
+    type Asset = Texture;
 
-#[derive(Clone)]
-pub struct Sampler(wgpu::Sampler);
+    type Arg = (Read<RenderDevice>, Write<SamplerCache>);
 
-impl std::ops::Deref for Sampler {
-    type Target = wgpu::Sampler;
+    fn extract(
+        _: asset::AssetId<Self::Asset>,
+        asset: Self::Asset,
+        (device, samplers): &mut ecs::ArgItem<Self::Arg>,
+    ) -> Result<Self, super::extract::ExtractError<Self::Asset>> {
+        let sampler = samplers.allocate(device, asset.sampler);
+        let texture = GpuTexture::new(device, &asset, sampler);
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+        Ok(texture)
     }
 }
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SamplerId(usize);
 
 pub struct SamplerDesc<'a> {
     pub label: Label<'a>,
@@ -240,8 +250,21 @@ pub struct SamplerDesc<'a> {
     pub anisotropy_clamp: u16,
 }
 
-impl Sampler {
-    pub fn new(device: &RenderDevice, desc: &SamplerDesc) -> Self {
+#[derive(Resource)]
+pub struct SamplerCache {
+    samplers: Vec<Sampler>,
+    allocated: HashMap<TextureSampler, SamplerId>,
+}
+
+impl SamplerCache {
+    pub fn new(default: Sampler) -> Self {
+        Self {
+            samplers: vec![default],
+            allocated: HashMap::from_iter(std::iter::once((TextureSampler::Default, SamplerId(0)))),
+        }
+    }
+
+    fn new_sampler(device: &RenderDevice, desc: &SamplerDesc) -> Sampler {
         let address_mode = desc.wrap.into();
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: desc.label,
@@ -258,21 +281,7 @@ impl Sampler {
             border_color: desc.wrap.border_color(),
         });
 
-        Self(sampler)
-    }
-}
-
-pub struct SamplerCache {
-    samplers: Vec<Sampler>,
-    allocated: HashMap<TextureSampler, SamplerId>,
-}
-
-impl SamplerCache {
-    pub fn new(default: Sampler) -> Self {
-        Self {
-            samplers: vec![default],
-            allocated: HashMap::from_iter(std::iter::once((TextureSampler::Default, SamplerId(0)))),
-        }
+        sampler
     }
 
     pub fn get(&self, id: SamplerId) -> &Sampler {
@@ -304,7 +313,7 @@ impl SamplerCache {
                 lod_max_clamp: 32.0,
             };
 
-            self.samplers.push(Sampler::new(device, &desc));
+            self.samplers.push(Self::new_sampler(device, &desc));
             self.allocated.insert(sampler, SamplerId(id));
 
             SamplerId(id)

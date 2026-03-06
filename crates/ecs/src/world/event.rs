@@ -28,6 +28,15 @@ impl<E: Event> Default for EventStorage<E> {
     }
 }
 
+impl<E: Event + Clone> Clone for EventStorage<E> {
+    fn clone(&self) -> Self {
+        Self {
+            events: self.events.clone(),
+            entities: self.entities.clone(),
+        }
+    }
+}
+
 pub struct Events<E: Event> {
     pub(crate) write: EventStorage<E>,
     pub(crate) read: EventStorage<E>,

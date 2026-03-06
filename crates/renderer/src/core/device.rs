@@ -1,10 +1,11 @@
 use std::sync::Arc;
+use ecs::Resource;
 use wgpu::{
     Adapter, Device, Features, Limits, MemoryHints, Queue, RequestDeviceError,
     wgt::DeviceDescriptor,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Resource)]
 pub struct RenderDevice {
     inner: Arc<Device>,
     queue: Arc<Queue>,

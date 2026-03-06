@@ -1,5 +1,6 @@
 use crate::{
-    AppTag, Commands, Component, Despawn, Despawned, Entity, EventReader, Extract, Plugin,
+    AppTag, Commands, Component, Despawn, Despawned, Entity, Event, EventReader, Events, Extract,
+    Plugin,
     system::{Added, Main, Modified, Or, Removed},
     unlifetime::SQuery,
 };
@@ -100,5 +101,29 @@ impl<C: Component + Clone, A: AppTag + Default + Clone> Plugin for SyncComponent
             .register::<MainEntity>()
             .add_systems(Extract, Self::sync_component)
             .add_systems(Extract, Self::sync_removed_component);
+    }
+}
+
+pub struct SyncEventsPlugin<E: Event + Clone, A: AppTag + Default + Clone>(
+    std::marker::PhantomData<(E, A)>,
+);
+
+impl<E: Event + Clone, A: AppTag + Default + Clone> SyncEventsPlugin<E, A> {
+    pub fn new() -> Self {
+        Self(Default::default())
+    }
+
+    pub fn sync(main_events: Main<&Events<E>>, sub_events: &mut Events<E>) {
+        sub_events.read = main_events.read.clone();
+    }
+}
+
+impl<E: Event + Clone, A: AppTag + Default + Clone> Plugin for SyncEventsPlugin<E, A> {
+    fn setup(&mut self, app: &mut super::AppBuilder) {
+        app.add_plugins(SyncAppPlugin::<A>::new())
+            .register_event::<E>()
+            .sub_app_mut(A::default())
+            .register_event::<E>()
+            .add_systems(Extract, Self::sync);
     }
 }

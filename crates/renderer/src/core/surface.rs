@@ -1,4 +1,5 @@
 use crate::core::device::RenderDevice;
+use ecs::Resource;
 use wgpu::{
     Adapter, CompositeAlphaMode, CreateSurfaceError, Instance, PowerPreference, PresentMode,
     RequestAdapterOptions, Surface, SurfaceConfiguration, TextureFormat, TextureUsages,
@@ -6,6 +7,7 @@ use wgpu::{
 };
 use window::Window;
 
+#[derive(Resource)]
 pub struct RenderSurface {
     config: SurfaceConfiguration,
     depth: wgpu::TextureFormat,
@@ -13,6 +15,7 @@ pub struct RenderSurface {
     adapter: Adapter,
 }
 
+#[derive(Debug)]
 pub enum RenderSurfaceError {
     SurfaceTarget(HandleError),
     CreateSurface(CreateSurfaceError),
@@ -115,6 +118,10 @@ impl RenderSurface {
     pub fn resize(&mut self, device: &RenderDevice, width: u32, height: u32) {
         self.config.width = width;
         self.config.height = height;
+        self.inner.configure(device, &self.config);
+    }
+
+    pub fn configure(&mut self, device: &RenderDevice) {
         self.inner.configure(device, &self.config);
     }
 }
