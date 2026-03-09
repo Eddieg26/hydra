@@ -4,7 +4,7 @@ use crate::{
 };
 use bytemuck::Pod;
 use encase::{ShaderType, internal::WriteInto};
-use std::{borrow::Cow, marker::PhantomData, num::NonZero};
+use std::{borrow::Cow, fmt::Debug, hash::Hash, marker::PhantomData, num::NonZero};
 use wgpu::{
     BufferSize, BufferUsages,
     util::{BufferInitDescriptor, DeviceExt},
@@ -19,6 +19,23 @@ pub struct BufferDesc<'a, T = ()> {
     pub usages: BufferUsages,
 }
 
+impl<'a, T: Debug> Debug for BufferDesc<'a, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BufferDesc")
+            .field("label", &self.label)
+            .field("data", &self.data)
+            .field("usages", &self.usages)
+            .finish()
+    }
+}
+
+impl<'a, T: Hash> Hash for BufferDesc<'a, T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.label.hash(state);
+        self.usages.hash(state);
+    }
+}
+
 #[derive(Clone)]
 pub struct Buffer {
     id: BufferId,
@@ -28,7 +45,7 @@ pub struct Buffer {
 
 impl Buffer {
     pub fn new(device: &RenderDevice, desc: BufferDesc<u64>) -> Self {
-        let id = BufferId::new();
+        let id = BufferId::generate();
         let label = desc.label.map(|l| Cow::Owned(l.to_owned()));
         let inner = device.create_buffer(&BufferDescriptor {
             label: desc.label,
@@ -41,7 +58,7 @@ impl Buffer {
     }
 
     pub fn with_data<'a>(device: &RenderDevice, desc: BufferDesc<'a, &'a [u8]>) -> Self {
-        let id = BufferId::new();
+        let id = BufferId::generate();
         let label = desc.label.map(|l| Cow::Owned(l.to_owned()));
         let inner = device.create_buffer_init(&BufferInitDescriptor {
             label: desc.label,

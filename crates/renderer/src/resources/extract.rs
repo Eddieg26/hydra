@@ -137,12 +137,12 @@ impl RenderAssetConfig {
                 AssetEvent::Added { id }
                 | AssetEvent::Loaded { id }
                 | AssetEvent::Modified { id } => {
-                    let Some(asset) = assets.get(id).cloned() else {
+                    let Some(asset) = assets.remove(id) else {
                         continue;
                     };
 
-                    if R::usage(&asset) == AssetUsage::Discard {
-                        assets.remove(id);
+                    if R::usage(&asset) == AssetUsage::Keep {
+                        assets.insert(*id, asset.clone());
                     }
 
                     let extracted = ExtractedAsset { id: *id, asset };

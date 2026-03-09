@@ -132,7 +132,7 @@ impl RenderPipeline {
 impl From<wgpu::RenderPipeline> for RenderPipeline {
     fn from(pipeline: wgpu::RenderPipeline) -> Self {
         Self {
-            id: PipelineId::new(),
+            id: PipelineId::generate(),
             pipeline: Arc::new(pipeline),
         }
     }
@@ -212,7 +212,7 @@ impl ComputePipeline {
 impl From<wgpu::ComputePipeline> for ComputePipeline {
     fn from(pipeline: wgpu::ComputePipeline) -> Self {
         Self {
-            id: PipelineId::new(),
+            id: PipelineId::generate(),
             pipeline: Arc::new(pipeline),
         }
     }

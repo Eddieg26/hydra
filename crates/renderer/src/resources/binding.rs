@@ -1,5 +1,8 @@
-use crate::{core::RenderDevice, resources::Label};
-use std::num::NonZero;
+use crate::{
+    core::RenderDevice,
+    resources::{GpuResourceId, Label},
+};
+use std::{collections::HashMap, num::NonZero};
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BufferBinding, BufferBindingType, Sampler,
@@ -19,19 +22,19 @@ impl BindGroupLayoutBuilder {
         }
     }
 
-    pub fn with_label(mut self, label: Label) -> Self {
+    pub fn with_label(&mut self, label: Label) -> &mut Self {
         self.label = Some(label);
         self
     }
 
     pub fn with_buffer(
-        mut self,
+        &mut self,
         ty: BufferBindingType,
         visibility: ShaderStages,
         has_dynamic_offset: bool,
         min_binding_size: Option<NonZero<u64>>,
         count: Option<NonZero<u32>>,
-    ) -> Self {
+    ) -> &mut Self {
         let binding = self.entries.len() as u32;
         self.entries.push(BindGroupLayoutEntry {
             binding,
@@ -48,12 +51,12 @@ impl BindGroupLayoutBuilder {
     }
 
     pub fn with_uniform(
-        self,
+        &mut self,
         visibility: ShaderStages,
         has_dynamic_offset: bool,
         min_binding_size: Option<NonZero<u64>>,
         count: Option<NonZero<u32>>,
-    ) -> Self {
+    ) -> &mut Self {
         self.with_buffer(
             BufferBindingType::Uniform,
             visibility,
@@ -64,13 +67,13 @@ impl BindGroupLayoutBuilder {
     }
 
     pub fn with_storage(
-        self,
+        &mut self,
         read_only: bool,
         visibility: ShaderStages,
         has_dynamic_offset: bool,
         min_binding_size: Option<NonZero<u64>>,
         count: Option<NonZero<u32>>,
-    ) -> Self {
+    ) -> &mut Self {
         self.with_buffer(
             BufferBindingType::Storage { read_only },
             visibility,
@@ -81,13 +84,13 @@ impl BindGroupLayoutBuilder {
     }
 
     pub fn with_texture(
-        mut self,
+        &mut self,
         visibility: ShaderStages,
         sample_type: TextureSampleType,
         view_dimension: TextureViewDimension,
         multisampled: bool,
         count: Option<NonZero<u32>>,
-    ) -> Self {
+    ) -> &mut Self {
         let binding = self.entries.len() as u32;
         self.entries.push(BindGroupLayoutEntry {
             binding,
@@ -103,11 +106,11 @@ impl BindGroupLayoutBuilder {
     }
 
     pub fn with_sampler(
-        mut self,
+        &mut self,
         visibility: ShaderStages,
         ty: SamplerBindingType,
         count: Option<NonZero<u32>>,
-    ) -> Self {
+    ) -> &mut Self {
         let binding = self.entries.len() as u32;
         self.entries.push(BindGroupLayoutEntry {
             binding,
@@ -117,36 +120,27 @@ impl BindGroupLayoutBuilder {
         });
         self
     }
-
-    pub fn build(self, device: &RenderDevice) -> BindGroupLayout {
-        device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: self.label.as_deref(),
-            entries: &self.entries,
-        })
-    }
 }
 
 pub struct BindGroupBuilder<'a> {
     label: Option<Label>,
-    layout: &'a BindGroupLayout,
     entries: Vec<BindGroupEntry<'a>>,
 }
 
 impl<'a> BindGroupBuilder<'a> {
-    pub fn new(layout: &'a BindGroupLayout) -> Self {
+    pub fn new() -> Self {
         Self {
             label: None,
-            layout,
             entries: Vec::new(),
         }
     }
 
-    pub fn with_label(mut self, label: Label) -> Self {
+    pub fn with_label(&mut self, label: Label) -> &mut Self {
         self.label = Some(label);
         self
     }
 
-    pub fn with_buffer(mut self, buffer: BufferBinding<'a>) -> Self {
+    pub fn with_buffer(&mut self, buffer: BufferBinding<'a>) -> &mut Self {
         let binding = self.entries.len() as u32;
         self.entries.push(BindGroupEntry {
             binding,
@@ -156,7 +150,7 @@ impl<'a> BindGroupBuilder<'a> {
         self
     }
 
-    pub fn with_buffer_array(mut self, buffers: &'a [BufferBinding<'_>]) -> Self {
+    pub fn with_buffer_array(&mut self, buffers: &'a [BufferBinding<'_>]) -> &mut Self {
         let binding = self.entries.len() as u32;
         self.entries.push(BindGroupEntry {
             binding,
@@ -165,7 +159,7 @@ impl<'a> BindGroupBuilder<'a> {
         self
     }
 
-    pub fn with_texture(mut self, texture: &'a TextureView) -> Self {
+    pub fn with_texture(&mut self, texture: &'a TextureView) -> &mut Self {
         let binding = self.entries.len() as u32;
         self.entries.push(BindGroupEntry {
             binding,
@@ -174,7 +168,7 @@ impl<'a> BindGroupBuilder<'a> {
         self
     }
 
-    pub fn with_texture_array(mut self, textures: &'a [&TextureView]) -> Self {
+    pub fn with_texture_array(&mut self, textures: &'a [&TextureView]) -> &mut Self {
         let binding = self.entries.len() as u32;
         self.entries.push(BindGroupEntry {
             binding,
@@ -183,7 +177,7 @@ impl<'a> BindGroupBuilder<'a> {
         self
     }
 
-    pub fn with_sampler(mut self, sampler: &'a Sampler) -> Self {
+    pub fn with_sampler(&mut self, sampler: &'a Sampler) -> &mut Self {
         let binding = self.entries.len() as u32;
         self.entries.push(BindGroupEntry {
             binding,
@@ -192,7 +186,7 @@ impl<'a> BindGroupBuilder<'a> {
         self
     }
 
-    pub fn with_sampler_array(mut self, samplers: &'a [&Sampler]) -> Self {
+    pub fn with_sampler_array(&mut self, samplers: &'a [&Sampler]) -> &mut Self {
         let binding = self.entries.len() as u32;
         self.entries.push(BindGroupEntry {
             binding,
@@ -201,11 +195,54 @@ impl<'a> BindGroupBuilder<'a> {
         self
     }
 
-    pub fn build(self, device: &RenderDevice) -> BindGroup {
+    pub fn build(self, device: &RenderDevice, layout: &'a BindGroupLayout) -> BindGroup {
         device.create_bind_group(&BindGroupDescriptor {
             label: self.label.as_deref(),
-            layout: self.layout,
+            layout,
             entries: &self.entries,
         })
+    }
+}
+
+pub struct BindGroupLayoutCache {
+    layouts: Vec<BindGroupLayout>,
+    map: HashMap<Vec<BindGroupLayoutEntry>, GpuResourceId<BindGroupLayout>>,
+}
+
+impl BindGroupLayoutCache {
+    pub fn new() -> Self {
+        Self {
+            layouts: Vec::new(),
+            map: HashMap::new(),
+        }
+    }
+
+    pub fn get(&self, id: GpuResourceId<BindGroupLayout>) -> &BindGroupLayout {
+        &self.layouts[id.get() as usize]
+    }
+
+    pub fn id(&self, key: &[BindGroupLayoutEntry]) -> Option<GpuResourceId<BindGroupLayout>> {
+        self.map.get(key).copied()
+    }
+
+    pub fn create(
+        &mut self,
+        device: &RenderDevice,
+        builder: BindGroupLayoutBuilder,
+    ) -> GpuResourceId<BindGroupLayout> {
+        if let Some(id) = self.id(&builder.entries) {
+            id
+        } else {
+            let id = GpuResourceId::new(self.layouts.len() as u32);
+            let layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: builder.label.as_deref(),
+                entries: &builder.entries,
+            });
+
+            self.layouts.push(layout);
+            self.map.insert(builder.entries, id);
+
+            id
+        }
     }
 }

@@ -42,7 +42,7 @@ impl PipelineCache {
     }
 
     pub fn queue_render_pipeline(&mut self, desc: RenderPipelineDesc) -> PipelineId {
-        let id = PipelineId::new();
+        let id = PipelineId::generate();
 
         self.pipeline_queue
             .insert(id, QueuedPipeline::Render { id, desc });
@@ -51,7 +51,7 @@ impl PipelineCache {
     }
 
     pub fn queue_compute_pipeline(&mut self, desc: ComputePipelineDesc) -> PipelineId {
-        let id = PipelineId::new();
+        let id = PipelineId::generate();
 
         self.pipeline_queue
             .insert(id, QueuedPipeline::Compute { id, desc });
