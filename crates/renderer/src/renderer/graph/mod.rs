@@ -6,14 +6,14 @@ use ecs::{Resource, World};
 use std::{
     any::{Any, TypeId},
     cmp,
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     hash::{DefaultHasher, Hash, Hasher},
     marker::PhantomData,
 };
-use wgpu::{
-    BindGroup, BindGroupLayout, ShaderStages, TextureFormat, TextureSampleType, TextureUsages,
-    TextureView,
-};
+use wgpu::{ShaderStages, TextureFormat, TextureSampleType, TextureUsages, TextureView};
+
+pub mod allocator;
+pub mod compiler;
 
 pub type Name = &'static str;
 
@@ -22,7 +22,7 @@ pub trait GraphResource: Send + Sync + Sized + 'static {
 
     fn create(device: &RenderDevice, name: Name, desc: &Self::Desc) -> Self;
 
-    fn entry(builder: &mut BindGroupLayoutBuilder, desc: &Self::Desc);
+    fn entry(builder: &mut BindGroupLayoutBuilder, desc: &Self::Desc, stages: ShaderStages);
 
     fn bind<'a>(&'a self, builder: &mut BindGroupBuilder<'a>);
 }
@@ -54,14 +54,8 @@ impl GraphResource for TextureView {
         texture.create_view(&Default::default())
     }
 
-    fn entry(builder: &mut BindGroupLayoutBuilder, desc: &Self::Desc) {
-        builder.with_texture(
-            ShaderStages::all(),
-            desc.sample_type,
-            desc.dimension.into(),
-            false,
-            None,
-        );
+    fn entry(builder: &mut BindGroupLayoutBuilder, desc: &Self::Desc, stages: ShaderStages) {
+        builder.with_texture(stages, desc.sample_type, desc.dimension.into(), false, None);
     }
 
     fn bind<'a>(&'a self, builder: &mut BindGroupBuilder<'a>) {
@@ -71,6 +65,8 @@ impl GraphResource for TextureView {
 
 pub trait ImportedGraphResource: Resource + Send {
     type GraphResource: GraphResource;
+
+    const ROOT: bool = false;
 
     fn resource(&self) -> Self::GraphResource;
 }
@@ -95,6 +91,7 @@ pub struct ResourceNode {
     desc: Box<dyn Any>,
     current_version: u32,
     desc_hash: u64,
+    root: bool,
 }
 
 impl ResourceNode {
@@ -110,6 +107,7 @@ impl ResourceNode {
             desc: Box::new(desc),
             current_version: 0,
             desc_hash: hasher.finish(),
+            root: false,
         }
     }
 
@@ -122,6 +120,7 @@ impl ResourceNode {
             desc: Box::new(()),
             current_version: 0,
             desc_hash: 0,
+            root: R::ROOT,
         }
     }
 }
@@ -139,13 +138,13 @@ impl ResourceVersion {
 }
 
 pub struct GpuAllocation {
-    id: u32,
-    ty: u32,
-    generation: u32,
-    desc_hash: u64,
-    kind: ResourceKind,
-    last_use: Option<u32>,
-    instance: Box<dyn Any>,
+    pub id: u32,
+    pub ty: u32,
+    pub generation: u32,
+    pub desc_hash: u64,
+    pub kind: ResourceKind,
+    pub last_use: Option<u32>,
+    pub instance: Box<dyn Any>,
 }
 
 impl GpuAllocation {
@@ -174,7 +173,7 @@ impl<R: GraphResource> GraphResourceId<R> {
 
 pub struct ResourceType {
     create: fn(&World, &RenderDevice, Name, &Box<dyn Any>) -> Box<dyn Any>,
-    entry: fn(&dyn Any, &mut BindGroupLayoutBuilder),
+    entry: fn(&dyn Any, &mut BindGroupLayoutBuilder, ShaderStages),
     bind: for<'a> fn(&'a dyn Any, &mut BindGroupBuilder<'a>),
 }
 
@@ -185,9 +184,9 @@ impl ResourceType {
                 let desc = desc.downcast_ref::<R::Desc>().unwrap();
                 Box::new(R::create(device, name, desc))
             },
-            entry: |desc, builder| {
+            entry: |desc, builder, stages| {
                 let desc = desc.downcast_ref::<R::Desc>().unwrap();
-                R::entry(builder, desc);
+                R::entry(builder, desc, stages);
             },
             bind: |resource, builder| {
                 let resource = resource.downcast_ref::<R>().unwrap();
@@ -202,11 +201,11 @@ impl ResourceType {
                 let imported = world.resource::<R>();
                 Box::new(imported.resource())
             },
-            entry: |desc, builder| {
+            entry: |desc, builder, stages| {
                 let desc = desc
                     .downcast_ref::<<R::GraphResource as GraphResource>::Desc>()
                     .unwrap();
-                <R::GraphResource as GraphResource>::entry(builder, desc);
+                <R::GraphResource as GraphResource>::entry(builder, desc, stages);
             },
             bind: |resource, builder| {
                 let resource = resource.downcast_ref::<R::GraphResource>().unwrap();
@@ -225,8 +224,13 @@ impl ResourceType {
         (self.create)(world, device, name, desc)
     }
 
-    fn entry(&self, desc: &Box<dyn Any>, builder: &mut BindGroupLayoutBuilder) {
-        (self.entry)(desc, builder);
+    fn entry(
+        &self,
+        desc: &Box<dyn Any>,
+        builder: &mut BindGroupLayoutBuilder,
+        stages: ShaderStages,
+    ) {
+        (self.entry)(desc, builder, stages);
     }
 
     fn bind<'a>(&self, resource: &'a dyn Any, builder: &mut BindGroupBuilder<'a>) {
@@ -247,7 +251,11 @@ pub struct PassNode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResourceUsage {
     Attachment,
-    Binding { group: u32, binding: u32 },
+    Binding {
+        group: u32,
+        binding: u32,
+        stages: ShaderStages,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -255,6 +263,7 @@ pub struct ResourceBinding {
     resource: u32,
     group: u32,
     binding: u32,
+    stages: ShaderStages,
 }
 
 impl Ord for ResourceBinding {
@@ -337,11 +346,17 @@ impl<'a> PassBuilder<'a> {
             .versions
             .push(ResourceVersion::new(id, version, resource.0));
 
-        if let ResourceUsage::Binding { group, binding } = usage {
+        if let ResourceUsage::Binding {
+            group,
+            binding,
+            stages,
+        } = usage
+        {
             self.bindings.push(ResourceBinding {
                 resource: resource.0,
                 group,
                 binding,
+                stages,
             });
         }
 
@@ -362,11 +377,17 @@ impl<'a> PassBuilder<'a> {
             .versions
             .push(ResourceVersion::new(id, version, resource.0));
 
-        if let ResourceUsage::Binding { group, binding } = usage {
+        if let ResourceUsage::Binding {
+            group,
+            binding,
+            stages,
+        } = usage
+        {
             self.bindings.push(ResourceBinding {
                 resource: resource.0,
                 group,
                 binding,
+                stages,
             });
         }
 
@@ -496,134 +517,4 @@ pub struct RenderGraph {
     passes: Vec<PassNode>,
     pass_map: HashMap<Name, u32>,
     compiled: CompiledGraph,
-}
-
-impl RenderGraph {
-    pub fn compile(&self, device: &RenderDevice, world: &World) {
-        struct ResourceRef {
-            id: u32,
-            producer: Option<u32>,
-            first_use: Option<u32>,
-            last_use: Option<u32>,
-        }
-
-        impl From<&ResourceNode> for ResourceRef {
-            fn from(value: &ResourceNode) -> Self {
-                Self {
-                    id: value.id,
-                    producer: None,
-                    first_use: None,
-                    last_use: None,
-                }
-            }
-        }
-
-        struct PassRef<'a> {
-            id: u32,
-            bindings: &'a [u32],
-        }
-
-        impl<'a> From<&'a PassNode> for PassRef<'a> {
-            fn from(value: &'a PassNode) -> Self {
-                Self {
-                    id: value.id,
-                    bindings: &[],
-                }
-            }
-        }
-
-        let mut resources = self
-            .resources
-            .nodes
-            .iter()
-            .map(ResourceRef::from)
-            .collect::<Vec<_>>();
-
-        let mut passes = Vec::with_capacity(self.passes.len());
-
-        for pass in &self.passes {
-            for index in &pass.creates {
-                let node = self.resources.versions[*index as usize].node;
-                resources[node as usize].producer = Some(pass.id);
-            }
-
-            for index in &pass.reads {
-                let node = self.resources.versions[*index as usize].node;
-                resources[node as usize].first_use = Some(pass.id);
-                resources[node as usize].last_use = Some(pass.id);
-            }
-
-            for index in &pass.writes {
-                let node = self.resources.versions[*index as usize].node;
-                resources[node as usize].first_use = Some(pass.id);
-                resources[node as usize].last_use = Some(pass.id);
-            }
-
-            passes.push(PassRef::from(pass));
-        }
-
-        resources.sort_by(|a, b| a.first_use.cmp(&b.first_use));
-
-        let mut allocated = Vec::<GpuAllocation>::with_capacity(resources.len());
-        let mut refs = Vec::with_capacity(resources.len());
-
-        for resource in resources {
-            let node = &self.resources.nodes[resource.id as usize];
-            let ty = &self.resources.types[node.ty as usize];
-            if let Some(index) = allocated.iter().position(|physical| {
-                physical.compatible(node)
-                    && resource.first_use.cmp(&physical.last_use) == cmp::Ordering::Greater
-            }) {
-                refs[resource.id as usize] = index;
-                allocated[index].last_use = resource.last_use;
-            } else {
-                let index = allocated.len();
-                allocated.push(GpuAllocation {
-                    id: node.id,
-                    ty: node.ty,
-                    generation: 0,
-                    desc_hash: node.desc_hash,
-                    kind: node.kind,
-                    last_use: resource.last_use,
-                    instance: Box::new(ty.create(world, device, node.name, &node.desc)),
-                });
-
-                refs[resource.id as usize] = index;
-            }
-        }
-    }
-}
-
-pub struct ResourceEntry {
-    resource: u32,
-    generation: u32,
-}
-
-impl ResourceEntry {
-    pub fn new(resource: u32, generation: u32) -> Self {
-        Self {
-            resource,
-            generation,
-        }
-    }
-}
-
-pub struct GraphBindGroup {
-    layout: BindGroupLayout,
-    bind_group: BindGroup,
-    entries: Vec<ResourceEntry>,
-}
-
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct BindGroupId(Box<[u32]>);
-
-impl From<&[ResourceBinding]> for BindGroupId {
-    fn from(value: &[ResourceBinding]) -> Self {
-        Self(Box::from_iter(value.iter().map(|v| v.resource)))
-    }
-}
-
-pub struct BindGroupCache {
-    bind_groups: Vec<GraphBindGroup>,
-    map: HashMap<BindGroupId, u32>,
 }

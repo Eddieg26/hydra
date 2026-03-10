@@ -9,9 +9,10 @@ use wgpu::{
     SamplerBindingType, ShaderStages, TextureSampleType, TextureView, TextureViewDimension,
 };
 
+#[derive(Default, Clone)]
 pub struct BindGroupLayoutBuilder {
-    label: Option<Label>,
-    entries: Vec<BindGroupLayoutEntry>,
+    pub label: Option<Label>,
+    pub entries: Vec<BindGroupLayoutEntry>,
 }
 
 impl BindGroupLayoutBuilder {
@@ -122,6 +123,15 @@ impl BindGroupLayoutBuilder {
     }
 }
 
+impl From<Vec<BindGroupLayoutEntry>> for BindGroupLayoutBuilder {
+    fn from(value: Vec<BindGroupLayoutEntry>) -> Self {
+        Self {
+            label: None,
+            entries: value,
+        }
+    }
+}
+
 pub struct BindGroupBuilder<'a> {
     label: Option<Label>,
     entries: Vec<BindGroupEntry<'a>>,
@@ -204,12 +214,12 @@ impl<'a> BindGroupBuilder<'a> {
     }
 }
 
-pub struct BindGroupLayoutCache {
+pub struct BindGroupLayoutRegistry {
     layouts: Vec<BindGroupLayout>,
     map: HashMap<Vec<BindGroupLayoutEntry>, GpuResourceId<BindGroupLayout>>,
 }
 
-impl BindGroupLayoutCache {
+impl BindGroupLayoutRegistry {
     pub fn new() -> Self {
         Self {
             layouts: Vec::new(),
@@ -225,7 +235,7 @@ impl BindGroupLayoutCache {
         self.map.get(key).copied()
     }
 
-    pub fn create(
+    pub fn register(
         &mut self,
         device: &RenderDevice,
         builder: BindGroupLayoutBuilder,
