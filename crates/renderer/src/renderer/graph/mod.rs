@@ -69,6 +69,8 @@ pub trait ImportedGraphResource: Resource + Send {
     const ROOT: bool = false;
 
     fn resource(&self) -> Self::GraphResource;
+
+    fn generation(&self) -> u32;
 }
 
 pub trait GraphPass {
@@ -91,6 +93,7 @@ pub struct ResourceNode {
     desc: Box<dyn Any>,
     current_version: u32,
     desc_hash: u64,
+    generation: fn(&World) -> u32,
     root: bool,
 }
 
@@ -107,6 +110,7 @@ impl ResourceNode {
             desc: Box::new(desc),
             current_version: 0,
             desc_hash: hasher.finish(),
+            generation: |_| 0,
             root: false,
         }
     }
@@ -120,8 +124,13 @@ impl ResourceNode {
             desc: Box::new(()),
             current_version: 0,
             desc_hash: 0,
+            generation: |world| world.resource::<R>().generation(),
             root: R::ROOT,
         }
+    }
+
+    pub fn generation(&self, world: &World) -> u32 {
+        (self.generation)(world)
     }
 }
 

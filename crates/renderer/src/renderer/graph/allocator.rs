@@ -29,8 +29,14 @@ impl GpuAllocationDesc {
     }
 }
 
+pub struct ImportedResource {
+    alloc: u32,
+    node: u32,
+}
+
 pub struct GpuResourceAllocator {
     resources: Vec<u32>,
+    imported: Vec<ImportedResource>,
     allocations: Vec<GpuAllocation>,
     bind_groups: BindGroupCache,
 }
@@ -43,27 +49,67 @@ impl GpuResourceAllocator {
         resources: Vec<u32>,
         mut descs: Vec<GpuAllocationDesc>,
     ) -> Self {
+        let mut imported = Vec::new();
         let allocations = descs.drain(..).map(|desc| {
             let node = &graph.resources.nodes[desc.node as usize];
             let ty = &graph.resources.types[node.ty as usize];
             let instance = ty.create(world, device, node.name, &node.desc);
+            let generation = match node.kind {
+                ResourceKind::Imported => node.generation(world),
+                ResourceKind::Transient => 0,
+            };
+
+            if node.kind == ResourceKind::Imported {
+                imported.push(ImportedResource {
+                    alloc: desc.id,
+                    node: node.id,
+                });
+            }
+
             GpuAllocation {
                 node: node.id,
-                generation: 0,
+                generation,
                 instance,
             }
         });
 
         Self {
-            resources,
             allocations: allocations.collect(),
             bind_groups: BindGroupCache::default(),
+            resources,
+            imported,
         }
     }
 
-    pub fn update(&mut self, world: &World, device: &RenderDevice, graph: &RenderGraph) {}
+    pub fn update(&mut self, world: &World, device: &RenderDevice, graph: &RenderGraph) {
+        for index in 0..self.imported.len() {
+            let ImportedResource { alloc, node } = self.imported[index];
+            let generation = graph.resources.nodes[node as usize].generation(world);
+            self.allocations[alloc as usize].generation = generation;
+        }
 
-    fn create_layouts(
+        let mut updated = FixedBitSet::new();
+        for index in 0..self.allocations.len() {
+            let changed = self.allocations[index].generation != self.bind_groups.entries[index];
+            if changed {
+                let allocation = &mut self.allocations[index];
+                let node = &graph.resources.nodes[allocation.node as usize];
+                let ty = &graph.resources.types[node.ty as usize];
+                allocation.instance = ty.create(world, device, node.name, &node.desc);
+            }
+
+            self.bind_groups.entries[index] = self.allocations[index].generation;
+            updated.grow(index);
+            updated.set(index, changed);
+        }
+
+        if !updated.is_empty() {
+            self.bind_groups
+                .update(updated, device, graph, &self.allocations);
+        }
+    }
+
+    pub fn create_layouts(
         device: &RenderDevice,
         layouts: &mut BindGroupLayoutRegistry,
         mut queue: IndexSet<Vec<BindGroupLayoutEntry>>,
@@ -77,7 +123,7 @@ impl GpuResourceAllocator {
             .collect()
     }
 
-    fn create_bind_group_cache(
+    pub fn create_bind_group_cache(
         device: &RenderDevice,
         graph: &RenderGraph,
         allocations: &[GpuAllocation],
@@ -174,22 +220,11 @@ impl BindGroupCache {
 
     pub fn update(
         &mut self,
+        updated: FixedBitSet,
         device: &RenderDevice,
         graph: &RenderGraph,
         allocations: &[GpuAllocation],
     ) {
-        let mut updated = FixedBitSet::new();
-        for index in 0..allocations.len() {
-            let changed = allocations[index].generation != self.entries[index];
-            self.entries[index] = allocations[index].generation;
-            updated.grow(index);
-            updated.set(index, changed);
-        }
-
-        if updated.is_empty() {
-            return;
-        }
-
         for archetype in &self.archetypes {
             if updated.is_disjoint(&archetype.allocations) {
                 continue;
