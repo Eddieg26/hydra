@@ -1,6 +1,6 @@
 use crate::{
     core::RenderDevice,
-    renderer::graph::{RenderGraph, ResourceKind, ResourceNode},
+    renderer::graph::{RenderGraph, ResourceKind, ResourceVersion},
     resources::{BindGroupBuilder, BindGroupLayoutBuilder, BindGroupLayoutRegistry, GpuResourceId},
 };
 use ecs::{FixedBitSet, IndexSet, World};
@@ -11,20 +11,22 @@ pub struct GpuAllocation {
     node: u32,
     generation: u32,
     instance: Box<dyn Any>,
+    desc: Option<Box<dyn Any>>,
 }
 
 pub struct GpuAllocationDesc {
     pub id: u32,
     pub node: u32,
-    pub desc_hash: u64,
+    pub key: u64,
     pub kind: ResourceKind,
     pub last_use: Option<u32>,
+    pub desc: Option<Box<dyn Any>>,
 }
 
 impl GpuAllocationDesc {
-    pub fn compatible(&self, node: &ResourceNode) -> bool {
-        self.desc_hash == node.desc_hash
-            && node.kind == ResourceKind::Transient
+    pub fn compatible(&self, instance: &ResourceVersion, kind: ResourceKind) -> bool {
+        self.key == instance.key
+            && kind == ResourceKind::Transient
             && self.kind == ResourceKind::Transient
     }
 }
@@ -35,7 +37,6 @@ pub struct ImportedResource {
 }
 
 pub struct GpuResourceAllocator {
-    resources: Vec<u32>,
     imported: Vec<ImportedResource>,
     allocations: Vec<GpuAllocation>,
     bind_groups: BindGroupCache,
@@ -46,22 +47,22 @@ impl GpuResourceAllocator {
         world: &World,
         device: &RenderDevice,
         graph: &RenderGraph,
-        resources: Vec<u32>,
         mut descs: Vec<GpuAllocationDesc>,
     ) -> Self {
         let mut imported = Vec::new();
-        let allocations = descs.drain(..).map(|desc| {
-            let node = &graph.resources.nodes[desc.node as usize];
+        let allocations = descs.drain(..).map(|alloc| {
+            let node = &graph.resources.nodes[alloc.node as usize];
             let ty = &graph.resources.types[node.ty as usize];
-            let instance = ty.create(world, device, node.name, &node.desc);
+            let desc = alloc.desc.as_ref().unwrap_or(&node.desc);
+            let instance = ty.create(world, device, node.name, desc);
             let generation = match node.kind {
-                ResourceKind::Imported => node.generation(world),
+                ResourceKind::Imported => ty.generation(world, desc),
                 ResourceKind::Transient => 0,
             };
 
             if node.kind == ResourceKind::Imported {
                 imported.push(ImportedResource {
-                    alloc: desc.id,
+                    alloc: alloc.id,
                     node: node.id,
                 });
             }
@@ -70,13 +71,13 @@ impl GpuResourceAllocator {
                 node: node.id,
                 generation,
                 instance,
+                desc: alloc.desc,
             }
         });
 
         Self {
             allocations: allocations.collect(),
             bind_groups: BindGroupCache::default(),
-            resources,
             imported,
         }
     }
@@ -84,7 +85,13 @@ impl GpuResourceAllocator {
     pub fn update(&mut self, world: &World, device: &RenderDevice, graph: &RenderGraph) {
         for index in 0..self.imported.len() {
             let ImportedResource { alloc, node } = self.imported[index];
-            let generation = graph.resources.nodes[node as usize].generation(world);
+            let node = &graph.resources.nodes[node as usize];
+            let ty = &graph.resources.types[node.ty as usize];
+            let desc = self.allocations[alloc as usize]
+                .desc
+                .as_ref()
+                .unwrap_or(&node.desc);
+            let generation = ty.generation(world, desc);
             self.allocations[alloc as usize].generation = generation;
         }
 
@@ -96,61 +103,17 @@ impl GpuResourceAllocator {
                 let node = &graph.resources.nodes[allocation.node as usize];
                 let ty = &graph.resources.types[node.ty as usize];
                 allocation.instance = ty.create(world, device, node.name, &node.desc);
+                updated.grow(index);
+                updated.set(index, true);
             }
 
             self.bind_groups.entries[index] = self.allocations[index].generation;
-            updated.grow(index);
-            updated.set(index, changed);
         }
 
         if !updated.is_empty() {
             self.bind_groups
                 .update(updated, device, graph, &self.allocations);
         }
-    }
-
-    pub fn create_layouts(
-        device: &RenderDevice,
-        layouts: &mut BindGroupLayoutRegistry,
-        mut queue: IndexSet<Vec<BindGroupLayoutEntry>>,
-    ) -> Vec<BindGroupLayout> {
-        queue
-            .drain(..)
-            .map(|entries| {
-                let id = layouts.register(device, BindGroupLayoutBuilder::from(entries));
-                layouts.get(id).clone()
-            })
-            .collect()
-    }
-
-    pub fn create_bind_group_cache(
-        device: &RenderDevice,
-        graph: &RenderGraph,
-        allocations: &[GpuAllocation],
-        layouts: &[BindGroupLayout],
-        queue: IndexSet<BindGroupKey>,
-    ) -> BindGroupCache {
-        let mut cache = BindGroupCache::default();
-
-        for key in queue {
-            let BindGroupKey { layout, resources } = key;
-            let mut builder = BindGroupBuilder::new();
-            for id in &resources {
-                let alloc = &allocations[*id as usize];
-                let node = &graph.resources.nodes[alloc.node as usize];
-                let ty = &graph.resources.types[node.ty as usize];
-                ty.bind(&alloc.instance, &mut builder);
-            }
-
-            let archetype = cache.register(resources);
-            let layout = &layouts[layout as usize];
-            let bind_group = CachedBindGroup::new(layout.clone(), builder.build(device, layout));
-            cache.add(archetype, bind_group);
-        }
-
-        cache.entries = (0..allocations.len()).map(|index| index as u32).collect();
-
-        cache
     }
 }
 
@@ -185,7 +148,6 @@ impl CachedBindGroup {
 }
 
 pub struct BindGroupArchetype {
-    id: u32,
     bind_groups: Vec<GpuResourceId<BindGroup>>,
     allocations: FixedBitSet,
 }
@@ -199,6 +161,36 @@ pub struct BindGroupCache {
 }
 
 impl BindGroupCache {
+    fn build(
+        device: &RenderDevice,
+        graph: &RenderGraph,
+        allocations: &[GpuAllocation],
+        layouts: &[BindGroupLayout],
+        queue: IndexSet<BindGroupKey>,
+    ) -> BindGroupCache {
+        let mut cache = BindGroupCache::default();
+
+        for key in queue {
+            let BindGroupKey { layout, resources } = key;
+            let mut builder = BindGroupBuilder::new();
+            for id in &resources {
+                let alloc = &allocations[*id as usize];
+                let node = &graph.resources.nodes[alloc.node as usize];
+                let ty = &graph.resources.types[node.ty as usize];
+                ty.bind(&alloc.instance, &mut builder);
+            }
+
+            let archetype = cache.register(resources);
+            let layout = &layouts[layout as usize];
+            let bind_group = CachedBindGroup::new(layout.clone(), builder.build(device, layout));
+            cache.add(archetype, bind_group);
+        }
+
+        cache.entries = (0..allocations.len()).map(|index| index as u32).collect();
+
+        cache
+    }
+
     pub fn register(&mut self, resources: Box<[u32]>) -> u32 {
         let index = self.archetypes.len() as u32;
         let mut allocations = FixedBitSet::new();
@@ -208,7 +200,6 @@ impl BindGroupCache {
         }
 
         self.archetypes.push(BindGroupArchetype {
-            id: index,
             bind_groups: Vec::new(),
             allocations,
         });
@@ -251,5 +242,19 @@ impl BindGroupCache {
         self.archetypes[archetype as usize].bind_groups.push(id);
 
         id
+    }
+
+    fn create_layouts(
+        device: &RenderDevice,
+        layouts: &mut BindGroupLayoutRegistry,
+        mut queue: IndexSet<Vec<BindGroupLayoutEntry>>,
+    ) -> Vec<BindGroupLayout> {
+        queue
+            .drain(..)
+            .map(|entries| {
+                let id = layouts.register(device, BindGroupLayoutBuilder::from(entries));
+                layouts.get(id).clone()
+            })
+            .collect()
     }
 }

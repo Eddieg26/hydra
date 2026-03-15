@@ -1,24 +1,24 @@
 use crate::{
     core::RenderDevice,
-    resources::{BindGroupBuilder, BindGroupLayoutBuilder, TextureDimension},
+    resources::{BindGroupBuilder, BindGroupLayoutBuilder, GpuResourceId},
 };
-use ecs::{Resource, World};
+use ecs::World;
 use std::{
     any::{Any, TypeId},
-    cmp,
     collections::HashMap,
-    hash::{DefaultHasher, Hash, Hasher},
+    hash::{Hash, Hasher},
     marker::PhantomData,
 };
-use wgpu::{ShaderStages, TextureFormat, TextureSampleType, TextureUsages, TextureView};
+use wgpu::ShaderStages;
 
 pub mod allocator;
 pub mod compiler;
 
 pub type Name = &'static str;
+pub type Execute = Box<dyn Fn() + Send + Sync + 'static>;
 
 pub trait GraphResource: Send + Sync + Sized + 'static {
-    type Desc: Send + Sync + Clone + Hash + 'static;
+    type Desc: Hash + Send + Sync + 'static;
 
     fn create(device: &RenderDevice, name: Name, desc: &Self::Desc) -> Self;
 
@@ -27,167 +27,131 @@ pub trait GraphResource: Send + Sync + Sized + 'static {
     fn bind<'a>(&'a self, builder: &mut BindGroupBuilder<'a>);
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
-pub struct TextureDesc {
-    dimension: TextureDimension,
-    format: TextureFormat,
-    usages: TextureUsages,
-    sample_type: TextureSampleType,
-    sample_count: u32,
-}
-
-impl GraphResource for TextureView {
-    type Desc = TextureDesc;
-
-    fn create(device: &RenderDevice, name: Name, desc: &Self::Desc) -> Self {
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(name),
-            size: desc.dimension.extents(),
-            mip_level_count: 1,
-            sample_count: desc.sample_count,
-            dimension: desc.dimension.into(),
-            format: desc.format,
-            usage: desc.usages,
-            view_formats: &[desc.format.add_srgb_suffix()],
-        });
-
-        texture.create_view(&Default::default())
-    }
-
-    fn entry(builder: &mut BindGroupLayoutBuilder, desc: &Self::Desc, stages: ShaderStages) {
-        builder.with_texture(stages, desc.sample_type, desc.dimension.into(), false, None);
-    }
-
-    fn bind<'a>(&'a self, builder: &mut BindGroupBuilder<'a>) {
-        builder.with_texture(self);
-    }
-}
-
-pub trait ImportedGraphResource: Resource + Send {
+pub trait ImportedGraphResource: Send + Sync + Sized + 'static {
     type GraphResource: GraphResource;
 
+    type Desc: Default + Hash + Send + Sync + 'static;
+
     const ROOT: bool = false;
+
+    fn name() -> Name;
+
+    fn get<'a>(world: &'a World, desc: &'a Self::Desc) -> &'a Self;
 
     fn resource(&self) -> Self::GraphResource;
 
     fn generation(&self) -> u32;
 }
 
-pub trait GraphPass {
+pub trait GraphPass: Send + Sync + 'static {
     fn name() -> Name;
 
     fn setup(builder: &mut PassBuilder) -> impl Fn() + Send + Sync + 'static;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ResourceKind {
-    Imported,
-    Transient,
+pub struct SubGraphExpander<'a> {
+    graph: &'a RenderGraph,
+    versions: &'a mut Vec<ResourceVersion>,
+    resources: &'a mut [ResourceRef],
+    passes: Vec<PassRef>,
 }
 
-pub struct ResourceNode {
-    id: u32,
-    ty: u32,
-    name: Name,
-    kind: ResourceKind,
-    desc: Box<dyn Any>,
-    current_version: u32,
-    desc_hash: u64,
-    generation: fn(&World) -> u32,
-    root: bool,
-}
-
-impl ResourceNode {
-    pub fn transient<R: GraphResource>(id: u32, ty: u32, name: Name, desc: R::Desc) -> Self {
-        let mut hasher = DefaultHasher::new();
-        desc.hash(&mut hasher);
-
+impl<'a> SubGraphExpander<'a> {
+    pub fn new(
+        graph: &'a RenderGraph,
+        resources: &'a mut [ResourceRef],
+        versions: &'a mut Vec<ResourceVersion>,
+    ) -> Self {
         Self {
-            id,
-            name,
-            ty,
-            kind: ResourceKind::Transient,
-            desc: Box::new(desc),
-            current_version: 0,
-            desc_hash: hasher.finish(),
-            generation: |_| 0,
-            root: false,
+            graph,
+            versions,
+            resources,
+            passes: Vec::new(),
         }
     }
 
-    pub fn imported<R: ImportedGraphResource>(id: u32, ty: u32, name: Name) -> Self {
-        Self {
+    pub fn add_resource(&mut self, node: u32, desc: Option<Box<dyn Any>>) -> u32 {
+        let id = self.versions.len() as u32;
+        let node = &self.graph.resources.nodes[node as usize];
+        let resource = ResourceVersion {
             id,
-            ty,
-            name,
-            kind: ResourceKind::Imported,
-            desc: Box::new(()),
-            current_version: 0,
-            desc_hash: 0,
-            generation: |world| world.resource::<R>().generation(),
-            root: R::ROOT,
+            node: node.id,
+            key: node.key,
+            producer: None,
+            user: None,
+            desc,
+        };
+
+        self.versions.push(resource);
+
+        id
+    }
+
+    pub fn add_pass(
+        &mut self,
+        node: u32,
+        reads: Vec<u32>,
+        writes: Vec<u32>,
+        bindings: Vec<ResourceBinding>,
+    ) -> u32 {
+        let id = self.passes.len() as u32;
+        let ref_count = writes.len() as u32;
+
+        for index in &writes {
+            self.versions[*index as usize].producer = Some(id);
         }
+
+        for index in &reads {
+            let node = self.versions[*index as usize].node as usize;
+            self.versions[*index as usize].user = Some(id);
+            self.resources[node].ref_count += 1;
+        }
+
+        self.passes.push(PassRef {
+            id,
+            node,
+            ref_count,
+            reads,
+            writes,
+            bindings,
+        });
+
+        id
     }
 
-    pub fn generation(&self, world: &World) -> u32 {
-        (self.generation)(world)
-    }
-}
-
-pub struct ResourceVersion {
-    id: u32,
-    node: u32,
-    version: u32,
-}
-
-impl ResourceVersion {
-    pub fn new(id: u32, node: u32, version: u32) -> Self {
-        Self { id, node, version }
-    }
-}
-
-pub struct GpuAllocation {
-    pub id: u32,
-    pub ty: u32,
-    pub generation: u32,
-    pub desc_hash: u64,
-    pub kind: ResourceKind,
-    pub last_use: Option<u32>,
-    pub instance: Box<dyn Any>,
-}
-
-impl GpuAllocation {
-    pub fn compatible(&self, node: &ResourceNode) -> bool {
-        self.desc_hash == node.desc_hash
-            && node.kind == ResourceKind::Transient
-            && self.kind == ResourceKind::Transient
+    fn finish(self) -> Vec<PassRef> {
+        self.passes
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct GraphVersionId<R: GraphResource>(u32, PhantomData<R>);
-impl<R: GraphResource> GraphVersionId<R> {
-    fn new(id: u32) -> Self {
-        Self(id, PhantomData)
-    }
+pub trait SubGraph: Send + Sync + 'static {
+    fn name() -> Name;
+
+    fn setup(
+        id: u32,
+        _: &mut PassBuilder,
+    ) -> impl Fn(&mut SubGraphExpander) + Send + Sync + 'static;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct GraphResourceId<R: GraphResource>(u32, PhantomData<R>);
-impl<R: GraphResource> GraphResourceId<R> {
-    fn new(id: u32) -> Self {
-        Self(id, PhantomData)
+impl<G: SubGraph> GraphPass for G {
+    fn name() -> Name {
+        <G as SubGraph>::name()
+    }
+
+    fn setup(_: &mut PassBuilder) -> impl Fn() + Send + Sync + 'static {
+        || {}
     }
 }
 
 pub struct ResourceType {
-    create: fn(&World, &RenderDevice, Name, &Box<dyn Any>) -> Box<dyn Any>,
+    create: fn(&World, &RenderDevice, Name, &dyn Any) -> Box<dyn Any>,
     entry: fn(&dyn Any, &mut BindGroupLayoutBuilder, ShaderStages),
     bind: for<'a> fn(&'a dyn Any, &mut BindGroupBuilder<'a>),
+    generation: fn(&World, &dyn Any) -> u32,
 }
 
 impl ResourceType {
-    pub fn new<R: GraphResource>() -> Self {
+    fn transient<R: GraphResource>() -> Self {
         Self {
             create: |_, device, name, desc| {
                 let desc = desc.downcast_ref::<R::Desc>().unwrap();
@@ -201,13 +165,15 @@ impl ResourceType {
                 let resource = resource.downcast_ref::<R>().unwrap();
                 R::bind(resource, builder);
             },
+            generation: |_, _| 0,
         }
     }
 
-    pub fn imported<R: ImportedGraphResource>() -> Self {
+    fn imported<R: ImportedGraphResource>() -> Self {
         Self {
-            create: |world, _, _, _| {
-                let imported = world.resource::<R>();
+            create: |world: &World, _, _, desc| {
+                let desc = desc.downcast_ref::<R::Desc>().unwrap();
+                let imported = R::get(world, desc);
                 Box::new(imported.resource())
             },
             entry: |desc, builder, stages| {
@@ -219,6 +185,10 @@ impl ResourceType {
             bind: |resource, builder| {
                 let resource = resource.downcast_ref::<R::GraphResource>().unwrap();
                 <R::GraphResource as GraphResource>::bind(resource, builder);
+            },
+            generation: |world, desc| {
+                let desc = desc.downcast_ref::<R::Desc>().unwrap();
+                R::get(world, desc).generation()
             },
         }
     }
@@ -245,19 +215,89 @@ impl ResourceType {
     fn bind<'a>(&self, resource: &'a dyn Any, builder: &mut BindGroupBuilder<'a>) {
         (self.bind)(resource, builder);
     }
+
+    fn generation(&self, world: &World, desc: &dyn Any) -> u32 {
+        (self.generation)(world, desc)
+    }
 }
 
-pub struct PassNode {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ResourceKind {
+    Transient,
+    Imported,
+}
+
+pub struct ResourceNode {
     id: u32,
+    ty: u32,
     name: Name,
-    creates: Vec<u32>,
-    reads: Vec<u32>,
-    writes: Vec<u32>,
-    bindings: Vec<ResourceBinding>,
-    execute: Box<dyn Fn() + Send + Sync + 'static>,
+    root: bool,
+    kind: ResourceKind,
+    key: u64,
+    desc: Box<dyn Any>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl ResourceNode {
+    fn transient<R: GraphResource>(id: u32, ty: u32, name: Name, desc: R::Desc) -> Self {
+        Self {
+            id,
+            ty,
+            name,
+            root: false,
+            kind: ResourceKind::Transient,
+            key: Self::key(&desc),
+            desc: Box::new(desc),
+        }
+    }
+
+    fn imported<R: ImportedGraphResource>(id: u32, ty: u32, name: Name) -> Self {
+        let desc = R::Desc::default();
+        Self {
+            id,
+            ty,
+            name,
+            root: R::ROOT,
+            kind: ResourceKind::Imported,
+            key: Self::key(&desc),
+            desc: Box::new(desc),
+        }
+    }
+
+    fn key<H: Hash>(value: &H) -> u64 {
+        let mut state = std::hash::DefaultHasher::new();
+        value.hash(&mut state);
+        state.finish()
+    }
+}
+
+pub struct ResourceVersion {
+    id: u32,
+    node: u32,
+    key: u64,
+    producer: Option<u32>,
+    user: Option<u32>,
+    desc: Option<Box<dyn Any>>,
+}
+
+#[derive(Debug, Default)]
+pub struct ResourceRef {
+    node: u32,
+    ref_count: u32,
+}
+
+impl From<&ResourceNode> for ResourceRef {
+    fn from(value: &ResourceNode) -> Self {
+        Self {
+            node: value.id,
+            ref_count: match value.root {
+                true => 1,
+                false => 0,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResourceUsage {
     Attachment,
     Binding {
@@ -276,7 +316,7 @@ pub struct ResourceBinding {
 }
 
 impl Ord for ResourceBinding {
-    fn cmp(&self, other: &Self) -> cmp::Ordering {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         match self.group.cmp(&other.group) {
             core::cmp::Ordering::Equal => {}
             ord => return ord,
@@ -286,7 +326,7 @@ impl Ord for ResourceBinding {
 }
 
 impl PartialOrd for ResourceBinding {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         match self.group.partial_cmp(&other.group) {
             Some(core::cmp::Ordering::Equal) => {}
             ord => return ord,
@@ -295,17 +335,104 @@ impl PartialOrd for ResourceBinding {
     }
 }
 
-pub struct PassBuilder<'a> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PassAttachment {
+    Attachment {
+        resource: u32,
+    },
+    Binding {
+        resource: u32,
+        group: u32,
+        binding: u32,
+        stages: ShaderStages,
+    },
+}
+
+impl PassAttachment {
+    pub fn resource(&self) -> u32 {
+        match self {
+            PassAttachment::Attachment { resource } => *resource,
+            PassAttachment::Binding { resource, .. } => *resource,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GraphResourceId<R: GraphResource>(u32, PhantomData<R>);
+impl<R: GraphResource> GraphResourceId<R> {
+    fn new(id: u32) -> Self {
+        Self(id, PhantomData)
+    }
+}
+
+pub struct PassNode {
     id: u32,
+    name: Name,
     creates: Vec<u32>,
+    reads: Vec<PassAttachment>,
+    writes: Vec<PassAttachment>,
+    execute: Execute,
+    expand: Box<dyn Fn(&mut SubGraphExpander) + Send + Sync + 'static>,
+}
+
+impl PassNode {
+    fn expand(&self, expander: &mut SubGraphExpander) {
+        (self.expand)(expander);
+    }
+}
+
+pub struct PassRef {
+    id: u32,
+    node: u32,
+    ref_count: u32,
     reads: Vec<u32>,
     writes: Vec<u32>,
     bindings: Vec<ResourceBinding>,
-    resources: &'a mut RenderGraphResources,
+}
+
+pub struct SubGraphNode {
+    id: u32,
+    passes: Vec<u32>,
+}
+
+impl SubGraphNode {
+    fn new(id: u32) -> Self {
+        Self {
+            id,
+            passes: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GraphName {
+    Main,
+    SubGraph(Name),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PassKey {
+    name: Name,
+    graph: GraphName,
+}
+
+impl PassKey {
+    pub fn new(name: Name, graph: GraphName) -> Self {
+        Self { name, graph }
+    }
+}
+
+pub struct PassBuilder<'a> {
+    id: u32,
+    creates: Vec<u32>,
+    reads: Vec<PassAttachment>,
+    writes: Vec<PassAttachment>,
+    bindings: Vec<ResourceBinding>,
+    resources: &'a mut GraphResources,
 }
 
 impl<'a> PassBuilder<'a> {
-    pub fn new(id: u32, resources: &'a mut RenderGraphResources) -> Self {
+    pub fn new(id: u32, resources: &'a mut GraphResources) -> Self {
         Self {
             id,
             resources,
@@ -326,204 +453,208 @@ impl<'a> PassBuilder<'a> {
     }
 
     pub fn create<R: GraphResource>(&mut self, name: Name, desc: R::Desc) -> GraphResourceId<R> {
-        let id = self.resources.create(name, desc);
+        let id = self.resources.create::<R>(name, desc);
 
-        self.creates.push(id.0);
+        self.creates.push(id);
 
-        id
+        GraphResourceId::new(id)
     }
 
-    pub fn import<R: ImportedGraphResource>(
-        &mut self,
-        name: Name,
-    ) -> GraphResourceId<R::GraphResource> {
-        let id = self.resources.import::<R>(name);
+    pub fn import<R: ImportedGraphResource>(&mut self) -> GraphResourceId<R::GraphResource> {
+        let id = self.resources.import::<R>();
 
-        id
+        GraphResourceId::new(id)
     }
 
     pub fn read<R: GraphResource>(
         &mut self,
         resource: GraphResourceId<R>,
         usage: ResourceUsage,
-    ) -> GraphVersionId<R> {
-        let id = self.resources.versions.len() as u32;
-        let version = self.resources.nodes[resource.0 as usize].current_version;
-
-        self.reads.push(id);
-        self.resources
-            .versions
-            .push(ResourceVersion::new(id, version, resource.0));
-
-        if let ResourceUsage::Binding {
-            group,
-            binding,
-            stages,
-        } = usage
-        {
-            self.bindings.push(ResourceBinding {
+    ) -> GraphResourceId<R> {
+        let attachment = match usage {
+            ResourceUsage::Attachment => PassAttachment::Attachment {
+                resource: resource.0,
+            },
+            ResourceUsage::Binding {
+                group,
+                binding,
+                stages,
+            } => PassAttachment::Binding {
                 resource: resource.0,
                 group,
                 binding,
                 stages,
-            });
-        }
+            },
+        };
 
-        GraphVersionId::new(id)
+        self.reads.push(attachment);
+
+        resource
     }
 
     pub fn write<R: GraphResource>(
         &mut self,
         resource: GraphResourceId<R>,
         usage: ResourceUsage,
-    ) -> GraphVersionId<R> {
-        let id = self.resources.versions.len() as u32;
-        let version = self.resources.nodes[resource.0 as usize].current_version + 1;
-
-        self.writes.push(id);
-        self.resources.nodes[resource.0 as usize].current_version = version;
-        self.resources
-            .versions
-            .push(ResourceVersion::new(id, version, resource.0));
-
-        if let ResourceUsage::Binding {
-            group,
-            binding,
-            stages,
-        } = usage
-        {
-            self.bindings.push(ResourceBinding {
+    ) -> GraphResourceId<R> {
+        let attachment = match usage {
+            ResourceUsage::Attachment => PassAttachment::Attachment {
+                resource: resource.0,
+            },
+            ResourceUsage::Binding {
+                group,
+                binding,
+                stages,
+            } => PassAttachment::Binding {
                 resource: resource.0,
                 group,
                 binding,
                 stages,
-            });
-        }
+            },
+        };
 
-        GraphVersionId::new(id)
+        self.writes.push(attachment);
+
+        resource
     }
 
-    fn build<P: GraphPass>(mut self) -> PassNode {
+    fn build<P: GraphPass>(
+        mut self,
+        expand: impl Fn(&mut SubGraphExpander) + Send + Sync + 'static,
+    ) -> PassNode {
+        let id = self.id;
         let execute = P::setup(&mut self);
 
         self.bindings.sort();
 
         PassNode {
-            id: self.id,
+            id,
             name: P::name(),
             creates: self.creates,
             reads: self.reads,
             writes: self.writes,
-            bindings: self.bindings,
             execute: Box::new(execute),
+            expand: Box::new(expand),
         }
     }
 }
 
-pub struct CompiledGraph {
-    resources: Vec<GpuAllocation>,
-    resource_refs: Vec<usize>,
-}
-
-pub struct RenderContext<'a> {
-    graph: &'a mut RenderGraph,
-}
-
-impl<'a> RenderContext<'a> {
-    pub fn get<R: GraphResource>(&self, id: GraphVersionId<R>) -> &R {
-        let version = &self.graph.resources.versions[id.0 as usize];
-        let node = &self.graph.resources.nodes[version.node as usize];
-        let resource = self.graph.compiled.resource_refs[node.id as usize];
-        self.graph.compiled.resources[resource]
-            .instance
-            .downcast_ref()
-            .expect("Failed to cast resource.")
-    }
-}
-
-pub struct RenderGraphResources {
+#[derive(Default)]
+pub struct GraphResources {
     types: Vec<ResourceType>,
     nodes: Vec<ResourceNode>,
-    versions: Vec<ResourceVersion>,
 
     type_map: HashMap<TypeId, u32>,
     node_map: HashMap<Name, u32>,
 }
 
-impl RenderGraphResources {
-    pub fn new() -> Self {
-        Self {
-            types: Vec::new(),
-            nodes: Vec::new(),
-            versions: Vec::new(),
-            type_map: HashMap::new(),
-            node_map: HashMap::new(),
+impl GraphResources {
+    pub fn create<R: GraphResource>(&mut self, name: Name, desc: R::Desc) -> u32 {
+        if let Some(id) = self.node_map.get(name) {
+            *id
+        } else {
+            let id = self.nodes.len() as u32;
+            let ty = self.register::<R>();
+            self.nodes
+                .push(ResourceNode::transient::<R>(id, ty, name, desc));
+            self.node_map.insert(name, id);
+
+            id
         }
     }
 
-    pub fn create<R: GraphResource>(&mut self, name: Name, desc: R::Desc) -> GraphResourceId<R> {
-        let ty = self.register::<R>();
+    pub fn import<R: ImportedGraphResource>(&mut self) -> u32 {
+        let name = R::name();
         if let Some(id) = self.node_map.get(name) {
-            GraphResourceId::new(*id)
+            *id
         } else {
             let id = self.nodes.len() as u32;
-            let node = ResourceNode::transient::<R>(id, ty, name, desc);
-            self.nodes.push(node);
+            let ty = self.register_import::<R>();
+            self.nodes.push(ResourceNode::imported::<R>(id, ty, name));
             self.node_map.insert(name, id);
 
-            GraphResourceId::new(id)
-        }
-    }
-
-    pub fn import<R: ImportedGraphResource>(
-        &mut self,
-        name: Name,
-    ) -> GraphResourceId<R::GraphResource> {
-        let ty = self.register_import::<R>();
-        if let Some(id) = self.node_map.get(name) {
-            GraphResourceId::new(*id)
-        } else {
-            let id = self.nodes.len() as u32;
-            let node = ResourceNode::imported::<R>(id, ty, name);
-            self.nodes.push(node);
-            self.node_map.insert(name, id);
-
-            GraphResourceId::new(id)
+            id
         }
     }
 
     fn register<R: GraphResource>(&mut self) -> u32 {
         let ty = TypeId::of::<R>();
-        if let Some(index) = self.type_map.get(&ty) {
-            return *index as u32;
+        if let Some(id) = self.type_map.get(&ty) {
+            *id
         } else {
-            let index = self.types.len() as u32;
-            let resource_ty = ResourceType::new::<R>();
-            self.types.push(resource_ty);
-            self.type_map.insert(ty, index);
-            index
+            let id = self.types.len() as u32;
+            self.types.push(ResourceType::transient::<R>());
+            self.type_map.insert(ty, id);
+
+            id
         }
     }
 
     fn register_import<R: ImportedGraphResource>(&mut self) -> u32 {
-        self.register::<R::GraphResource>();
-
         let ty = TypeId::of::<R>();
-        if let Some(index) = self.type_map.get(&ty) {
-            return *index as u32;
+        if let Some(id) = self.type_map.get(&ty) {
+            *id
         } else {
-            let index = self.types.len() as u32;
-            let resource_ty = ResourceType::imported::<R>();
-            self.types.push(resource_ty);
-            self.type_map.insert(ty, index);
-            index
+            let id = self.types.len() as u32;
+            self.types.push(ResourceType::imported::<R>());
+            self.type_map.insert(ty, id);
+
+            id
         }
     }
 }
 
+pub struct GraphPasses {
+    nodes: Vec<PassNode>,
+    graphs: Vec<SubGraphNode>,
+
+    node_map: HashMap<PassKey, u32>,
+    graph_map: HashMap<GraphName, u32>,
+}
+
 pub struct RenderGraph {
-    resources: RenderGraphResources,
-    passes: Vec<PassNode>,
-    pass_map: HashMap<Name, u32>,
-    compiled: CompiledGraph,
+    passes: GraphPasses,
+    resources: GraphResources,
+}
+
+impl RenderGraph {
+    pub const MAIN_GRAPH: usize = 0;
+
+    pub fn add_pass<P: GraphPass>(&mut self) {
+        let key = PassKey::new(P::name(), GraphName::Main);
+        if !self.passes.node_map.contains_key(&key) {
+            let id = self.passes.nodes.len() as u32;
+            let pass = PassBuilder::new(id, &mut self.resources).build::<P>(|_| {});
+            self.passes.nodes.push(pass);
+            self.passes.node_map.insert(key, id);
+        }
+    }
+
+    pub fn add_subgraph<G: SubGraph>(&mut self) {
+        let name = GraphName::SubGraph(G::name());
+        if !self.passes.graph_map.contains_key(&name) {
+            let id = self.passes.graphs.len() as u32;
+            let pass_id = self.passes.nodes.len() as u32;
+
+            let mut builder = PassBuilder::new(pass_id, &mut self.resources);
+            let expand = G::setup(id, &mut builder);
+
+            self.passes.graphs[Self::MAIN_GRAPH].passes.push(pass_id);
+            self.passes.nodes.push(builder.build::<G>(expand));
+            self.passes.graphs.push(SubGraphNode::new(id));
+            self.passes.graph_map.insert(name, id);
+        }
+    }
+
+    pub fn create<R: GraphResource>(&mut self, name: Name, desc: R::Desc) -> GpuResourceId<R> {
+        let id = self.resources.create::<R>(name, desc);
+
+        GpuResourceId::new(id)
+    }
+
+    pub fn import<R: ImportedGraphResource>(&mut self) -> GpuResourceId<R> {
+        let id = self.resources.import::<R>();
+
+        GpuResourceId::new(id)
+    }
 }

@@ -63,7 +63,7 @@ pub trait RenderAsset: Send + Sync + Sized + 'static {
 
     fn removed(id: &AssetId<Self::Asset>, asset: &Self, arg: &mut ArgItem<Self::Arg>) {}
 
-    fn dependencies(register: impl RenderAssetRegister) {}
+    fn dependencies(registery: impl RenderAssetRegister) {}
 
     fn usage(asset: &Self::Asset) -> AssetUsage {
         AssetUsage::Discard

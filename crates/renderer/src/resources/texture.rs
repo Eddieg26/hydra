@@ -1,15 +1,14 @@
 use crate::{core::RenderDevice, resources::extract::RenderAsset, types::Color};
-use asset::Asset;
+use asset::{Asset, AssetId};
 use ecs::{
     Resource,
     unlifetime::{Read, Write},
 };
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 use wgpu::{
-    CompareFunction, FilterMode, Label, Sampler, SamplerBorderColor, TextureFormat, TextureUsages,
-    TextureView,
-    util::DeviceExt,
-    wgt::{TextureDataOrder, TextureDescriptor},
+    CompareFunction, FilterMode, Label, Sampler, SamplerBorderColor, SurfaceTexture,
+    TextureDescriptor, TextureFormat, TextureUsages, TextureView, util::DeviceExt,
+    wgt::TextureDataOrder,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -167,13 +166,24 @@ impl Texture {
 }
 
 pub struct GpuTexture {
-    inner: Arc<wgpu::Texture>,
+    inner: Box<wgpu::Texture>,
     view: TextureView,
     sampler: SamplerId,
 }
 
 impl GpuTexture {
-    pub fn new(device: &RenderDevice, texture: &Texture, sampler: SamplerId) -> Self {
+    pub fn new(device: &RenderDevice, desc: &TextureDescriptor<'_>, sampler: SamplerId) -> Self {
+        let texture = device.create_texture(desc);
+        let view = texture.create_view(&Default::default());
+
+        Self {
+            inner: Box::new(texture),
+            view,
+            sampler,
+        }
+    }
+
+    pub fn from_texture(device: &RenderDevice, texture: &Texture, sampler: SamplerId) -> Self {
         let mip_level_count = match texture.mips {
             true => texture
                 .dimension
@@ -201,7 +211,18 @@ impl GpuTexture {
         let view = texture.create_view(&Default::default());
 
         Self {
-            inner: Arc::new(texture),
+            inner: Box::new(texture),
+            view,
+            sampler,
+        }
+    }
+
+    pub fn from_surface(surface: &SurfaceTexture, sampler: SamplerId) -> Self {
+        let texture = surface.texture.clone();
+        let view = texture.create_view(&Default::default());
+
+        Self {
+            inner: Box::new(texture),
             view,
             sampler,
         }
@@ -231,7 +252,7 @@ impl RenderAsset for GpuTexture {
         (device, samplers): &mut ecs::ArgItem<Self::Arg>,
     ) -> Result<Self, super::extract::ExtractError<Self::Asset>> {
         let sampler = samplers.allocate(device, asset.sampler);
-        let texture = GpuTexture::new(device, &asset, sampler);
+        let texture = GpuTexture::from_texture(device, &asset, sampler);
 
         Ok(texture)
     }
@@ -257,6 +278,8 @@ pub struct SamplerCache {
 }
 
 impl SamplerCache {
+    pub const DEFAULT: SamplerId = SamplerId(0);
+
     pub fn new(default: Sampler) -> Self {
         Self {
             samplers: vec![default],
@@ -323,5 +346,143 @@ impl SamplerCache {
     pub fn clear(&mut self) {
         self.samplers.clear();
         self.allocated.clear();
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RenderTextureDimension {
+    D2 { width: u32, height: u32 },
+    Cube { size: u32 },
+}
+
+impl RenderTextureDimension {
+    pub fn extents(&self) -> wgpu::Extent3d {
+        let dimension: TextureDimension = (*self).into();
+        dimension.extents()
+    }
+}
+
+impl From<RenderTextureDimension> for TextureDimension {
+    fn from(value: RenderTextureDimension) -> Self {
+        match value {
+            RenderTextureDimension::D2 { width, height } => TextureDimension::D2 { width, height },
+            RenderTextureDimension::Cube { size } => TextureDimension::Cube { size },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DepthFormat {
+    D16,
+    D24,
+    D24Stencil8,
+    D32,
+    D32Stencil8,
+}
+
+impl From<DepthFormat> for TextureFormat {
+    fn from(value: DepthFormat) -> Self {
+        match value {
+            DepthFormat::D16 => TextureFormat::Depth16Unorm,
+            DepthFormat::D24 => TextureFormat::Depth24Plus,
+            DepthFormat::D24Stencil8 => TextureFormat::Depth24PlusStencil8,
+            DepthFormat::D32 => TextureFormat::Depth32Float,
+            DepthFormat::D32Stencil8 => TextureFormat::Depth32FloatStencil8,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Asset)]
+pub struct RenderTexture {
+    pub dimension: RenderTextureDimension,
+    pub format: TextureFormat,
+    pub depth: Option<DepthFormat>,
+    pub mips: bool,
+    pub sample_count: u32,
+    pub wrap: WrapMode,
+    pub filter: FilterMode,
+    pub anisotropy_clamp: u16,
+}
+
+pub struct RenderTarget {
+    pub color: Option<GpuTexture>,
+    pub depth: Option<GpuTexture>,
+}
+
+impl RenderTarget {
+    pub const SURFACE: AssetId<Texture> =
+        AssetId::from_u128(272050184886967597568779241039146563399);
+}
+
+impl RenderAsset for RenderTarget {
+    type Asset = RenderTexture;
+
+    type Arg = (Read<RenderDevice>, Write<SamplerCache>);
+
+    fn extract(
+        _: asset::AssetId<Self::Asset>,
+        asset: Self::Asset,
+        (device, samplers): &mut ecs::ArgItem<Self::Arg>,
+    ) -> Result<Self, super::ExtractError<Self::Asset>> {
+        let anisotropy = match asset.depth {
+            Some(_) => 0,
+            None => asset.anisotropy_clamp,
+        };
+
+        let mip_level_count = match asset.mips {
+            true => asset
+                .dimension
+                .extents()
+                .max_mips(TextureDimension::from(asset.dimension).into())
+                as u32,
+            false => 1,
+        };
+
+        let sampler = samplers.allocate(
+            device,
+            TextureSampler::Custom {
+                filter: asset.filter,
+                wrap: asset.wrap,
+                compare: None,
+                anisotropy,
+            },
+        );
+
+        let color = GpuTexture::new(
+            device,
+            &TextureDescriptor {
+                label: None,
+                size: asset.dimension.extents(),
+                mip_level_count,
+                sample_count: asset.sample_count,
+                dimension: TextureDimension::from(asset.dimension).into(),
+                format: asset.format,
+                usage: TextureUsages::all(),
+                view_formats: &[asset.format.add_srgb_suffix()],
+            },
+            sampler,
+        );
+
+        let depth = asset.depth.map(|format| {
+            GpuTexture::new(
+                device,
+                &TextureDescriptor {
+                    label: None,
+                    size: asset.dimension.extents(),
+                    mip_level_count,
+                    sample_count: asset.sample_count,
+                    dimension: TextureDimension::from(asset.dimension).into(),
+                    format: format.into(),
+                    usage: TextureUsages::all(),
+                    view_formats: &[],
+                },
+                SamplerCache::DEFAULT,
+            )
+        });
+
+        Ok(Self {
+            color: Some(color),
+            depth,
+        })
     }
 }

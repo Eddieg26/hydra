@@ -256,6 +256,10 @@ impl World {
         self.archetypes.get_component::<C>(entity)
     }
 
+    pub fn get_components<C: Component>(&self) -> Vec<(Entity, &C)> {
+        vec![]
+    }
+
     pub fn get_component_mut<C: Component>(&mut self, entity: Entity) -> Option<&mut C> {
         self.archetypes.get_component_mut::<C>(entity)
     }

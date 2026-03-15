@@ -124,4 +124,8 @@ impl RenderSurface {
     pub fn configure(&mut self, device: &RenderDevice) {
         self.inner.configure(device, &self.config);
     }
+
+    pub fn texture(&self) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
+        self.inner.get_current_texture()
+    }
 }
