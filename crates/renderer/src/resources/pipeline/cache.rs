@@ -25,14 +25,6 @@ pub struct PipelineCache {
 }
 
 impl PipelineCache {
-    pub fn new() -> Self {
-        Self {
-            render_pipelines: HashMap::new(),
-            compute_pipelines: HashMap::new(),
-            pipeline_queue: IndexMap::new(),
-        }
-    }
-
     pub fn get_render_pipeline(&self, id: &PipelineId) -> Option<&RenderPipeline> {
         self.render_pipelines.get(id)
     }

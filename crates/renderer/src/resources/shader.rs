@@ -137,20 +137,13 @@ pub struct ShaderVariant {
     pub constants: ShaderConstants,
 }
 
-#[derive(Resource)]
+#[derive(Default, Resource)]
 pub struct ShaderVariants {
     queue: HashMap<AssetId<Shader>, Vec<ShaderVariant>>,
     variants: HashMap<AssetId<Shader>, HashSet<AssetId<Shader>>>,
 }
 
 impl ShaderVariants {
-    pub fn new() -> Self {
-        Self {
-            queue: HashMap::new(),
-            variants: HashMap::new(),
-        }
-    }
-
     pub fn queue(&mut self, shader: AssetId<Shader>, variant: ShaderVariant) {
         self.queue.entry(shader).or_default().push(variant);
     }

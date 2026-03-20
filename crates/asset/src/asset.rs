@@ -18,7 +18,7 @@ pub struct AssetId<A: Asset>(Uuid, PhantomData<A>);
 
 impl<A: Asset> AssetId<A> {
     pub fn new() -> Self {
-        Self(Uuid::new_v4(), Default::default())
+        Self(Uuid::new_v4(), PhantomData)
     }
 
     pub const fn from_u128(value: u128) -> Self {
@@ -26,7 +26,11 @@ impl<A: Asset> AssetId<A> {
     }
 
     pub fn with_namespace(&self, name: &[u8]) -> Self {
-        Self(Uuid::new_v5(&self.0, name), Default::default())
+        Self(Uuid::new_v5(&self.0, name), PhantomData)
+    }
+
+    pub fn to<S: Asset>(self) -> AssetId<S> {
+        AssetId(self.0, PhantomData)
     }
 }
 

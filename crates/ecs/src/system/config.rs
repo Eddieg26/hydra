@@ -629,13 +629,12 @@ macro_rules! impl_tuple_condition {
 
 variadics::variable_impl!(impl_tuple_condition, P, 2, 16);
 
-#[allow(unused_imports, dead_code)]
+#[cfg(test)]
 mod tests {
     use super::{Condition, CurrentMode, Exists};
     use crate::{
-        IntoSystemConfig, Resource, System, SystemConfigs, SystemMeta, World, WorldMode,
+        IntoSystemConfig, Resource, System, SystemMeta, World, WorldMode,
         system::{Added, Entered, Exited, Modified, Not, Or, Removed},
-        world,
     };
 
     #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]

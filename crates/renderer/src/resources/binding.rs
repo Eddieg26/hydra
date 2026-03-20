@@ -2,6 +2,7 @@ use crate::{
     core::RenderDevice,
     resources::{GpuResourceId, Label},
 };
+use ecs::Resource;
 use std::{collections::HashMap, num::NonZero};
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
@@ -214,19 +215,13 @@ impl<'a> BindGroupBuilder<'a> {
     }
 }
 
+#[derive(Default, Resource)]
 pub struct BindGroupLayoutRegistry {
     layouts: Vec<BindGroupLayout>,
     map: HashMap<Vec<BindGroupLayoutEntry>, GpuResourceId<BindGroupLayout>>,
 }
 
 impl BindGroupLayoutRegistry {
-    pub fn new() -> Self {
-        Self {
-            layouts: Vec::new(),
-            map: HashMap::new(),
-        }
-    }
-
     pub fn get(&self, id: GpuResourceId<BindGroupLayout>) -> &BindGroupLayout {
         &self.layouts[id.get() as usize]
     }

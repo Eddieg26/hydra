@@ -1,16 +1,23 @@
 use crate::{
-    core::{RenderDevice, RenderSurface},
+    core::{RenderDevice, RenderSettings, RenderSurface, SurfaceTexture},
+    renderer::{
+        camera::Camera,
+        graph::{RenderGraph, RenderGraphDirty, compiler::RenderGraphCompiler},
+    },
     resources::{
-        ExtractError, ExtractInfo, GpuMesh, GpuShader, GpuTexture, PipelineCache, RenderAsset,
-        RenderAssetRegistry, RenderAssets, ShaderVariants,
+        BindGroupLayoutRegistry, ExtractError, ExtractInfo, GpuMesh, GpuShader, GpuTexture,
+        MainRenderTarget, PipelineCache, RenderAsset, RenderAssetRegistry, RenderAssets,
+        RenderTarget, SamplerCache, ShaderVariants,
         allocator::{MeshAllocator, MeshAllocatorConfig},
     },
 };
 use asset::plugin::{AssetAppExt, AssetPlugin};
-use ecs::{AppBuilder, AppTag, Extract, Phase, Plugin, Run, app::sync::SyncEventsPlugin};
+use ecs::{
+    AppBuilder, AppTag, Extract, IntoSystemConfig, Phase, Plugin, Run,
+    app::sync::{SyncComponentPlugin, SyncEventsPlugin},
+};
 use std::marker::PhantomData;
 use transform::GlobalTransform;
-use wgpu::TextureFormat;
 use window::{Window, events::WindowResized, plugin::WindowPlugin};
 
 pub struct RenderPlugin;
@@ -26,6 +33,8 @@ impl Plugin for RenderPlugin {
             RenderAssetPlugin::<GpuShader>::new(),
             RenderAssetPlugin::<GpuTexture>::new(),
             RenderAssetPlugin::<GpuMesh>::new(),
+            RenderAssetPlugin::<RenderTarget>::new(),
+            SyncComponentPlugin::<Camera, RenderApp>::new(),
             SyncEventsPlugin::<WindowResized, RenderApp>::new(),
         ))
         .register::<GlobalTransform>()
@@ -33,18 +42,28 @@ impl Plugin for RenderPlugin {
         .add_sub_phase(Run, Process)
         .add_sub_phase(Run, Queue)
         .add_sub_phase(Run, Commit)
+        .add_sub_phase(Run, PreRender)
         .add_sub_phase(Run, Render)
         .add_sub_phase(Run, Present)
+        .add_resource(PipelineCache::default())
+        .add_resource(ShaderVariants::default())
         .add_resource(MeshAllocatorConfig::default())
-        .add_resource(PipelineCache::new())
-        .add_resource(ShaderVariants::new());
+        .add_resource(RenderSettings::default())
+        .add_resource(SurfaceTexture::default())
+        .add_resource(BindGroupLayoutRegistry::default())
+        .add_systems(Process, RenderSurface::on_resize)
+        .add_systems(
+            PreRender,
+            RenderGraphCompiler::compile.when::<RenderGraphDirty>(),
+        )
+        .add_systems(Render, RenderGraph::run)
+        .add_systems(Present, SurfaceTexture::present);
     }
 
     fn build(&mut self, app: &mut AppBuilder) {
         let window = app.resource::<Window>();
         let task = async {
-            let depth = TextureFormat::Depth32Float;
-            let mut surface = RenderSurface::new(window, depth).await.unwrap();
+            let mut surface = RenderSurface::new(window).await.unwrap();
             let device = RenderDevice::new(surface.adapter()).await.unwrap();
 
             surface.configure(&device);
@@ -53,10 +72,20 @@ impl Plugin for RenderPlugin {
         };
 
         let (surface, device) = smol::block_on(task);
+        let target = MainRenderTarget::new(
+            &device,
+            app.sub_app_mut(RenderApp).resource::<RenderSettings>(),
+            surface.width(),
+            surface.height(),
+        );
+        let sampler = SamplerCache::new_sampler(&device, &Default::default());
+        let samplers = SamplerCache::new(sampler);
 
         app.sub_app_mut(RenderApp)
             .add_resource(surface)
-            .add_resource(device);
+            .add_resource(device)
+            .add_resource(target)
+            .add_resource(samplers);
     }
 
     fn finish(&mut self, app: &mut AppBuilder) {
@@ -112,6 +141,9 @@ pub struct Queue;
 
 #[derive(Phase)]
 pub struct Commit;
+
+#[derive(Phase)]
+pub struct PreRender;
 
 #[derive(Phase)]
 pub struct Render;

@@ -1,16 +1,15 @@
 use crate::core::device::RenderDevice;
-use ecs::Resource;
+use ecs::{EventReader, Resource};
 use wgpu::{
     Adapter, CompositeAlphaMode, CreateSurfaceError, Instance, PowerPreference, PresentMode,
     RequestAdapterOptions, Surface, SurfaceConfiguration, TextureFormat, TextureUsages,
     rwh::HandleError,
 };
-use window::Window;
+use window::{Window, events::WindowResized};
 
 #[derive(Resource)]
 pub struct RenderSurface {
     config: SurfaceConfiguration,
-    depth: wgpu::TextureFormat,
     inner: Surface<'static>,
     adapter: Adapter,
 }
@@ -34,7 +33,7 @@ impl From<CreateSurfaceError> for RenderSurfaceError {
 }
 
 impl RenderSurface {
-    pub async fn new(window: &Window, depth: TextureFormat) -> Result<Self, RenderSurfaceError> {
+    pub async fn new(window: &Window) -> Result<Self, RenderSurfaceError> {
         let instance = Instance::default();
 
         let surface = unsafe {
@@ -81,7 +80,6 @@ impl RenderSurface {
 
         Ok(Self {
             config,
-            depth,
             inner: surface,
             adapter,
         })
@@ -107,12 +105,8 @@ impl RenderSurface {
         self.config.height
     }
 
-    pub fn color_format(&self) -> wgpu::TextureFormat {
+    pub fn format(&self) -> wgpu::TextureFormat {
         self.config.format
-    }
-
-    pub fn depth_format(&self) -> wgpu::TextureFormat {
-        self.depth
     }
 
     pub fn resize(&mut self, device: &RenderDevice, width: u32, height: u32) {
@@ -127,5 +121,36 @@ impl RenderSurface {
 
     pub fn texture(&self) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
         self.inner.get_current_texture()
+    }
+
+    pub(crate) fn on_resize(
+        events: EventReader<WindowResized>,
+        device: &RenderDevice,
+        surface: &mut RenderSurface,
+    ) {
+        if let Some(event) = events.last() {
+            surface.resize(device, event.width(), event.height());
+        }
+    }
+}
+
+#[derive(Default, Resource)]
+pub struct SurfaceTexture(Option<wgpu::SurfaceTexture>);
+
+impl SurfaceTexture {
+    pub fn set(&mut self, texture: wgpu::SurfaceTexture) {
+        self.0 = Some(texture);
+    }
+
+    pub fn get(&self) -> Option<&wgpu::SurfaceTexture> {
+        self.0.as_ref()
+    }
+
+    pub(crate) fn present(surface: &mut SurfaceTexture) {
+        let Some(texture) = surface.0.take() else {
+            return;
+        };
+
+        texture.present();
     }
 }
