@@ -61,7 +61,7 @@ impl From<ColorFormat> for TextureFormat {
     }
 }
 
-#[derive(Debug, Clone, Copy, Resource)]
+#[derive(Debug, Clone, Copy, Resource, PartialEq, Eq)]
 pub struct RenderSettings {
     msaa: Msaa,
     color: ColorFormat,

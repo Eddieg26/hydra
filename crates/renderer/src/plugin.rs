@@ -13,7 +13,7 @@ use crate::{
 };
 use asset::plugin::{AssetAppExt, AssetPlugin};
 use ecs::{
-    AppBuilder, AppTag, Extract, IntoSystemConfig, Phase, Plugin, Run,
+    AppBuilder, AppTag, Extract, IntoSystemConfigs, Phase, Plugin, Run,
     app::sync::{SyncComponentPlugin, SyncEventsPlugin},
 };
 use std::marker::PhantomData;
@@ -50,8 +50,12 @@ impl Plugin for RenderPlugin {
         .add_resource(MeshAllocatorConfig::default())
         .add_resource(RenderSettings::default())
         .add_resource(SurfaceTexture::default())
+        .add_resource(MainRenderTarget::default())
         .add_resource(BindGroupLayoutRegistry::default())
-        .add_systems(Process, RenderSurface::on_resize)
+        .add_systems(
+            Process,
+            RenderSurface::on_resize.before(MainRenderTarget::update),
+        )
         .add_systems(
             PreRender,
             RenderGraphCompiler::compile.when::<RenderGraphDirty>(),
@@ -72,19 +76,12 @@ impl Plugin for RenderPlugin {
         };
 
         let (surface, device) = smol::block_on(task);
-        let target = MainRenderTarget::new(
-            &device,
-            app.sub_app_mut(RenderApp).resource::<RenderSettings>(),
-            surface.width(),
-            surface.height(),
-        );
         let sampler = SamplerCache::new_sampler(&device, &Default::default());
         let samplers = SamplerCache::new(sampler);
 
         app.sub_app_mut(RenderApp)
             .add_resource(surface)
             .add_resource(device)
-            .add_resource(target)
             .add_resource(samplers);
     }
 

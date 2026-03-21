@@ -1,5 +1,5 @@
 use crate::{
-    core::{ColorFormat, RenderDevice, RenderSettings},
+    core::{ColorFormat, Msaa, RenderDevice, SurfaceTexture},
     resources::{RenderAssets, extract::RenderAsset},
     types::Color,
 };
@@ -170,7 +170,7 @@ impl Texture {
 
 #[derive(Debug, Clone)]
 pub struct GpuTexture {
-    inner: Box<wgpu::Texture>,
+    inner: wgpu::Texture,
     view: TextureView,
     sampler: SamplerId,
 }
@@ -181,7 +181,7 @@ impl GpuTexture {
         let view = texture.create_view(&Default::default());
 
         Self {
-            inner: Box::new(texture),
+            inner: texture,
             view,
             sampler,
         }
@@ -215,7 +215,7 @@ impl GpuTexture {
         let view = texture.create_view(&Default::default());
 
         Self {
-            inner: Box::new(texture),
+            inner: texture,
             view,
             sampler,
         }
@@ -231,6 +231,18 @@ impl GpuTexture {
 
     pub fn sampler(&self) -> SamplerId {
         self.sampler
+    }
+
+    pub fn mips(&self) -> bool {
+        self.inner.mip_level_count() > 1
+    }
+}
+
+impl std::ops::Deref for GpuTexture {
+    type Target = wgpu::Texture;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
 }
 
@@ -369,6 +381,7 @@ pub struct RenderTexture {
 pub struct RenderTarget {
     pub width: u32,
     pub height: u32,
+    pub format: ColorFormat,
     pub color: GpuTexture,
 }
 
@@ -405,6 +418,7 @@ impl RenderTarget {
         Self {
             width: texture.width,
             height: texture.height,
+            format: texture.format,
             color,
         }
     }
@@ -450,39 +464,112 @@ impl RenderAsset for RenderTarget {
     }
 }
 
-#[derive(Resource)]
-pub struct MainRenderTarget(RenderTarget);
+#[derive(Default, Resource)]
+pub struct MainRenderTarget(Option<RenderTarget>);
 
 impl MainRenderTarget {
-    pub fn new(device: &RenderDevice, settings: &RenderSettings, width: u32, height: u32) -> Self {
-        Self(RenderTarget::create(
-            device,
-            &RenderTexture {
-                width,
-                height,
-                format: settings.color(),
-                mips: false,
-                sampler: TextureSampler::Default,
-            },
-            SamplerCache::DEFAULT,
-        ))
+    pub fn get(&self) -> Option<&RenderTarget> {
+        self.0.as_ref()
     }
 
-    pub fn update(
-        &mut self,
-        device: &RenderDevice,
-        settings: &RenderSettings,
-        width: u32,
-        height: u32,
-    ) {
-        self.0 = Self::new(device, settings, width, height).0;
+    pub(crate) fn update(target: &mut MainRenderTarget, surface: &SurfaceTexture) {
+        let Some(surface) = surface.get() else {
+            target.0 = None;
+            return;
+        };
+
+        let color = GpuTexture {
+            inner: surface.texture.clone(),
+            view: surface.texture.create_view(&Default::default()),
+            sampler: SamplerCache::DEFAULT,
+        };
+
+        target.0 = Some(RenderTarget {
+            width: surface.texture.width(),
+            height: surface.texture.height(),
+            format: ColorFormat::Standard {
+                srgb: surface.texture.format().is_srgb(),
+            },
+            color,
+        });
     }
 }
 
-impl std::ops::Deref for MainRenderTarget {
-    type Target = RenderTarget;
+#[derive(Clone)]
+pub struct CachedTexture {
+    inner: Box<wgpu::Texture>,
+    refs: u32,
+}
+
+impl std::ops::Deref for CachedTexture {
+    type Target = wgpu::Texture;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.inner
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TextureKey {
+    pub dimension: TextureDimension,
+    pub format: TextureFormat,
+    pub usage: TextureUsages,
+    pub msaa: Msaa,
+    pub mips: bool,
+}
+
+#[derive(Resource)]
+pub struct TextureCache(HashMap<TextureKey, CachedTexture>);
+impl TextureCache {
+    pub fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+    pub fn get(&self, key: &TextureKey) -> Option<&wgpu::Texture> {
+        self.0.get(key).map(|t| t.inner.as_ref())
+    }
+
+    pub fn insert(&mut self, device: &RenderDevice, key: TextureKey) -> CachedTexture {
+        if let Some(texture) = self.0.get_mut(&key) {
+            texture.refs += 1;
+            texture.clone()
+        } else {
+            let mip_level_count = match key.mips {
+                true => key.dimension.extents().max_mips(key.dimension.into()) as u32,
+                false => 1,
+            };
+
+            let texture = device.create_texture(&TextureDescriptor {
+                label: None,
+                size: key.dimension.extents(),
+                mip_level_count,
+                sample_count: key.msaa.sample_count(),
+                dimension: key.dimension.into(),
+                format: key.format,
+                usage: key.usage,
+                view_formats: &[key.format.add_srgb_suffix()],
+            });
+
+            let texture = CachedTexture {
+                inner: Box::new(texture),
+                refs: 1,
+            };
+
+            self.0.insert(key, texture.clone());
+            texture
+        }
+    }
+
+    pub fn remove(&mut self, key: &TextureKey) {
+        let dead = if let Some(texture) = self.0.get_mut(key) {
+            texture.refs -= 1;
+            texture.refs == 0
+        } else {
+            false
+        };
+
+        if dead {
+            self.0.remove(key);
+        }
     }
 }

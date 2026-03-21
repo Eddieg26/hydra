@@ -1,5 +1,5 @@
 use crate::{
-    core::RenderDevice,
+    core::{RenderDevice, RenderSettings},
     renderer::graph::allocator::{GpuResourceAllocator, PassBindGroup},
     resources::{BindGroupBuilder, BindGroupLayoutBuilder},
 };
@@ -504,12 +504,31 @@ impl<'a> RenderContext<'a> {
     }
 }
 
+pub struct ExecutableState {
+    settings: RenderSettings,
+    passes: Box<[PassInstance]>,
+    allocator: GpuResourceAllocator,
+}
+
 #[derive(Default, Resource)]
-pub struct ExecutableGraph(Option<(Box<[PassInstance]>, GpuResourceAllocator)>);
+pub struct ExecutableGraph(Option<ExecutableState>);
 
 impl ExecutableGraph {
-    pub(crate) fn set(&mut self, passes: Box<[PassInstance]>, allocator: GpuResourceAllocator) {
-        self.0 = Some((passes, allocator))
+    pub(crate) fn set(
+        &mut self,
+        settings: RenderSettings,
+        passes: Box<[PassInstance]>,
+        allocator: GpuResourceAllocator,
+    ) {
+        self.0 = Some(ExecutableState {
+            settings,
+            passes,
+            allocator,
+        })
+    }
+
+    pub fn state(&self) -> Option<&ExecutableState> {
+        self.0.as_ref()
     }
 
     pub fn clear(&mut self) {
@@ -528,7 +547,6 @@ pub struct RenderGraph {
     resources: GraphResources,
     nodes: Vec<PassNode>,
     node_map: HashMap<TypeId, usize>,
-    executable: Option<ExecutableGraph>,
 }
 
 impl RenderGraph {
@@ -554,11 +572,11 @@ impl RenderGraph {
         graph: &RenderGraph,
         executable: &mut ExecutableGraph,
     ) {
-        if let Some((passes, allocator)) = executable.0.as_mut() {
-            allocator.update(world, device, graph);
+        if let Some(state) = executable.0.as_mut() {
+            state.allocator.update(world, device, graph);
 
-            let mut ctx = RenderContext::new(world, device, &allocator);
-            for pass in passes {
+            let mut ctx = RenderContext::new(world, device, &state.allocator);
+            for pass in &state.passes {
                 ctx.resource_offset = pass.resources;
 
                 let node = &graph.nodes[pass.node as usize];
@@ -573,13 +591,17 @@ impl RenderGraph {
 pub struct RenderGraphDirty;
 impl Condition for RenderGraphDirty {
     fn evaluate(world: &World, _: &ecs::SystemMeta) -> bool {
-        world.resource::<RenderGraph>().executable.is_none()
+        let graph = world.resource::<ExecutableGraph>();
+        let settings = world.resource::<RenderSettings>();
+        graph
+            .state()
+            .is_some_and(|state| &state.settings == settings)
     }
 }
 
 pub struct RecompileRenderGraph;
 impl ecs::Command for RecompileRenderGraph {
     fn execute(self, world: &mut World) {
-        world.resource_mut::<RenderGraph>().executable = None;
+        world.resource_mut::<ExecutableGraph>().clear();
     }
 }

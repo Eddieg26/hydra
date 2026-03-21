@@ -4,7 +4,6 @@ use crate::{
 };
 use asset::AssetId;
 use ecs::Component;
-use wgpu::TextureView;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Projection {
@@ -34,14 +33,4 @@ pub struct Camera {
     pub msaa: SettingState,
     /// HDR rendering, if Auto - use the same value as the main render target
     pub hdr: SettingState,
-}
-
-#[derive(Debug, Clone, Component)]
-pub struct RenderTargetAttachments {
-    /// MSAA color texture, if MSAA is enabled
-    pub color_msaa: Option<TextureView>,
-    /// Color texture
-    pub color: TextureView,
-    /// Output texture, final result of the render pass
-    pub output: TextureView,
 }

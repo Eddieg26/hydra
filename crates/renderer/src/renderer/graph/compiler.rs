@@ -1,5 +1,5 @@
 use crate::{
-    core::RenderDevice,
+    core::{RenderDevice, RenderSettings},
     renderer::{
         camera::Camera,
         graph::{
@@ -23,6 +23,7 @@ impl RenderGraphCompiler {
         world: &World,
         device: &RenderDevice,
         graph: &RenderGraph,
+        settings: &RenderSettings,
         executable: &mut ExecutableGraph,
         layouts: &mut BindGroupLayoutRegistry,
         cameras: Query<Entity, With<Camera>>,
@@ -47,7 +48,7 @@ impl RenderGraphCompiler {
             bind_groups,
         );
 
-        executable.set(passes, allocator);
+        executable.set(*settings, passes, allocator);
     }
 
     fn run(
