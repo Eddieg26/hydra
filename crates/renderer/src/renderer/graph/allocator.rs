@@ -103,7 +103,8 @@ impl GpuResourceAllocator {
             let ImportedResource { alloc, node } = self.imported[index];
             let generation = {
                 let resource = &self.allocations[alloc as usize].instance;
-                let ty = &graph.resources.types[node as usize];
+                let node = &graph.resources.nodes[node as usize];
+                let ty = &graph.resources.types[node.ty as usize];
                 ty.generation(resource)
             };
             self.allocations[alloc as usize].generation = generation;
@@ -206,7 +207,9 @@ impl BindGroupCache {
             cache.add(archetype, bind_group);
         }
 
-        cache.entries = (0..allocations.len()).map(|index| index as u32).collect();
+        cache.entries = (0..allocations.len())
+            .map(|index| allocations[index].generation)
+            .collect();
 
         cache
     }

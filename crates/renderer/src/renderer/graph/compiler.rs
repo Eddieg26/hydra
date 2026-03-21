@@ -1,7 +1,7 @@
 use crate::{
     core::RenderDevice,
     renderer::{
-        camera::{Camera, RenderTargetAttachments},
+        camera::Camera,
         graph::{
             BoxData, ExecutableGraph, PassInstance, RenderGraph, ResourceAccess, ResourceResolver,
             allocator::{
@@ -19,13 +19,13 @@ use wgpu::BindGroupLayoutEntry;
 pub struct RenderGraphCompiler;
 
 impl RenderGraphCompiler {
-    pub fn compile(
+    pub(crate) fn compile(
         world: &World,
         device: &RenderDevice,
         graph: &RenderGraph,
         executable: &mut ExecutableGraph,
         layouts: &mut BindGroupLayoutRegistry,
-        cameras: Query<Entity, (With<Camera>, With<RenderTargetAttachments>)>,
+        cameras: Query<Entity, With<Camera>>,
     ) {
         let CompiledRenderGraph {
             passes,
@@ -53,10 +53,10 @@ impl RenderGraphCompiler {
     fn run(
         world: &World,
         graph: &RenderGraph,
-        cameras: Query<Entity, (With<Camera>, With<RenderTargetAttachments>)>,
+        cameras: Query<Entity, With<Camera>>,
     ) -> CompiledRenderGraph {
         let mut passes = Vec::new();
-        let mut resources = Vec::<u32>::new();
+        let mut resources = vec![0u32; graph.resources.nodes.len()];
         let mut versions = Vec::new();
         let mut layouts = IndexSet::<Vec<BindGroupLayoutEntry>>::new();
         let mut bind_groups = IndexSet::<BindGroupKey>::new();
@@ -98,7 +98,6 @@ impl RenderGraphCompiler {
                 }
 
                 passes.push(PassRef {
-                    id: pass_id,
                     node: pass.id,
                     resources: offset,
                     reads,
@@ -109,7 +108,7 @@ impl RenderGraphCompiler {
 
         // Pass Culling
         let mut dead_versions = (0..versions.len())
-            .filter(|i| resources[versions[*i].node as usize] > 0)
+            .filter(|i| resources[versions[*i].node as usize] == 0)
             .collect::<VecDeque<_>>();
 
         while let Some(version) = dead_versions.pop_front() {
@@ -145,10 +144,10 @@ impl RenderGraphCompiler {
         }
 
         // Resource Allocation
-        let mut allocations = Vec::<GpuAllocationDesc>::new();
-        let mut resources = vec![0u32; resources.len()];
         versions.retain(|v| resources[v.node as usize] > 0);
         versions.sort_by(|a, b| a.user.cmp(&b.user));
+        let mut allocations = Vec::<GpuAllocationDesc>::new();
+        let mut resources = vec![0u32; versions.len()];
 
         for version in versions {
             if let Some(index) = allocations.iter().position(|alloc| {
@@ -182,8 +181,14 @@ impl RenderGraphCompiler {
         passes.retain(|p| p.ref_count > 0);
 
         let instances = passes.iter().map(|pass| {
-            let bindings =
-                Self::get_bindings(graph, pass, &resources, &mut layouts, &mut bind_groups);
+            let bindings = Self::get_bindings(
+                graph,
+                pass,
+                &resources,
+                &allocations,
+                &mut layouts,
+                &mut bind_groups,
+            );
             PassInstance {
                 node: pass.node,
                 resources: pass.resources,
@@ -204,19 +209,23 @@ impl RenderGraphCompiler {
         graph: &RenderGraph,
         pass: &PassRef,
         resources: &[u32],
+        allocations: &[GpuAllocationDesc],
         layouts: &mut IndexSet<Vec<BindGroupLayoutEntry>>,
         bind_groups: &mut IndexSet<BindGroupKey>,
     ) -> Vec<PassBindGroup> {
         let mut groups = HashMap::new();
-        for binding in &graph.nodes[pass.id as usize].bindings {
-            let node = &graph.resources.nodes[binding.entry as usize];
+        for binding in &graph.nodes[pass.node as usize].bindings {
+            let entry = graph.resources.entries[binding.entry as usize];
+            let node = &graph.resources.nodes[entry.node as usize];
             let ty = &graph.resources.types[node.ty as usize];
+            let alloc = resources[(pass.resources + entry.id) as usize];
+            let desc = &allocations[alloc as usize].desc;
             let group = groups
                 .entry(binding.group)
                 .or_insert_with(|| ResourceGroup::new(binding.group));
 
-            group.allocations.push(resources[node.id as usize]);
-            ty.entry(&node.desc, &mut group.builder, binding.visiblitiy);
+            group.allocations.push(alloc);
+            ty.entry(desc, &mut group.builder, binding.visiblitiy);
         }
 
         let mut groups = groups.into_values().collect::<Vec<_>>();
@@ -239,7 +248,6 @@ impl RenderGraphCompiler {
 }
 
 pub struct PassRef {
-    id: u32,
     node: u32,
     ref_count: u32,
     resources: u32,

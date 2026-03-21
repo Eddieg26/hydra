@@ -1,15 +1,14 @@
-use std::{
-    any::{Any, TypeId},
-    collections::HashMap,
-    marker::PhantomData,
-};
-
 use crate::{
     core::RenderDevice,
     renderer::graph::allocator::{GpuResourceAllocator, PassBindGroup},
     resources::{BindGroupBuilder, BindGroupLayoutBuilder},
 };
 use ecs::{Condition, Entity, Resource, World};
+use std::{
+    any::{Any, TypeId},
+    collections::HashMap,
+    marker::PhantomData,
+};
 use wgpu::{BindGroup, CommandBuffer, CommandEncoder, Extent3d, ShaderStages};
 
 pub mod allocator;
@@ -511,6 +510,10 @@ pub struct ExecutableGraph(Option<(Box<[PassInstance]>, GpuResourceAllocator)>);
 impl ExecutableGraph {
     pub(crate) fn set(&mut self, passes: Box<[PassInstance]>, allocator: GpuResourceAllocator) {
         self.0 = Some((passes, allocator))
+    }
+
+    pub fn clear(&mut self) {
+        self.0 = None;
     }
 }
 
