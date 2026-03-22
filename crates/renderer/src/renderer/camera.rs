@@ -4,10 +4,7 @@ use crate::{
     types::{Color, Viewport},
 };
 use asset::AssetId;
-use ecs::{
-    Component, Entity, Query, Resource,
-    system::{Added, Modified, Removed},
-};
+use ecs::{Component, Entity, Query, Resource, system::Removed};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Projection {
@@ -56,6 +53,21 @@ pub struct CameraSettings {
     pub generation: u32,
 }
 
+impl CameraSettings {
+    pub fn update(&mut self, camera: &Camera, target: &RenderTarget) {
+        self.priority = camera.priority;
+        self.target = camera.target;
+        self.width = target.width;
+        self.height = target.height;
+
+        if self.format != target.format || self.msaa != camera.msaa || camera.target == None {
+            self.format = target.format;
+            self.msaa = camera.msaa;
+            self.generation += 1;
+        }
+    }
+}
+
 impl Eq for CameraSettings {}
 impl PartialEq for CameraSettings {
     fn eq(&self, other: &Self) -> bool {
@@ -98,23 +110,15 @@ impl From<CameraQueue> for Vec<CameraSettings> {
 
 impl CameraQueue {
     pub(crate) fn queue(
-        added: Query<(Entity, &Camera), Added<Camera>>,
-        modified: Query<(Entity, &Camera), Modified<Camera>>,
+        cameras: Query<(Entity, &Camera)>,
         removed: Query<Entity, Removed<Camera>>,
         main_target: &MainRenderTarget,
         targets: &RenderAssets<RenderTarget>,
         queue: &mut CameraQueue,
     ) {
-        let removed = removed.iter().collect::<Vec<_>>();
-        queue.0.retain(|c| !removed.contains(&c.entity));
+        queue.0.retain(|c| !removed.contains(c.entity));
 
-        let mut new = Vec::new();
-        for (entity, camera) in modified {
-            let Some(prev) = queue.0.iter_mut().find(|s| s.entity == entity) else {
-                new.push((entity, camera));
-                continue;
-            };
-
+        for (entity, camera) in cameras {
             let target = match &camera.target {
                 Some(id) => targets.get(id),
                 None => main_target.get(),
@@ -124,37 +128,20 @@ impl CameraQueue {
                 continue;
             };
 
-            prev.priority = camera.priority;
-            prev.target = camera.target;
-            prev.width = target.width;
-            prev.height = target.height;
-            if prev.format != target.format || prev.msaa != camera.msaa {
-                prev.format = target.format;
-                prev.msaa = camera.msaa;
-                prev.generation += 1;
-            }
-        }
-
-        for (entity, camera) in added.iter().chain(new) {
-            let target = match &camera.target {
-                Some(id) => targets.get(id),
-                None => main_target.get(),
+            if let Some(prev) = queue.0.iter_mut().find(|s| s.entity == entity) {
+                prev.update(camera, target);
+            } else {
+                queue.0.push(CameraSettings {
+                    entity,
+                    priority: camera.priority,
+                    target: camera.target,
+                    msaa: camera.msaa,
+                    width: target.width,
+                    height: target.height,
+                    format: target.format,
+                    generation: 1,
+                });
             };
-
-            let Some(target) = target else {
-                continue;
-            };
-
-            queue.0.push(CameraSettings {
-                entity,
-                priority: camera.priority,
-                target: camera.target,
-                msaa: camera.msaa,
-                width: target.width,
-                height: target.height,
-                format: target.format,
-                generation: 1,
-            });
         }
 
         queue.sort();
