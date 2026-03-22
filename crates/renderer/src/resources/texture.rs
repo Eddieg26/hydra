@@ -299,14 +299,16 @@ pub struct SamplerCache {
 impl SamplerCache {
     pub const DEFAULT: SamplerId = SamplerId(0);
 
-    pub fn new(default: Sampler) -> Self {
+    pub fn new(device: &RenderDevice) -> Self {
+        let default = Self::new_sampler(device, &SamplerDesc::default());
+
         Self {
             samplers: vec![default],
             allocated: HashMap::from_iter(std::iter::once((TextureSampler::Default, SamplerId(0)))),
         }
     }
 
-    pub fn new_sampler(device: &RenderDevice, desc: &SamplerDesc) -> Sampler {
+    fn new_sampler(device: &RenderDevice, desc: &SamplerDesc) -> Sampler {
         let address_mode = desc.wrap.into();
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: desc.label,

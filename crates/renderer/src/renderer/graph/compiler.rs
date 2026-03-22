@@ -1,16 +1,13 @@
 use crate::{
-    core::{RenderDevice, RenderSettings},
+    core::RenderSettings,
     renderer::{
         camera::CameraQueue,
         graph::{
-            BoxData, PassInstance, RenderGraph, RenderGraphState, ResourceAccess, ResourceResolver,
-            allocator::{
-                BindGroupCache, BindGroupKey, GpuAllocationDesc, GpuResourceAllocator,
-                PassBindGroup,
-            },
+            BoxData, PassInstance, RenderGraph, ResourceAccess, ResourceResolver,
+            allocator::{BindGroupKey, GpuAllocationDesc, PassBindGroup},
         },
     },
-    resources::{BindGroupLayoutBuilder, BindGroupLayoutRegistry},
+    resources::BindGroupLayoutBuilder,
 };
 use ecs::{IndexSet, World};
 use std::collections::{HashMap, VecDeque};
@@ -19,38 +16,7 @@ use wgpu::BindGroupLayoutEntry;
 pub struct RenderGraphCompiler;
 
 impl RenderGraphCompiler {
-    pub(crate) fn compile(
-        world: &World,
-        device: &RenderDevice,
-        settings: &RenderSettings,
-        cameras: &CameraQueue,
-        graph: &mut RenderGraph,
-        layouts: &mut BindGroupLayoutRegistry,
-    ) {
-        let CompiledRenderGraph {
-            passes,
-            resources,
-            allocations,
-            bind_group_layouts,
-            bind_groups,
-        } = Self::run(world, graph, settings, cameras);
-
-        let layouts = BindGroupCache::create_layouts(device, layouts, bind_group_layouts);
-
-        let allocator = GpuResourceAllocator::build(
-            device,
-            graph,
-            resources,
-            allocations,
-            layouts,
-            bind_groups,
-        );
-
-        let state = RenderGraphState::new(cameras.clone(), *settings, passes, allocator);
-        graph.state = Some(state);
-    }
-
-    fn run(
+    pub fn run(
         world: &World,
         graph: &RenderGraph,
         settings: &RenderSettings,
@@ -60,9 +26,9 @@ impl RenderGraphCompiler {
         let mut layouts = IndexSet::<Vec<BindGroupLayoutEntry>>::new();
         let mut bind_groups = IndexSet::<BindGroupKey>::new();
 
-        let (mut passes, versions) = Self::expand(world, settings, graph, cameras, &mut resources);
+        let (passes, versions) = Self::expand(world, settings, graph, cameras, &mut resources);
 
-        Self::cull(&mut passes, &mut resources, &versions);
+        let passes = Self::cull(passes, &mut resources, &versions);
 
         let (allocations, table) = Self::allocate(graph, &resources, versions);
 
@@ -151,7 +117,11 @@ impl RenderGraphCompiler {
         (passes, versions)
     }
 
-    fn cull(passes: &mut Vec<PassRef>, resources: &mut [u32], versions: &[ResourceVersion]) {
+    fn cull(
+        mut passes: Vec<PassRef>,
+        resources: &mut [u32],
+        versions: &[ResourceVersion],
+    ) -> Vec<PassRef> {
         let mut dead_versions = (0..versions.len())
             .filter(|i| resources[versions[*i].node as usize] == 0)
             .collect::<VecDeque<_>>();
@@ -188,7 +158,8 @@ impl RenderGraphCompiler {
             );
         }
 
-        passes.retain(|p| p.ref_count > 0)
+        passes.retain(|p| p.ref_count > 0);
+        passes
     }
 
     fn allocate(

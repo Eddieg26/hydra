@@ -1,8 +1,8 @@
 use crate::{
     core::{RenderDevice, RenderSettings, RenderSurface, RenderSurfaceTexture},
     renderer::{
-        camera::Camera,
-        graph::{RenderGraph, RenderGraphDirty, compiler::RenderGraphCompiler},
+        camera::{Camera, CameraQueue},
+        graph::{RenderGraph, RenderGraphDirty},
     },
     resources::{
         BindGroupLayoutRegistry, ExtractError, ExtractInfo, GpuMesh, GpuShader, GpuTexture,
@@ -45,21 +45,18 @@ impl Plugin for RenderPlugin {
         .add_sub_phase(Run, PreRender)
         .add_sub_phase(Run, Render)
         .add_sub_phase(Run, Present)
+        .add_resource(RenderSettings::default())
+        .add_resource(CameraQueue::default())
         .add_resource(PipelineCache::default())
         .add_resource(ShaderVariants::default())
         .add_resource(MeshAllocatorConfig::default())
-        .add_resource(RenderSettings::default())
         .add_resource(RenderSurfaceTexture::default())
         .add_resource(MainRenderTarget::default())
         .add_resource(BindGroupLayoutRegistry::default())
-        .add_systems(
-            Process,
-            RenderSurface::on_resize.before(MainRenderTarget::update),
-        )
-        .add_systems(
-            PreRender,
-            RenderGraphCompiler::compile.when::<RenderGraphDirty>(),
-        )
+        .add_systems(Process, RenderSurface::on_resize)
+        .add_systems(Process, RenderSurfaceTexture::update)
+        .add_systems(Process, MainRenderTarget::update)
+        .add_systems(PreRender, RenderGraph::update.when::<RenderGraphDirty>())
         .add_systems(Render, RenderGraph::run)
         .add_systems(Present, RenderSurfaceTexture::present);
     }
@@ -76,8 +73,7 @@ impl Plugin for RenderPlugin {
         };
 
         let (surface, device) = smol::block_on(task);
-        let sampler = SamplerCache::new_sampler(&device, &Default::default());
-        let samplers = SamplerCache::new(sampler);
+        let samplers = SamplerCache::new(&device);
 
         app.sub_app_mut(RenderApp)
             .add_resource(surface)

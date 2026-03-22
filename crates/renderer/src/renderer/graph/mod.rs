@@ -2,9 +2,12 @@ use crate::{
     core::{RenderDevice, RenderSettings},
     renderer::{
         camera::{CameraQueue, CameraSettings},
-        graph::allocator::{GpuResourceAllocator, PassBindGroup},
+        graph::{
+            allocator::{BindGroupCache, GpuResourceAllocator, PassBindGroup},
+            compiler::{CompiledRenderGraph, RenderGraphCompiler},
+        },
     },
-    resources::{BindGroupBuilder, BindGroupLayoutBuilder},
+    resources::{BindGroupBuilder, BindGroupLayoutBuilder, BindGroupLayoutRegistry},
 };
 use ecs::{Condition, Resource, World};
 use std::{
@@ -576,7 +579,38 @@ impl RenderGraph {
         self.state.as_ref()
     }
 
-    pub fn run(world: &World, device: &RenderDevice, graph: &mut RenderGraph) {
+    pub(crate) fn update(
+        world: &World,
+        device: &RenderDevice,
+        settings: &RenderSettings,
+        cameras: &CameraQueue,
+        graph: &mut RenderGraph,
+        layouts: &mut BindGroupLayoutRegistry,
+    ) {
+        let CompiledRenderGraph {
+            passes,
+            resources,
+            allocations,
+            bind_group_layouts,
+            bind_groups,
+        } = RenderGraphCompiler::run(world, graph, settings, cameras);
+
+        let layouts = BindGroupCache::create_layouts(device, layouts, bind_group_layouts);
+
+        let allocator = GpuResourceAllocator::build(
+            device,
+            graph,
+            resources,
+            allocations,
+            layouts,
+            bind_groups,
+        );
+
+        let state = RenderGraphState::new(cameras.clone(), *settings, passes, allocator);
+        graph.state = Some(state);
+    }
+
+    pub(crate) fn run(world: &World, device: &RenderDevice, graph: &mut RenderGraph) {
         let RenderGraph {
             resources,
             nodes,
