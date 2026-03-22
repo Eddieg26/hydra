@@ -56,6 +56,7 @@ impl Plugin for RenderPlugin {
         .add_systems(Process, RenderSurface::on_resize)
         .add_systems(Process, RenderSurfaceTexture::update)
         .add_systems(Process, MainRenderTarget::update)
+        .add_systems(Queue, CameraQueue::queue)
         .add_systems(PreRender, RenderGraph::update.when::<RenderGraphDirty>())
         .add_systems(Render, RenderGraph::run)
         .add_systems(Present, RenderSurfaceTexture::present);
