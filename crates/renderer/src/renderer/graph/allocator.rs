@@ -1,6 +1,8 @@
 use crate::{
     core::RenderDevice,
-    renderer::graph::{BoxData, DynData, GraphEntryId, GraphResource, RenderGraph, ResourceKind},
+    renderer::graph::{
+        BoxData, DynData, GraphEntryId, GraphResource, GraphResources, RenderGraph, ResourceKind,
+    },
     resources::{BindGroupBuilder, BindGroupLayoutBuilder, BindGroupLayoutRegistry, GpuResourceId},
 };
 use ecs::{FixedBitSet, IndexSet};
@@ -97,13 +99,13 @@ impl GpuResourceAllocator {
             .unwrap()
     }
 
-    pub fn update(&mut self, device: &RenderDevice, graph: &RenderGraph) {
+    pub fn update(&mut self, device: &RenderDevice, resources: &GraphResources) {
         for index in 0..self.imported.len() {
             let ImportedResource { alloc, node } = self.imported[index];
             let generation = {
                 let resource = &self.allocations[alloc as usize].instance;
-                let node = &graph.resources.nodes[node as usize];
-                let ty = &graph.resources.types[node.ty as usize];
+                let node = &resources.nodes[node as usize];
+                let ty = &resources.types[node.ty as usize];
                 ty.generation(resource)
             };
             self.allocations[alloc as usize].generation = generation;
@@ -114,8 +116,8 @@ impl GpuResourceAllocator {
             let changed = self.allocations[index].generation != self.bind_groups.entries[index];
             if changed {
                 let allocation = &mut self.allocations[index];
-                let node = &graph.resources.nodes[allocation.node as usize];
-                let ty = &graph.resources.types[node.ty as usize];
+                let node = &resources.nodes[allocation.node as usize];
+                let ty = &resources.types[node.ty as usize];
                 allocation.instance = ty.create(device, node.name, &allocation.desc);
             }
 
@@ -126,7 +128,7 @@ impl GpuResourceAllocator {
 
         if !updated.is_empty() {
             self.bind_groups
-                .update(updated, device, graph, &self.allocations);
+                .update(updated, device, resources, &self.allocations);
         }
     }
 }
@@ -247,7 +249,7 @@ impl BindGroupCache {
         &mut self,
         updated: FixedBitSet,
         device: &RenderDevice,
-        graph: &RenderGraph,
+        resources: &GraphResources,
         allocations: &[GpuAllocation],
     ) {
         for archetype in &self.archetypes {
@@ -260,8 +262,8 @@ impl BindGroupCache {
                 let mut builder = BindGroupBuilder::new();
                 for alloc in archetype.allocations.ones() {
                     let allocation = &allocations[alloc];
-                    let node = &graph.resources.nodes[allocation.node as usize];
-                    let ty = &graph.resources.types[node.ty as usize];
+                    let node = &resources.nodes[allocation.node as usize];
+                    let ty = &resources.types[node.ty as usize];
                     ty.bind(&allocation.instance, &mut builder);
                 }
 

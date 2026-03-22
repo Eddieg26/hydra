@@ -3,7 +3,7 @@ use crate::{
     renderer::{
         camera::CameraQueue,
         graph::{
-            BoxData, ExecutableGraph, PassInstance, RenderGraph, ResourceAccess, ResourceResolver,
+            BoxData, PassInstance, RenderGraph, RenderGraphState, ResourceAccess, ResourceResolver,
             allocator::{
                 BindGroupCache, BindGroupKey, GpuAllocationDesc, GpuResourceAllocator,
                 PassBindGroup,
@@ -22,11 +22,10 @@ impl RenderGraphCompiler {
     pub(crate) fn compile(
         world: &World,
         device: &RenderDevice,
-        graph: &RenderGraph,
         settings: &RenderSettings,
-        executable: &mut ExecutableGraph,
-        layouts: &mut BindGroupLayoutRegistry,
         cameras: &CameraQueue,
+        graph: &mut RenderGraph,
+        layouts: &mut BindGroupLayoutRegistry,
     ) {
         let CompiledRenderGraph {
             passes,
@@ -47,7 +46,8 @@ impl RenderGraphCompiler {
             bind_groups,
         );
 
-        executable.set(cameras.clone(), *settings, passes, allocator);
+        let state = RenderGraphState::new(cameras.clone(), *settings, passes, allocator);
+        graph.state = Some(state);
     }
 
     fn run(
@@ -63,7 +63,8 @@ impl RenderGraphCompiler {
         let mut bind_groups = IndexSet::<BindGroupKey>::new();
 
         // Expansion
-        for camera in cameras.slice() {
+        for index in 0..cameras.slice().len() {
+            let camera = &cameras.slice()[index];
             let offset = versions.len() as u32;
             let mut resolver = ResourceResolver::new(world, Some(camera));
 
@@ -101,6 +102,7 @@ impl RenderGraphCompiler {
                 passes.push(PassRef {
                     node: pass.id,
                     resources: offset,
+                    camera: Some(index as u32),
                     reads,
                     ref_count: pass.refs,
                 });
@@ -194,6 +196,7 @@ impl RenderGraphCompiler {
             PassInstance {
                 node: pass.node,
                 resources: pass.resources,
+                camera: pass.camera,
                 bindings: bindings.into_boxed_slice(),
             }
         });
@@ -252,6 +255,7 @@ impl RenderGraphCompiler {
 
 pub struct PassRef {
     node: u32,
+    camera: Option<u32>,
     ref_count: u32,
     resources: u32,
     reads: Vec<u32>,

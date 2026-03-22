@@ -470,21 +470,19 @@ pub struct RenderContext<'a> {
     resource_offset: u32,
     world: &'a World,
     device: &'a RenderDevice,
-    allocator: &'a GpuResourceAllocator,
+    state: &'a RenderGraphState,
+    camera: Option<&'a CameraSettings>,
     buffers: Vec<CommandBuffer>,
 }
 
 impl<'a> RenderContext<'a> {
-    pub fn new(
-        world: &'a World,
-        device: &'a RenderDevice,
-        allocator: &'a GpuResourceAllocator,
-    ) -> Self {
+    pub fn new(world: &'a World, device: &'a RenderDevice, state: &'a RenderGraphState) -> Self {
         Self {
             resource_offset: 0,
             world,
             device,
-            allocator,
+            state,
+            camera: None,
             buffers: Vec::new(),
         }
     }
@@ -497,13 +495,17 @@ impl<'a> RenderContext<'a> {
         self.world
     }
 
+    pub fn camera(&self) -> Option<&CameraSettings> {
+        self.camera
+    }
+
     pub fn get<R: GraphResource>(&self, id: GraphEntryId<R>) -> &R {
         let id = id.offset(self.resource_offset);
-        self.allocator.resource(id)
+        self.state.allocator.resource(id)
     }
 
     pub fn bind_group(&self, index: u32) -> &BindGroup {
-        self.allocator.bind_groups().get(index)
+        self.state.allocator.bind_groups().get(index)
     }
 
     pub fn encoder(&self) -> CommandEncoder {
@@ -515,6 +517,13 @@ impl<'a> RenderContext<'a> {
     }
 }
 
+pub struct PassInstance {
+    pub node: u32,
+    pub resources: u32,
+    pub camera: Option<u32>,
+    pub bindings: Box<[PassBindGroup]>,
+}
+
 pub struct RenderGraphState {
     cameras: CameraQueue,
     settings: RenderSettings,
@@ -522,38 +531,20 @@ pub struct RenderGraphState {
     allocator: GpuResourceAllocator,
 }
 
-#[derive(Default, Resource)]
-pub struct ExecutableGraph(Option<RenderGraphState>);
-
-impl ExecutableGraph {
-    pub(crate) fn set(
-        &mut self,
+impl RenderGraphState {
+    pub fn new(
         cameras: CameraQueue,
         settings: RenderSettings,
         passes: Box<[PassInstance]>,
         allocator: GpuResourceAllocator,
-    ) {
-        self.0 = Some(RenderGraphState {
+    ) -> Self {
+        Self {
             cameras,
             settings,
             passes,
             allocator,
-        })
+        }
     }
-
-    pub fn state(&self) -> Option<&RenderGraphState> {
-        self.0.as_ref()
-    }
-
-    pub fn clear(&mut self) {
-        self.0 = None;
-    }
-}
-
-pub struct PassInstance {
-    pub node: u32,
-    pub resources: u32,
-    pub bindings: Box<[PassBindGroup]>,
 }
 
 #[derive(Resource)]
@@ -561,6 +552,7 @@ pub struct RenderGraph {
     resources: GraphResources,
     nodes: Vec<PassNode>,
     node_map: HashMap<TypeId, usize>,
+    state: Option<RenderGraphState>,
 }
 
 impl RenderGraph {
@@ -580,20 +572,27 @@ impl RenderGraph {
         &self.resources
     }
 
-    pub fn run(
-        world: &World,
-        device: &RenderDevice,
-        graph: &RenderGraph,
-        executable: &mut ExecutableGraph,
-    ) {
-        if let Some(state) = executable.0.as_mut() {
-            state.allocator.update(device, graph);
+    pub fn state(&self) -> Option<&RenderGraphState> {
+        self.state.as_ref()
+    }
 
-            let mut ctx = RenderContext::new(world, device, &state.allocator);
+    pub fn run(world: &World, device: &RenderDevice, graph: &mut RenderGraph) {
+        let RenderGraph {
+            resources,
+            nodes,
+            state,
+            ..
+        } = graph;
+
+        if let Some(state) = state {
+            state.allocator.update(device, resources);
+
+            let mut ctx = RenderContext::new(world, device, state);
             for pass in &state.passes {
+                ctx.camera = pass.camera.map(|i| &state.cameras.slice()[i as usize]);
                 ctx.resource_offset = pass.resources;
 
-                let node = &graph.nodes[pass.node as usize];
+                let node = &nodes[pass.node as usize];
                 node.execute(&mut ctx);
             }
 
@@ -605,7 +604,7 @@ impl RenderGraph {
 pub struct RenderGraphDirty;
 impl Condition for RenderGraphDirty {
     fn evaluate(world: &World, _: &ecs::SystemMeta) -> bool {
-        let graph = world.resource::<ExecutableGraph>();
+        let graph = world.resource::<RenderGraph>();
         let settings = world.resource::<RenderSettings>();
         let cameras = world.resource::<CameraQueue>();
         !graph
@@ -617,7 +616,7 @@ impl Condition for RenderGraphDirty {
 pub struct RecompileRenderGraph;
 impl ecs::Command for RecompileRenderGraph {
     fn execute(self, world: &mut World) {
-        world.resource_mut::<ExecutableGraph>().clear();
+        world.resource_mut::<RenderGraph>().state = None;
     }
 }
 
