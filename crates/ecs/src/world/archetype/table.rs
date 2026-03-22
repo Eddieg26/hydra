@@ -434,6 +434,10 @@ impl Table {
         self.columns.contains(id)
     }
 
+    pub fn len(&self) -> usize {
+        self.entities.len()
+    }
+
     pub(crate) fn update(&mut self, frame: Frame) {
         for column in self.columns.values_mut() {
             for status in column.frames_mut() {

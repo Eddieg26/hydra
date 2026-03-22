@@ -700,6 +700,14 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> Query<'w, 's, Q, F> {
             _ => None,
         }
     }
+
+    pub fn len(&self) -> usize {
+        let world = unsafe { self.world.get() };
+        self.state
+            .archetypes
+            .iter()
+            .fold(0, |acc, a| acc + world.archetypes[*a].table().len())
+    }
 }
 
 unsafe impl<Q: BaseQuery + 'static, F: BaseFilter + 'static> SystemArg for Query<'_, '_, Q, F> {
@@ -1242,7 +1250,7 @@ mod tests {
     fn prop_added_filter_matches_new_components(age_values: Vec<u32>) -> bool {
         // Limit the number of entities to avoid excessive test time
         let age_values: Vec<u32> = age_values.into_iter().take(50).collect();
-        
+
         if age_values.is_empty() {
             return true;
         }
@@ -1275,4 +1283,3 @@ mod tests {
         true
     }
 }
-

@@ -1,6 +1,6 @@
 use super::{ArchetypeAccess, Component, ComponentId, ComponentKit, Components, Entity};
 use crate::{
-    core::{FixedBitSet, Frame, sparse::SparseIndex},
+    core::{FixedBitSet, Frame, ObjectStatus, sparse::SparseIndex},
     impl_sparse_index_wrapper,
     world::ComponentWriter,
 };
@@ -58,6 +58,13 @@ impl Archetype {
 
     pub fn contains(&self, entity: Entity) -> bool {
         self.table.contains(entity)
+    }
+
+    pub fn status(&self, entity: Entity, component: ComponentId) -> Option<ObjectStatus> {
+        let column = self.table.get_column(component)?;
+        self.table
+            .get_entity_row(entity)
+            .map(|r| column.frames()[r.0 as usize])
     }
 
     pub fn matches(&self, query: &ArchetypeQuery) -> bool {
@@ -241,6 +248,13 @@ impl Archetypes {
         let row = archetype.remove_entity(entity)?;
 
         Some(row)
+    }
+
+    pub fn status<C: Component>(&self, entity: Entity) -> Option<ObjectStatus> {
+        let id = unsafe { self.components.get_id_unchecked::<C>() };
+        let archetype_id = self.entity_map.get(&entity)?;
+        let archetype = &self.archetypes[archetype_id.to_usize()];
+        archetype.status(entity, id)
     }
 
     pub fn get_component<C: Component>(&self, entity: Entity) -> Option<&C> {
