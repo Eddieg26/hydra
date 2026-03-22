@@ -1,7 +1,7 @@
 use crate::{
     core::{RenderDevice, RenderSettings},
     renderer::{
-        camera::Camera,
+        camera::CameraQueue,
         graph::{
             BoxData, ExecutableGraph, PassInstance, RenderGraph, ResourceAccess, ResourceResolver,
             allocator::{
@@ -12,7 +12,7 @@ use crate::{
     },
     resources::{BindGroupLayoutBuilder, BindGroupLayoutRegistry},
 };
-use ecs::{Entity, IndexSet, Query, World, query::With};
+use ecs::{IndexSet, World};
 use std::collections::{HashMap, VecDeque};
 use wgpu::BindGroupLayoutEntry;
 
@@ -26,7 +26,7 @@ impl RenderGraphCompiler {
         settings: &RenderSettings,
         executable: &mut ExecutableGraph,
         layouts: &mut BindGroupLayoutRegistry,
-        cameras: Query<Entity, With<Camera>>,
+        cameras: &CameraQueue,
     ) {
         let CompiledRenderGraph {
             passes,
@@ -47,14 +47,14 @@ impl RenderGraphCompiler {
             bind_groups,
         );
 
-        executable.set(*settings, passes, allocator);
+        executable.set(cameras.clone(), *settings, passes, allocator);
     }
 
     fn run(
         world: &World,
         graph: &RenderGraph,
         settings: &RenderSettings,
-        cameras: Query<Entity, With<Camera>>,
+        cameras: &CameraQueue,
     ) -> CompiledRenderGraph {
         let mut passes = Vec::new();
         let mut resources = vec![0u32; graph.resources.nodes.len()];
@@ -63,7 +63,7 @@ impl RenderGraphCompiler {
         let mut bind_groups = IndexSet::<BindGroupKey>::new();
 
         // Expansion
-        for camera in cameras {
+        for camera in cameras.slice() {
             let offset = versions.len() as u32;
             let mut resolver = ResourceResolver::new(world, Some(camera));
 

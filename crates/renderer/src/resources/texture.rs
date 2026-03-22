@@ -1,5 +1,5 @@
 use crate::{
-    core::{ColorFormat, Msaa, RenderDevice, SurfaceTexture},
+    core::{ColorFormat, RenderDevice, SurfaceTexture},
     resources::{RenderAssets, extract::RenderAsset},
     types::Color,
 };
@@ -492,84 +492,5 @@ impl MainRenderTarget {
             },
             color,
         });
-    }
-}
-
-#[derive(Clone)]
-pub struct CachedTexture {
-    inner: Box<wgpu::Texture>,
-    refs: u32,
-}
-
-impl std::ops::Deref for CachedTexture {
-    type Target = wgpu::Texture;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TextureKey {
-    pub dimension: TextureDimension,
-    pub format: TextureFormat,
-    pub usage: TextureUsages,
-    pub msaa: Msaa,
-    pub mips: bool,
-}
-
-#[derive(Resource)]
-pub struct TextureCache(HashMap<TextureKey, CachedTexture>);
-impl TextureCache {
-    pub fn new() -> Self {
-        Self(HashMap::new())
-    }
-
-    pub fn get(&self, key: &TextureKey) -> Option<&wgpu::Texture> {
-        self.0.get(key).map(|t| t.inner.as_ref())
-    }
-
-    pub fn insert(&mut self, device: &RenderDevice, key: TextureKey) -> CachedTexture {
-        if let Some(texture) = self.0.get_mut(&key) {
-            texture.refs += 1;
-            texture.clone()
-        } else {
-            let mip_level_count = match key.mips {
-                true => key.dimension.extents().max_mips(key.dimension.into()) as u32,
-                false => 1,
-            };
-
-            let texture = device.create_texture(&TextureDescriptor {
-                label: None,
-                size: key.dimension.extents(),
-                mip_level_count,
-                sample_count: key.msaa.sample_count(),
-                dimension: key.dimension.into(),
-                format: key.format,
-                usage: key.usage,
-                view_formats: &[key.format.add_srgb_suffix()],
-            });
-
-            let texture = CachedTexture {
-                inner: Box::new(texture),
-                refs: 1,
-            };
-
-            self.0.insert(key, texture.clone());
-            texture
-        }
-    }
-
-    pub fn remove(&mut self, key: &TextureKey) {
-        let dead = if let Some(texture) = self.0.get_mut(key) {
-            texture.refs -= 1;
-            texture.refs == 0
-        } else {
-            false
-        };
-
-        if dead {
-            self.0.remove(key);
-        }
     }
 }

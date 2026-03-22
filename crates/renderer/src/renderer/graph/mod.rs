@@ -1,9 +1,12 @@
 use crate::{
     core::{RenderDevice, RenderSettings},
-    renderer::graph::allocator::{GpuResourceAllocator, PassBindGroup},
+    renderer::{
+        camera::{CameraQueue, CameraSettings},
+        graph::allocator::{GpuResourceAllocator, PassBindGroup},
+    },
     resources::{BindGroupBuilder, BindGroupLayoutBuilder},
 };
-use ecs::{Condition, Entity, Resource, World};
+use ecs::{Condition, Resource, World};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -21,12 +24,12 @@ pub type BoxData = Box<DynData>;
 pub struct ResourceResolver<'a> {
     resource: u32,
     world: &'a World,
-    camera: Option<Entity>,
+    camera: Option<&'a CameraSettings>,
     textures: HashMap<u32, Extent3d>,
 }
 
 impl<'a> ResourceResolver<'a> {
-    pub fn new(world: &'a World, camera: Option<Entity>) -> Self {
+    pub fn new(world: &'a World, camera: Option<&'a CameraSettings>) -> Self {
         Self {
             resource: 0,
             world,
@@ -39,7 +42,7 @@ impl<'a> ResourceResolver<'a> {
         self.world
     }
 
-    pub fn camera(&self) -> Option<Entity> {
+    pub fn camera(&self) -> Option<&CameraSettings> {
         self.camera
     }
 
@@ -47,8 +50,15 @@ impl<'a> ResourceResolver<'a> {
         self.textures.get(&id).copied()
     }
 
-    pub fn add_texture(&mut self, size: Extent3d) {
-        self.textures.insert(self.resource, size);
+    pub fn add_texture(&mut self, width: u32, height: u32, depths_or_layers: u32) {
+        self.textures.insert(
+            self.resource,
+            Extent3d {
+                width,
+                height,
+                depth_or_array_layers: depths_or_layers,
+            },
+        );
     }
 }
 
@@ -505,30 +515,33 @@ impl<'a> RenderContext<'a> {
     }
 }
 
-pub struct ExecutableState {
+pub struct RenderGraphState {
+    cameras: CameraQueue,
     settings: RenderSettings,
     passes: Box<[PassInstance]>,
     allocator: GpuResourceAllocator,
 }
 
 #[derive(Default, Resource)]
-pub struct ExecutableGraph(Option<ExecutableState>);
+pub struct ExecutableGraph(Option<RenderGraphState>);
 
 impl ExecutableGraph {
     pub(crate) fn set(
         &mut self,
+        cameras: CameraQueue,
         settings: RenderSettings,
         passes: Box<[PassInstance]>,
         allocator: GpuResourceAllocator,
     ) {
-        self.0 = Some(ExecutableState {
+        self.0 = Some(RenderGraphState {
+            cameras,
             settings,
             passes,
             allocator,
         })
     }
 
-    pub fn state(&self) -> Option<&ExecutableState> {
+    pub fn state(&self) -> Option<&RenderGraphState> {
         self.0.as_ref()
     }
 
@@ -594,9 +607,10 @@ impl Condition for RenderGraphDirty {
     fn evaluate(world: &World, _: &ecs::SystemMeta) -> bool {
         let graph = world.resource::<ExecutableGraph>();
         let settings = world.resource::<RenderSettings>();
-        graph
+        let cameras = world.resource::<CameraQueue>();
+        !graph
             .state()
-            .is_some_and(|state| &state.settings == settings)
+            .is_some_and(|state| &state.settings == settings && &state.cameras != cameras)
     }
 }
 
@@ -608,13 +622,12 @@ impl ecs::Command for RecompileRenderGraph {
 }
 
 pub mod test {
-    use ecs::Entity;
-    use wgpu::TextureDescriptor;
-
     use crate::{
         core::{ColorFormat, Msaa, RenderSettings},
-        renderer::graph::GraphResource,
+        renderer::{camera::SettingState, graph::GraphResource},
+        resources::MainRenderTarget,
     };
+    use wgpu::TextureDescriptor;
 
     pub struct SurfaceInput {
         pub color: wgpu::TextureView,
@@ -624,9 +637,6 @@ pub mod test {
     #[derive(Clone, PartialEq, Eq)]
     pub enum SurfaceInputDesc {
         Auto,
-        Camera {
-            entity: Entity,
-        },
         Fixed {
             width: u32,
             height: u32,
@@ -644,7 +654,37 @@ pub mod test {
             resolver: &mut super::ResourceResolver,
             desc: Self::Desc,
         ) -> Self::Desc {
-            todo!()
+            if let SurfaceInputDesc::Fixed { .. } = &desc {
+                return desc;
+            }
+
+            let (width, height, color, msaa) = match resolver.camera.as_ref() {
+                Some(camera) => {
+                    let msaa = match camera.msaa {
+                        SettingState::Auto => settings.msaa(),
+                        SettingState::Disabled => Msaa::Disabled,
+                    };
+
+                    (camera.width, camera.height, camera.format, msaa)
+                }
+                None => {
+                    let main = world
+                        .resource::<MainRenderTarget>()
+                        .get()
+                        .expect("Main Render Target not set");
+
+                    (main.width, main.height, main.format, settings.msaa())
+                }
+            };
+
+            resolver.add_texture(width, height, 1);
+
+            SurfaceInputDesc::Fixed {
+                width,
+                height,
+                color,
+                msaa,
+            }
         }
 
         fn create(
