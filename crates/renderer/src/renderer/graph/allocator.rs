@@ -3,7 +3,7 @@ use crate::{
     renderer::graph::{BoxData, DynData, GraphEntryId, GraphResource, RenderGraph, ResourceKind},
     resources::{BindGroupBuilder, BindGroupLayoutBuilder, BindGroupLayoutRegistry, GpuResourceId},
 };
-use ecs::{FixedBitSet, IndexSet, World};
+use ecs::{FixedBitSet, IndexSet};
 use std::{collections::HashMap, hash::Hash};
 use wgpu::{BindGroup, BindGroupLayout, BindGroupLayoutEntry};
 
@@ -42,7 +42,6 @@ pub struct GpuResourceAllocator {
 
 impl GpuResourceAllocator {
     pub fn build(
-        world: &World,
         device: &RenderDevice,
         graph: &RenderGraph,
         resources: Box<[u32]>,
@@ -55,7 +54,7 @@ impl GpuResourceAllocator {
         for alloc in descs {
             let node = &graph.resources.nodes[alloc.node as usize];
             let ty = &graph.resources.types[node.ty as usize];
-            let instance = ty.create(world, device, node.name, &alloc.desc);
+            let instance = ty.create(device, node.name, &alloc.desc);
 
             if node.kind == ResourceKind::Imported {
                 imported.push(ImportedResource {
@@ -98,7 +97,7 @@ impl GpuResourceAllocator {
             .unwrap()
     }
 
-    pub fn update(&mut self, world: &World, device: &RenderDevice, graph: &RenderGraph) {
+    pub fn update(&mut self, device: &RenderDevice, graph: &RenderGraph) {
         for index in 0..self.imported.len() {
             let ImportedResource { alloc, node } = self.imported[index];
             let generation = {
@@ -117,7 +116,7 @@ impl GpuResourceAllocator {
                 let allocation = &mut self.allocations[index];
                 let node = &graph.resources.nodes[allocation.node as usize];
                 let ty = &graph.resources.types[node.ty as usize];
-                allocation.instance = ty.create(world, device, node.name, &allocation.desc);
+                allocation.instance = ty.create(device, node.name, &allocation.desc);
             }
 
             self.bind_groups.entries[index] = self.allocations[index].generation;

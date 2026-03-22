@@ -100,17 +100,29 @@ impl PartialOrd for ResourceBinding {
 pub trait GraphResource: Send + Sync + Sized + 'static {
     type Desc: Clone + Send + Sync + Sized + 'static;
 
-    fn resolve(resolver: &ResourceResolver, desc: Self::Desc) -> Self::Desc;
+    fn resolve(
+        world: &ecs::World,
+        settings: &crate::core::RenderSettings,
+        resolver: &mut ResourceResolver,
+        desc: Self::Desc,
+    ) -> Self::Desc;
 
-    fn create(world: &World, device: &RenderDevice, name: Name, desc: &Self::Desc) -> Self;
+    fn create(device: &RenderDevice, name: Name, desc: &Self::Desc) -> Self;
 
-    fn entry(desc: &Self::Desc, builder: &mut BindGroupLayoutBuilder, visibility: ShaderStages);
+    fn entry(
+        settings: &RenderSettings,
+        desc: &Self::Desc,
+        builder: &mut BindGroupLayoutBuilder,
+        visibility: ShaderStages,
+    );
 
-    fn bind(&self, builder: &mut BindGroupBuilder);
+    fn bind<'a>(&'a self, builder: &mut BindGroupBuilder<'a>);
 
     fn compatible(desc_a: &Self::Desc, desc_b: &Self::Desc) -> bool;
 
     fn generation(&self) -> u32;
+
+    fn kind() -> ResourceKind;
 }
 
 pub struct PassBuilder<'a> {
@@ -216,10 +228,10 @@ pub trait GraphPass: Send + Sync + Sized + 'static {
 }
 
 pub struct ResourceType {
-    resolve: fn(&ResourceResolver, BoxData) -> BoxData,
-    create: fn(&World, &RenderDevice, Name, &dyn Any) -> BoxData,
-    entry: fn(&DynData, &mut BindGroupLayoutBuilder, ShaderStages),
-    bind: fn(&DynData, &mut BindGroupBuilder),
+    resolve: fn(&World, &RenderSettings, &mut ResourceResolver, BoxData) -> BoxData,
+    create: fn(&RenderDevice, Name, &dyn Any) -> BoxData,
+    entry: fn(&RenderSettings, &DynData, &mut BindGroupLayoutBuilder, ShaderStages),
+    bind: for<'a> fn(&'a DynData, &mut BindGroupBuilder<'a>),
     clone: fn(&DynData) -> BoxData,
     compatible: fn(&DynData, &DynData) -> bool,
     generation: fn(&DynData) -> u32,
@@ -228,17 +240,17 @@ pub struct ResourceType {
 impl ResourceType {
     fn new<R: GraphResource>() -> Self {
         Self {
-            resolve: |resolver, desc| {
+            resolve: |world, settings, resolver, desc| {
                 let desc = *desc.downcast::<R::Desc>().unwrap();
-                Box::new(R::resolve(resolver, desc))
+                Box::new(R::resolve(world, settings, resolver, desc))
             },
-            create: |world, device, name, desc| {
+            create: |device, name, desc| {
                 let desc = desc.downcast_ref::<R::Desc>().unwrap();
-                Box::new(R::create(world, device, name, desc))
+                Box::new(R::create(device, name, desc))
             },
-            entry: |desc, builder, visibility| {
+            entry: |settings, desc, builder, visibility| {
                 let desc = desc.downcast_ref::<R::Desc>().unwrap();
-                R::entry(desc, builder, visibility);
+                R::entry(settings, desc, builder, visibility);
             },
             bind: |resource, builder| {
                 let resource = resource.downcast_ref::<R>().unwrap();
@@ -258,30 +270,31 @@ impl ResourceType {
         }
     }
 
-    pub fn resolve(&self, resolver: &ResourceResolver, desc: BoxData) -> BoxData {
-        (self.resolve)(resolver, desc)
-    }
-
-    pub fn create(
+    pub fn resolve(
         &self,
         world: &World,
-        device: &RenderDevice,
-        name: Name,
-        desc: &DynData,
+        settings: &RenderSettings,
+        resolver: &mut ResourceResolver,
+        desc: BoxData,
     ) -> BoxData {
-        (self.create)(world, device, name, desc)
+        (self.resolve)(world, settings, resolver, desc)
+    }
+
+    pub fn create(&self, device: &RenderDevice, name: Name, desc: &DynData) -> BoxData {
+        (self.create)(device, name, desc)
     }
 
     pub fn entry(
         &self,
+        settings: &RenderSettings,
         desc: &DynData,
         builder: &mut BindGroupLayoutBuilder,
         visibility: ShaderStages,
     ) {
-        (self.entry)(desc, builder, visibility);
+        (self.entry)(settings, desc, builder, visibility);
     }
 
-    pub fn bind(&self, resource: &DynData, builder: &mut BindGroupBuilder) {
+    pub fn bind<'a>(&self, resource: &'a DynData, builder: &mut BindGroupBuilder<'a>) {
         (self.bind)(resource, builder)
     }
 
@@ -378,20 +391,8 @@ impl GraphResources {
     }
 
     pub fn create<R: GraphResource>(&mut self, name: Name, desc: R::Desc) -> GraphResourceId<R> {
-        self.add_node(name, ResourceKind::Transient, desc)
-    }
-
-    pub fn import<R: GraphResource>(&mut self, name: Name, desc: R::Desc) -> GraphResourceId<R> {
-        self.add_node(name, ResourceKind::Imported, desc)
-    }
-
-    fn add_node<R: GraphResource>(
-        &mut self,
-        name: Name,
-        kind: ResourceKind,
-        desc: R::Desc,
-    ) -> GraphResourceId<R> {
         let ty = self.register::<R>() as u32;
+        let kind = R::kind();
         let id = if let Some(index) = self.node_map.get(name).copied() {
             self.nodes[index] = ResourceNode::new::<R>(index as u32, ty, name, kind, desc);
             index
@@ -573,7 +574,7 @@ impl RenderGraph {
         executable: &mut ExecutableGraph,
     ) {
         if let Some(state) = executable.0.as_mut() {
-            state.allocator.update(world, device, graph);
+            state.allocator.update(device, graph);
 
             let mut ctx = RenderContext::new(world, device, &state.allocator);
             for pass in &state.passes {
@@ -603,5 +604,130 @@ pub struct RecompileRenderGraph;
 impl ecs::Command for RecompileRenderGraph {
     fn execute(self, world: &mut World) {
         world.resource_mut::<ExecutableGraph>().clear();
+    }
+}
+
+pub mod test {
+    use ecs::Entity;
+    use wgpu::TextureDescriptor;
+
+    use crate::{
+        core::{ColorFormat, Msaa, RenderSettings},
+        renderer::graph::GraphResource,
+    };
+
+    pub struct SurfaceInput {
+        pub color: wgpu::TextureView,
+        pub msaa_color: Option<wgpu::TextureView>,
+    }
+
+    #[derive(Clone, PartialEq, Eq)]
+    pub enum SurfaceInputDesc {
+        Auto,
+        Camera {
+            entity: Entity,
+        },
+        Fixed {
+            width: u32,
+            height: u32,
+            color: ColorFormat,
+            msaa: Msaa,
+        },
+    }
+
+    impl GraphResource for SurfaceInput {
+        type Desc = SurfaceInputDesc;
+
+        fn resolve(
+            world: &ecs::World,
+            settings: &crate::core::RenderSettings,
+            resolver: &mut super::ResourceResolver,
+            desc: Self::Desc,
+        ) -> Self::Desc {
+            todo!()
+        }
+
+        fn create(
+            device: &crate::core::RenderDevice,
+            name: super::Name,
+            desc: &Self::Desc,
+        ) -> Self {
+            let SurfaceInputDesc::Fixed {
+                width,
+                height,
+                color,
+                msaa,
+            } = desc
+            else {
+                panic!("Suface Input Desc not resolved.")
+            };
+
+            let size = wgpu::Extent3d {
+                width: *width,
+                height: *height,
+                depth_or_array_layers: 1,
+            };
+
+            let color = device.create_texture(&TextureDescriptor {
+                label: Some(name),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: (*color).into(),
+                usage: wgpu::TextureUsages::all(),
+                view_formats: &[],
+            });
+
+            let msaa = match *msaa {
+                crate::core::Msaa::Disabled => None,
+                _ => Some(device.create_texture(&TextureDescriptor {
+                    label: Some(&format!("{name}_MSAA")),
+                    size,
+                    mip_level_count: 1,
+                    sample_count: msaa.sample_count(),
+                    dimension: wgpu::TextureDimension::D2,
+                    format: color.format(),
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                })),
+            };
+
+            Self {
+                color: color.create_view(&Default::default()),
+                msaa_color: msaa.map(|msaa| msaa.create_view(&Default::default())),
+            }
+        }
+
+        fn entry(
+            _: &RenderSettings,
+            _: &Self::Desc,
+            builder: &mut crate::resources::BindGroupLayoutBuilder,
+            visibility: wgpu::ShaderStages,
+        ) {
+            builder.with_texture(
+                visibility,
+                wgpu::TextureSampleType::Float { filterable: true },
+                wgpu::TextureViewDimension::D2,
+                false,
+                None,
+            );
+        }
+
+        fn bind<'a>(&'a self, builder: &mut crate::resources::BindGroupBuilder<'a>) {
+            builder.with_texture(&self.color);
+        }
+
+        fn compatible(desc_a: &Self::Desc, desc_b: &Self::Desc) -> bool {
+            desc_a == desc_b
+        }
+
+        fn generation(&self) -> u32 {
+            0
+        }
+
+        fn kind() -> super::ResourceKind {
+            super::ResourceKind::Transient
+        }
     }
 }

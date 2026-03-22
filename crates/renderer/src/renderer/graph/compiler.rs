@@ -34,12 +34,11 @@ impl RenderGraphCompiler {
             allocations,
             bind_group_layouts,
             bind_groups,
-        } = Self::run(world, graph, cameras);
+        } = Self::run(world, graph, settings, cameras);
 
         let layouts = BindGroupCache::create_layouts(device, layouts, bind_group_layouts);
 
         let allocator = GpuResourceAllocator::build(
-            world,
             device,
             graph,
             resources,
@@ -54,6 +53,7 @@ impl RenderGraphCompiler {
     fn run(
         world: &World,
         graph: &RenderGraph,
+        settings: &RenderSettings,
         cameras: Query<Entity, With<Camera>>,
     ) -> CompiledRenderGraph {
         let mut passes = Vec::new();
@@ -79,7 +79,7 @@ impl RenderGraphCompiler {
 
                     resolver.resource = node.id;
 
-                    let desc = ty.resolve(&mut resolver, ty.clone(&node.desc));
+                    let desc = ty.resolve(world, settings, &mut resolver, ty.clone(&node.desc));
                     let (producer, user) = match entry.access {
                         ResourceAccess::Read => {
                             resources[node.id as usize] += 1;
@@ -184,6 +184,7 @@ impl RenderGraphCompiler {
         let instances = passes.iter().map(|pass| {
             let bindings = Self::get_bindings(
                 graph,
+                settings,
                 pass,
                 &resources,
                 &allocations,
@@ -208,6 +209,7 @@ impl RenderGraphCompiler {
 
     fn get_bindings(
         graph: &RenderGraph,
+        settings: &RenderSettings,
         pass: &PassRef,
         resources: &[u32],
         allocations: &[GpuAllocationDesc],
@@ -226,7 +228,7 @@ impl RenderGraphCompiler {
                 .or_insert_with(|| ResourceGroup::new(binding.group));
 
             group.allocations.push(alloc);
-            ty.entry(desc, &mut group.builder, binding.visiblitiy);
+            ty.entry(settings, desc, &mut group.builder, binding.visiblitiy);
         }
 
         let mut groups = groups.into_values().collect::<Vec<_>>();
