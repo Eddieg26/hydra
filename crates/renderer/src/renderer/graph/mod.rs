@@ -368,6 +368,13 @@ impl<R: GraphResource> GraphResourceId<R> {
     }
 }
 
+impl<R: GraphResource> Copy for GraphResourceId<R> {}
+impl<R: GraphResource> Clone for GraphResourceId<R> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), self.1.clone())
+    }
+}
+
 pub struct GraphEntryId<R: GraphResource>(u32, PhantomData<R>);
 impl<R: GraphResource> GraphEntryId<R> {
     fn new(id: u32) -> Self {
@@ -380,6 +387,13 @@ impl<R: GraphResource> GraphEntryId<R> {
 
     pub fn get(&self) -> u32 {
         self.0
+    }
+}
+
+impl<R: GraphResource> Copy for GraphEntryId<R> {}
+impl<R: GraphResource> Clone for GraphEntryId<R> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), self.1.clone())
     }
 }
 
@@ -403,20 +417,15 @@ impl GraphResources {
         }
     }
 
-    pub fn create<R: GraphResource>(&mut self, name: Name, desc: R::Desc) -> GraphResourceId<R> {
+    fn create<R: GraphResource>(&mut self, name: Name, desc: R::Desc) -> GraphResourceId<R> {
         let ty = self.register::<R>() as u32;
         let kind = R::kind();
-        let id = if let Some(index) = self.node_map.get(name).copied() {
-            self.nodes[index] = ResourceNode::new::<R>(index as u32, ty, name, kind, desc);
-            index
-        } else {
-            let id = self.nodes.len();
-            let node = ResourceNode::new::<R>(id as u32, ty, name, kind, desc);
-            self.nodes.push(node);
-            id
-        };
+        let id = self.nodes.len();
+        let node = ResourceNode::new::<R>(id as u32, ty, name, kind, desc);
 
+        self.nodes.push(node);
         self.node_map.insert(name, id);
+
         GraphResourceId::new(id as u32)
     }
 
@@ -498,6 +507,10 @@ impl<'a> RenderContext<'a> {
         self.world
     }
 
+    pub fn settings(&self) -> &RenderSettings {
+        &self.state.settings
+    }
+
     pub fn camera(&self) -> Option<&CameraSettings> {
         self.camera
     }
@@ -511,8 +524,11 @@ impl<'a> RenderContext<'a> {
         self.state.allocator.bind_groups().get(index)
     }
 
-    pub fn encoder(&self) -> CommandEncoder {
-        self.device.create_command_encoder(&Default::default())
+    pub fn encoder(&self, label: impl Into<Option<&'static str>>) -> CommandEncoder {
+        self.device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: label.into(),
+            })
     }
 
     pub fn submit(&mut self, encoder: CommandEncoder) {
@@ -657,10 +673,13 @@ impl ecs::Command for RecompileRenderGraph {
 pub mod test {
     use crate::{
         core::{ColorFormat, DepthFormat, Msaa, RenderSettings},
-        renderer::{camera::SettingState, graph::GraphResource},
-        resources::{MainRenderTarget, RenderAssets, RenderTarget},
+        renderer::{
+            camera::SettingState,
+            graph::{GraphPass, GraphResource, ResourceUsage},
+        },
+        resources::{MainRenderTarget, PipelineId, RenderAssets, RenderTarget},
     };
-    use wgpu::TextureDescriptor;
+    use wgpu::{ShaderStages, TextureDescriptor};
 
     #[derive(Clone, Copy, PartialEq, Eq)]
     pub enum SurfaceKind {
@@ -815,7 +834,7 @@ pub mod test {
     }
 
     pub struct RenderOutput {
-        output: wgpu::TextureView,
+        view: wgpu::TextureView,
         generation: u32,
     }
 
@@ -863,7 +882,7 @@ pub mod test {
             };
 
             Self {
-                output: view.clone(),
+                view: view.clone(),
                 generation: *generation,
             }
         }
@@ -884,7 +903,7 @@ pub mod test {
         }
 
         fn bind<'a>(&'a self, builder: &mut crate::resources::BindGroupBuilder<'a>) {
-            builder.with_texture(&self.output);
+            builder.with_texture(&self.view);
         }
 
         fn compatible(desc_a: &Self::Desc, desc_b: &Self::Desc) -> bool {
@@ -897,6 +916,126 @@ pub mod test {
 
         fn kind() -> super::ResourceKind {
             super::ResourceKind::Imported
+        }
+    }
+
+    pub struct OutputPass;
+
+    impl OutputPass {
+        fn copy(
+            ctx: &super::RenderContext,
+            src: &wgpu::TextureView,
+            dst: &wgpu::TextureView,
+        ) -> wgpu::CommandEncoder {
+            let mut encoder = ctx.encoder("output_copy");
+
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("output_copy"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: dst,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                // set render pipeline
+                pass.set_bind_group(0, ctx.bind_group(0), &[]);
+                pass.draw(0..3, 0..1);
+            }
+
+            encoder
+        }
+
+        fn tonemap(
+            ctx: &super::RenderContext,
+            src: &wgpu::TextureView,
+            dst: &wgpu::TextureView,
+            srgb: bool,
+        ) -> wgpu::CommandEncoder {
+            let pipeline: PipelineId = match srgb {
+                true => todo!(),
+                false => todo!(),
+            };
+
+            let mut encoder = ctx.encoder("output_tonemap");
+
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("output_tonemap"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: dst,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                pass.set_bind_group(0, ctx.bind_group(0), &[]);
+                pass.draw(0..3, 0..1);
+            }
+
+            encoder
+        }
+    }
+
+    impl GraphPass for OutputPass {
+        const NAME: super::Name = "OutputPass";
+
+        fn setup(
+            builder: &mut super::PassBuilder,
+        ) -> impl Fn(&mut super::RenderContext) + Send + Sync + 'static {
+            let color = builder.create::<SurfaceTexture>(
+                "intermediate_color",
+                SurfaceDesc {
+                    size: SurfaceSize::Auto,
+                    kind: SurfaceKind::Color(ColorFormat::HDR),
+                    msaa: Msaa::Disabled,
+                },
+            );
+            let output = builder.create::<RenderOutput>("output", RenderOutputDesc::Auto);
+
+            let src = builder.read(
+                color,
+                ResourceUsage::Binding {
+                    group: 0,
+                    binding: 0,
+                    visiblitiy: ShaderStages::FRAGMENT,
+                },
+            );
+            let dst = builder.write(output, ResourceUsage::Attachment);
+
+            move |ctx: &mut super::RenderContext<'_>| {
+                let camera = ctx.camera().expect("Missing camera for OutputPass");
+                let src = ctx.get(src);
+                let dst = ctx.get(dst);
+
+                let encoder = match (ctx.settings().color(), camera.format) {
+                    (ColorFormat::Standard { .. }, ColorFormat::Standard { .. }) => {
+                        OutputPass::copy(ctx, &src.view, &dst.view)
+                    }
+                    (ColorFormat::HDR, ColorFormat::HDR) => {
+                        OutputPass::copy(ctx, &src.view, &dst.view)
+                    }
+                    (ColorFormat::HDR, ColorFormat::Standard { srgb }) => {
+                        OutputPass::tonemap(ctx, &src.view, &dst.view, srgb)
+                    }
+                    (ColorFormat::Standard { .. }, ColorFormat::HDR) => unreachable!(),
+                };
+
+                ctx.submit(encoder);
+            }
         }
     }
 }
