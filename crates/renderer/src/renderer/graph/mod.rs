@@ -622,30 +622,38 @@ impl ecs::Command for RecompileRenderGraph {
 
 pub mod test {
     use crate::{
-        core::{ColorFormat, Msaa, RenderSettings},
+        core::{ColorFormat, DepthFormat, Msaa, RenderSettings},
         renderer::{camera::SettingState, graph::GraphResource},
-        resources::MainRenderTarget,
+        resources::{MainRenderTarget, RenderAssets, RenderTarget},
     };
     use wgpu::TextureDescriptor;
 
-    pub struct SurfaceInput {
-        pub color: wgpu::TextureView,
-        pub msaa_color: Option<wgpu::TextureView>,
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub enum SurfaceKind {
+        Color(ColorFormat),
+        Depth(DepthFormat),
     }
 
-    #[derive(Clone, PartialEq, Eq)]
-    pub enum SurfaceInputDesc {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub enum SurfaceSize {
         Auto,
-        Fixed {
-            width: u32,
-            height: u32,
-            color: ColorFormat,
-            msaa: Msaa,
-        },
+        Fixed { width: u32, height: u32 },
     }
 
-    impl GraphResource for SurfaceInput {
-        type Desc = SurfaceInputDesc;
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub struct SurfaceDesc {
+        pub size: SurfaceSize,
+        pub kind: SurfaceKind,
+        pub msaa: Msaa,
+    }
+
+    pub struct SurfaceTexture {
+        pub view: wgpu::TextureView,
+        pub msaa_view: Option<wgpu::TextureView>,
+    }
+
+    impl GraphResource for SurfaceTexture {
+        type Desc = SurfaceDesc;
 
         fn resolve(
             world: &ecs::World,
@@ -653,35 +661,38 @@ pub mod test {
             resolver: &mut super::ResourceResolver,
             desc: Self::Desc,
         ) -> Self::Desc {
-            if let SurfaceInputDesc::Fixed { .. } = &desc {
-                return desc;
-            }
+            let kind = match desc.kind {
+                SurfaceKind::Color(_) => SurfaceKind::Color(settings.color()),
+                SurfaceKind::Depth(_) => SurfaceKind::Depth(settings.depth()),
+            };
 
-            let (width, height, color, msaa) = match resolver.camera.as_ref() {
-                Some(camera) => {
-                    let msaa = match camera.msaa {
-                        SettingState::Auto => settings.msaa(),
-                        SettingState::Disabled => Msaa::Disabled,
-                    };
+            let (width, height, msaa) = match desc.size {
+                SurfaceSize::Auto => match resolver.camera.as_ref() {
+                    Some(camera) => {
+                        let msaa = match camera.msaa {
+                            SettingState::Auto => settings.msaa(),
+                            SettingState::Disabled => Msaa::Disabled,
+                        };
 
-                    (camera.width, camera.height, camera.format, msaa)
-                }
-                None => {
-                    let main = world
-                        .resource::<MainRenderTarget>()
-                        .get()
-                        .expect("Main Render Target not set");
+                        (camera.width, camera.height, msaa)
+                    }
+                    None => {
+                        let main = world
+                            .resource::<MainRenderTarget>()
+                            .get()
+                            .expect("Main Render Target not set");
 
-                    (main.width, main.height, main.format, settings.msaa())
-                }
+                        (main.width, main.height, settings.msaa())
+                    }
+                },
+                SurfaceSize::Fixed { width, height } => (width, height, desc.msaa),
             };
 
             resolver.add_texture(width, height, 1);
 
-            SurfaceInputDesc::Fixed {
-                width,
-                height,
-                color,
+            SurfaceDesc {
+                size: SurfaceSize::Fixed { width, height },
+                kind,
                 msaa,
             }
         }
@@ -691,50 +702,49 @@ pub mod test {
             name: super::Name,
             desc: &Self::Desc,
         ) -> Self {
-            let SurfaceInputDesc::Fixed {
-                width,
-                height,
-                color,
-                msaa,
-            } = desc
-            else {
+            let SurfaceSize::Fixed { width, height } = desc.size else {
                 panic!("Suface Input Desc not resolved.")
             };
 
+            let format = match desc.kind {
+                SurfaceKind::Color(format) => wgpu::TextureFormat::from(format),
+                SurfaceKind::Depth(format) => wgpu::TextureFormat::from(format),
+            };
+
             let size = wgpu::Extent3d {
-                width: *width,
-                height: *height,
+                width: width,
+                height: height,
                 depth_or_array_layers: 1,
             };
 
-            let color = device.create_texture(&TextureDescriptor {
+            let texture = device.create_texture(&TextureDescriptor {
                 label: Some(name),
                 size,
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: (*color).into(),
+                format,
                 usage: wgpu::TextureUsages::all(),
                 view_formats: &[],
             });
 
-            let msaa = match *msaa {
+            let msaa = match desc.msaa {
                 crate::core::Msaa::Disabled => None,
                 _ => Some(device.create_texture(&TextureDescriptor {
                     label: Some(&format!("{name}_MSAA")),
                     size,
                     mip_level_count: 1,
-                    sample_count: msaa.sample_count(),
+                    sample_count: desc.msaa.sample_count(),
                     dimension: wgpu::TextureDimension::D2,
-                    format: color.format(),
+                    format,
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                     view_formats: &[],
                 })),
             };
 
             Self {
-                color: color.create_view(&Default::default()),
-                msaa_color: msaa.map(|msaa| msaa.create_view(&Default::default())),
+                view: texture.create_view(&Default::default()),
+                msaa_view: msaa.map(|msaa| msaa.create_view(&Default::default())),
             }
         }
 
@@ -754,7 +764,7 @@ pub mod test {
         }
 
         fn bind<'a>(&'a self, builder: &mut crate::resources::BindGroupBuilder<'a>) {
-            builder.with_texture(&self.color);
+            builder.with_texture(&self.view);
         }
 
         fn compatible(desc_a: &Self::Desc, desc_b: &Self::Desc) -> bool {
@@ -767,6 +777,92 @@ pub mod test {
 
         fn kind() -> super::ResourceKind {
             super::ResourceKind::Transient
+        }
+    }
+
+    pub struct RenderOutput {
+        output: wgpu::TextureView,
+        generation: u32,
+    }
+
+    #[derive(Clone, PartialEq, Eq)]
+    pub enum RenderOutputDesc {
+        Auto,
+        Resolved {
+            view: wgpu::TextureView,
+            generation: u32,
+        },
+    }
+
+    impl GraphResource for RenderOutput {
+        type Desc = RenderOutputDesc;
+
+        fn resolve(
+            world: &ecs::World,
+            _: &crate::core::RenderSettings,
+            resolver: &mut super::ResourceResolver,
+            desc: Self::Desc,
+        ) -> Self::Desc {
+            if let RenderOutputDesc::Resolved { .. } = &desc {
+                return desc;
+            };
+
+            let targets = world.resource::<RenderAssets<RenderTarget>>();
+            let target = match resolver.camera() {
+                Some(camera) => camera.target.and_then(|id| targets.get(&id)),
+                None => world.resource::<MainRenderTarget>().get(),
+            };
+
+            let Some(target) = target else {
+                panic!("Render target not found.")
+            };
+
+            let view = target.color.view().clone();
+            let generation = resolver.camera.map(|c| c.generation).unwrap_or(0);
+
+            RenderOutputDesc::Resolved { view, generation }
+        }
+
+        fn create(_: &crate::core::RenderDevice, _: super::Name, desc: &Self::Desc) -> Self {
+            let RenderOutputDesc::Resolved { view, generation } = desc else {
+                panic!("Render output not resolved.")
+            };
+
+            Self {
+                output: view.clone(),
+                generation: *generation,
+            }
+        }
+
+        fn entry(
+            _: &RenderSettings,
+            _: &Self::Desc,
+            builder: &mut crate::resources::BindGroupLayoutBuilder,
+            visibility: wgpu::ShaderStages,
+        ) {
+            builder.with_texture(
+                visibility,
+                wgpu::TextureSampleType::Float { filterable: true },
+                wgpu::TextureViewDimension::D2,
+                false,
+                None,
+            );
+        }
+
+        fn bind<'a>(&'a self, builder: &mut crate::resources::BindGroupBuilder<'a>) {
+            builder.with_texture(&self.output);
+        }
+
+        fn compatible(desc_a: &Self::Desc, desc_b: &Self::Desc) -> bool {
+            desc_a == desc_b
+        }
+
+        fn generation(&self) -> u32 {
+            self.generation
+        }
+
+        fn kind() -> super::ResourceKind {
+            super::ResourceKind::Imported
         }
     }
 }

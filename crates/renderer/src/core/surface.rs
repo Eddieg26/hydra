@@ -135,9 +135,9 @@ impl RenderSurface {
 }
 
 #[derive(Default, Resource)]
-pub struct SurfaceTexture(Option<wgpu::SurfaceTexture>);
+pub struct RenderSurfaceTexture(Option<wgpu::SurfaceTexture>);
 
-impl SurfaceTexture {
+impl RenderSurfaceTexture {
     pub fn set(&mut self, texture: wgpu::SurfaceTexture) {
         self.0 = Some(texture);
     }
@@ -146,7 +146,7 @@ impl SurfaceTexture {
         self.0.as_ref()
     }
 
-    pub(crate) fn present(surface: &mut SurfaceTexture) {
+    pub(crate) fn present(surface: &mut RenderSurfaceTexture) {
         let Some(texture) = surface.0.take() else {
             return;
         };

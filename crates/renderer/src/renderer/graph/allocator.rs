@@ -118,10 +118,11 @@ impl GpuResourceAllocator {
                 let allocation = &mut self.allocations[index];
                 let node = &resources.nodes[allocation.node as usize];
                 let ty = &resources.types[node.ty as usize];
+
                 allocation.instance = ty.create(device, node.name, &allocation.desc);
+                self.bind_groups.entries[index] = ty.generation(&allocation.instance);
             }
 
-            self.bind_groups.entries[index] = self.allocations[index].generation;
             updated.grow(index);
             updated.set(index, changed);
         }
@@ -166,6 +167,7 @@ impl CachedBindGroup {
 pub struct BindGroupArchetype {
     bind_groups: Vec<GpuResourceId<BindGroup>>,
     allocations: FixedBitSet,
+    resources: Box<[u32]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -220,21 +222,26 @@ impl BindGroupCache {
     }
 
     pub fn register(&mut self, resources: Box<[u32]>) -> u32 {
-        let index = self.archetypes.len() as u32;
-        let mut allocations = FixedBitSet::new();
-        for resource in &resources {
-            allocations.grow(*resource as usize);
-            allocations.set(*resource as usize, true);
+        if let Some(index) = self.map.get(&resources) {
+            *index
+        } else {
+            let index = self.archetypes.len() as u32;
+            let mut allocations = FixedBitSet::new();
+            for resource in &resources {
+                allocations.grow(*resource as usize);
+                allocations.set(*resource as usize, true);
+            }
+
+            self.archetypes.push(BindGroupArchetype {
+                bind_groups: Vec::new(),
+                allocations,
+                resources: resources.clone(),
+            });
+
+            self.map.insert(resources, index);
+
+            index
         }
-
-        self.archetypes.push(BindGroupArchetype {
-            bind_groups: Vec::new(),
-            allocations,
-        });
-
-        self.map.insert(resources, index);
-
-        index
     }
 
     pub fn add(&mut self, archetype: u32, bind_group: CachedBindGroup) -> GpuResourceId<BindGroup> {
@@ -260,8 +267,8 @@ impl BindGroupCache {
             for id in &archetype.bind_groups {
                 let cached = &mut self.bind_groups[id.get() as usize];
                 let mut builder = BindGroupBuilder::new();
-                for alloc in archetype.allocations.ones() {
-                    let allocation = &allocations[alloc];
+                for alloc in &archetype.resources {
+                    let allocation = &allocations[*alloc as usize];
                     let node = &resources.nodes[allocation.node as usize];
                     let ty = &resources.types[node.ty as usize];
                     ty.bind(&allocation.instance, &mut builder);

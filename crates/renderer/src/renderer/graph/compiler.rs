@@ -56,13 +56,52 @@ impl RenderGraphCompiler {
         settings: &RenderSettings,
         cameras: &CameraQueue,
     ) -> CompiledRenderGraph {
-        let mut passes = Vec::new();
         let mut resources = vec![0u32; graph.resources.nodes.len()];
-        let mut versions = Vec::new();
         let mut layouts = IndexSet::<Vec<BindGroupLayoutEntry>>::new();
         let mut bind_groups = IndexSet::<BindGroupKey>::new();
 
-        // Expansion
+        let (mut passes, versions) = Self::expand(world, settings, graph, cameras, &mut resources);
+
+        Self::cull(&mut passes, &mut resources, &versions);
+
+        let (allocations, table) = Self::allocate(graph, &resources, versions);
+
+        let instances = passes.iter().map(|pass| {
+            let bindings = Self::get_bindings(
+                graph,
+                settings,
+                pass,
+                &table,
+                &allocations,
+                &mut layouts,
+                &mut bind_groups,
+            );
+            PassInstance {
+                node: pass.node,
+                resources: pass.resources,
+                camera: pass.camera,
+                bindings: bindings.into_boxed_slice(),
+            }
+        });
+
+        CompiledRenderGraph {
+            passes: instances.collect(),
+            resources: table.into_boxed_slice(),
+            allocations,
+            bind_group_layouts: layouts,
+            bind_groups,
+        }
+    }
+
+    fn expand(
+        world: &World,
+        settings: &RenderSettings,
+        graph: &RenderGraph,
+        cameras: &CameraQueue,
+        resources: &mut [u32],
+    ) -> (Vec<PassRef>, Vec<ResourceVersion>) {
+        let mut passes = Vec::new();
+        let mut versions = Vec::new();
         for index in 0..cameras.slice().len() {
             let camera = &cameras.slice()[index];
             let offset = versions.len() as u32;
@@ -109,7 +148,10 @@ impl RenderGraphCompiler {
             }
         }
 
-        // Pass Culling
+        (passes, versions)
+    }
+
+    fn cull(passes: &mut Vec<PassRef>, resources: &mut [u32], versions: &[ResourceVersion]) {
         let mut dead_versions = (0..versions.len())
             .filter(|i| resources[versions[*i].node as usize] == 0)
             .collect::<VecDeque<_>>();
@@ -146,11 +188,19 @@ impl RenderGraphCompiler {
             );
         }
 
-        // Resource Allocation
+        passes.retain(|p| p.ref_count > 0)
+    }
+
+    fn allocate(
+        graph: &RenderGraph,
+        resources: &[u32],
+        mut versions: Vec<ResourceVersion>,
+    ) -> (Vec<GpuAllocationDesc>, Vec<u32>) {
+        let mut allocations = Vec::<GpuAllocationDesc>::new();
+        let mut table = vec![0u32; versions.len()];
+
         versions.retain(|v| resources[v.node as usize] > 0);
         versions.sort_by(|a, b| a.user.cmp(&b.user));
-        let mut allocations = Vec::<GpuAllocationDesc>::new();
-        let mut resources = vec![0u32; versions.len()];
 
         for version in versions {
             if let Some(index) = allocations.iter().position(|alloc| {
@@ -164,11 +214,11 @@ impl RenderGraphCompiler {
                     && ty.compatible(&version.desc, &alloc.desc)
             }) {
                 allocations[index].last_use = version.user;
-                resources[version.id as usize] = index as u32;
+                table[version.id as usize] = index as u32;
             } else {
                 let id = allocations.len() as u32;
                 let node = &graph.resources.nodes[version.node as usize];
-                resources[version.id as usize] = id;
+                table[version.id as usize] = id;
 
                 allocations.push(GpuAllocationDesc {
                     id,
@@ -180,34 +230,7 @@ impl RenderGraphCompiler {
             }
         }
 
-        // Pass Bindings
-        passes.retain(|p| p.ref_count > 0);
-
-        let instances = passes.iter().map(|pass| {
-            let bindings = Self::get_bindings(
-                graph,
-                settings,
-                pass,
-                &resources,
-                &allocations,
-                &mut layouts,
-                &mut bind_groups,
-            );
-            PassInstance {
-                node: pass.node,
-                resources: pass.resources,
-                camera: pass.camera,
-                bindings: bindings.into_boxed_slice(),
-            }
-        });
-
-        CompiledRenderGraph {
-            passes: instances.collect(),
-            resources: resources.into_boxed_slice(),
-            allocations,
-            bind_group_layouts: layouts,
-            bind_groups,
-        }
+        (allocations, table)
     }
 
     fn get_bindings(
@@ -241,9 +264,9 @@ impl RenderGraphCompiler {
             .drain(..)
             .map(|group| {
                 let (layout, _) = layouts.insert_full(group.builder.entries);
-                let resources = group.allocations.into_boxed_slice();
+                let allocations = group.allocations.into_boxed_slice();
                 let (bind_group, _) =
-                    bind_groups.insert_full(BindGroupKey::new(layout as u32, resources));
+                    bind_groups.insert_full(BindGroupKey::new(layout as u32, allocations));
                 PassBindGroup {
                     layout: layout as u32,
                     bind_group: bind_group as u32,

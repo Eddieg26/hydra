@@ -35,11 +35,9 @@ pub struct Camera {
     pub clear: Option<Color>,
     /// MSAA samples, if Auto - use the same value as the main render target
     pub msaa: SettingState,
-    /// HDR rendering, if Auto - use the same value as the main render target
-    pub hdr: SettingState,
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, Hash)]
 pub struct CameraSettings {
     /// Camera Entity
     pub entity: Entity,
@@ -49,14 +47,31 @@ pub struct CameraSettings {
     pub target: Option<AssetId<RenderTexture>>,
     /// MSAA samples, if Auto - use the same value as the main render target
     pub msaa: SettingState,
-    /// HDR rendering, if Auto - use the same value as the main render target
-    pub hdr: SettingState,
     /// Render target width
     pub width: u32,
     /// Render target width
     pub height: u32,
     /// Render target color format
     pub format: ColorFormat,
+    pub generation: u32,
+}
+
+impl Eq for CameraSettings {}
+impl PartialEq for CameraSettings {
+    fn eq(&self, other: &Self) -> bool {
+        self.entity == other.entity
+            && self.priority == other.priority
+            && self.target == other.target
+            && self.width == other.width
+            && self.height == other.height
+            && self.generation == other.generation
+    }
+}
+
+impl CameraSettings {
+    pub fn diff(&self, format: ColorFormat, msaa: SettingState) -> bool {
+        self.format != format || self.msaa != msaa
+    }
 }
 
 #[derive(Resource, Default, Clone, PartialEq, Eq, Hash)]
@@ -93,8 +108,10 @@ impl CameraQueue {
         let removed = removed.iter().collect::<Vec<_>>();
         queue.0.retain(|c| !removed.contains(&c.entity));
 
+        let mut new = Vec::new();
         for (entity, camera) in modified {
             let Some(prev) = queue.0.iter_mut().find(|s| s.entity == entity) else {
+                new.push((entity, camera));
                 continue;
             };
 
@@ -107,25 +124,18 @@ impl CameraQueue {
                 continue;
             };
 
-            if camera.target != prev.target
-                || target.width != prev.width
-                || target.height != prev.height
-                || target.format != prev.format
-            {
-                *prev = CameraSettings {
-                    entity,
-                    priority: camera.priority,
-                    target: camera.target,
-                    msaa: camera.msaa,
-                    hdr: camera.hdr,
-                    width: target.width,
-                    height: target.height,
-                    format: target.format,
-                }
+            prev.priority = camera.priority;
+            prev.target = camera.target;
+            prev.width = target.width;
+            prev.height = target.height;
+            if prev.format != target.format || prev.msaa != camera.msaa {
+                prev.format = target.format;
+                prev.msaa = camera.msaa;
+                prev.generation += 1;
             }
         }
 
-        for (entity, camera) in added {
+        for (entity, camera) in added.iter().chain(new) {
             let target = match &camera.target {
                 Some(id) => targets.get(id),
                 None => main_target.get(),
@@ -140,10 +150,10 @@ impl CameraQueue {
                 priority: camera.priority,
                 target: camera.target,
                 msaa: camera.msaa,
-                hdr: camera.hdr,
                 width: target.width,
                 height: target.height,
                 format: target.format,
+                generation: 1,
             });
         }
 

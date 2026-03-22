@@ -1,5 +1,5 @@
 use crate::{
-    core::{ColorFormat, RenderDevice, SurfaceTexture},
+    core::{ColorFormat, RenderDevice, RenderSurfaceTexture},
     resources::{RenderAssets, extract::RenderAsset},
     types::Color,
 };
@@ -472,7 +472,7 @@ impl MainRenderTarget {
         self.0.as_ref()
     }
 
-    pub(crate) fn update(target: &mut MainRenderTarget, surface: &SurfaceTexture) {
+    pub(crate) fn update(target: &mut MainRenderTarget, surface: &RenderSurfaceTexture) {
         let Some(surface) = surface.get() else {
             target.0 = None;
             return;

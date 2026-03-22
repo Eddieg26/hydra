@@ -1,5 +1,5 @@
 use crate::{
-    core::{RenderDevice, RenderSettings, RenderSurface, SurfaceTexture},
+    core::{RenderDevice, RenderSettings, RenderSurface, RenderSurfaceTexture},
     renderer::{
         camera::Camera,
         graph::{RenderGraph, RenderGraphDirty, compiler::RenderGraphCompiler},
@@ -49,7 +49,7 @@ impl Plugin for RenderPlugin {
         .add_resource(ShaderVariants::default())
         .add_resource(MeshAllocatorConfig::default())
         .add_resource(RenderSettings::default())
-        .add_resource(SurfaceTexture::default())
+        .add_resource(RenderSurfaceTexture::default())
         .add_resource(MainRenderTarget::default())
         .add_resource(BindGroupLayoutRegistry::default())
         .add_systems(
@@ -61,7 +61,7 @@ impl Plugin for RenderPlugin {
             RenderGraphCompiler::compile.when::<RenderGraphDirty>(),
         )
         .add_systems(Render, RenderGraph::run)
-        .add_systems(Present, SurfaceTexture::present);
+        .add_systems(Present, RenderSurfaceTexture::present);
     }
 
     fn build(&mut self, app: &mut AppBuilder) {
