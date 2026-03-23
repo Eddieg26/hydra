@@ -63,7 +63,11 @@ impl RenderGraphCompiler {
             let mut resolver = ResourceResolver::new(world, Some(camera));
             let cursor = resources.len() as u32;
 
-            for pass in &graph.nodes {
+            for pass in graph
+                .nodes
+                .iter()
+                .filter(|p| !camera.mask.as_ref().is_some_and(|mask| mask.get(p.id)))
+            {
                 let id = passes.len() as u32;
                 let mut reads = Vec::new();
                 let mut ref_count = 0;
@@ -110,7 +114,7 @@ impl RenderGraphCompiler {
                 }
 
                 passes.push(PassRef {
-                    node: pass.id,
+                    node: *pass.id,
                     camera: Some(index as u32),
                     ref_count,
                     cursor,

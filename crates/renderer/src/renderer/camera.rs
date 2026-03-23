@@ -1,5 +1,6 @@
 use crate::{
     core::ColorFormat,
+    renderer::graph::RenderGraphMask,
     resources::{MainRenderTarget, RenderAssets, RenderTarget, RenderTexture},
     types::{Color, Viewport},
 };
@@ -50,6 +51,10 @@ pub struct CameraSettings {
     pub height: u32,
     /// Render target color format
     pub format: ColorFormat,
+    /// Render Graph Pass mask
+    pub mask: Option<RenderGraphMask>,
+    /// Generation, used to track changes in format or msaa
+    /// settings of the render target.
     pub generation: u32,
 }
 
@@ -76,6 +81,7 @@ impl PartialEq for CameraSettings {
             && self.target == other.target
             && self.width == other.width
             && self.height == other.height
+            && self.mask == other.mask
             && self.generation == other.generation
     }
 }
@@ -110,7 +116,7 @@ impl From<CameraQueue> for Vec<CameraSettings> {
 
 impl CameraQueue {
     pub(crate) fn queue(
-        cameras: Query<(Entity, &Camera)>,
+        cameras: Query<(Entity, &Camera, Option<&RenderGraphMask>)>,
         removed: Query<Entity, Removed<Camera>>,
         main_target: &MainRenderTarget,
         targets: &RenderAssets<RenderTarget>,
@@ -118,7 +124,7 @@ impl CameraQueue {
     ) {
         queue.0.retain(|c| !removed.contains(c.entity));
 
-        for (entity, camera) in cameras {
+        for (entity, camera, mask) in cameras {
             let target = match &camera.target {
                 Some(id) => targets.get(id),
                 None => main_target.get(),
@@ -139,6 +145,7 @@ impl CameraQueue {
                     width: target.width,
                     height: target.height,
                     format: target.format,
+                    mask: mask.cloned(),
                     generation: 1,
                 });
             };

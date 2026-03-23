@@ -9,7 +9,7 @@ use crate::{
     },
     resources::{BindGroupBuilder, BindGroupLayoutBuilder, BindGroupLayoutRegistry},
 };
-use ecs::{Condition, Resource, World};
+use ecs::{Component, Condition, FixedBitSet, Resource, World};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -226,7 +226,7 @@ impl<'a> PassBuilder<'a> {
         self.bindings.sort();
 
         PassNode {
-            id,
+            id: PassId(id),
             name: P::NAME,
             entries: self.entries.into_boxed_slice(),
             bindings: self.bindings.into_boxed_slice(),
@@ -434,8 +434,18 @@ impl GraphResources {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct PassId(u32);
+impl std::ops::Deref for PassId {
+    type Target = u32;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 pub struct PassNode {
-    id: u32,
+    id: PassId,
     name: Name,
     entries: Box<[ResourceEntry]>,
     bindings: Box<[ResourceBinding]>,
@@ -443,7 +453,7 @@ pub struct PassNode {
 }
 
 impl PassNode {
-    pub fn id(&self) -> u32 {
+    pub fn id(&self) -> PassId {
         self.id
     }
 
@@ -527,6 +537,23 @@ pub struct PassInstance {
     pub cursor: u32,
     pub camera: Option<u32>,
     pub bindings: Box<[PassBindGroup]>,
+}
+
+#[derive(Clone, Component, PartialEq, Eq, Hash)]
+pub struct RenderGraphMask(FixedBitSet);
+impl RenderGraphMask {
+    pub fn new(capacity: usize) -> Self {
+        Self(FixedBitSet::with_capacity(capacity))
+    }
+
+    pub fn get(&self, pass: PassId) -> bool {
+        self.0.contains(*pass as usize)
+    }
+
+    pub fn set(&mut self, pass: PassId, enabled: bool) {
+        self.0.grow(pass.0 as usize);
+        self.0.set(pass.0 as usize, enabled);
+    }
 }
 
 pub struct RenderGraphState {
