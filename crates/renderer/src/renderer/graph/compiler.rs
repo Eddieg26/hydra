@@ -22,18 +22,24 @@ impl RenderGraphCompiler {
         settings: &RenderSettings,
         cameras: &CameraQueue,
     ) -> CompiledRenderGraph {
-        let (passes, mut resources) = Self::expand(world, graph, settings, cameras);
+        let (passes, mut resources, ref_table) = Self::expand(world, graph, settings, cameras);
 
-        let passes = Self::cull(passes, &mut resources);
+        let passes = Self::cull(passes, &mut resources, &ref_table);
 
-        let (allocations, resources) = Self::allocate(graph, resources);
+        let (allocations, alloc_table) = Self::allocate(graph, resources);
 
-        let (passes, layouts, bind_groups) =
-            Self::bindings(graph, settings, passes, &resources, &allocations);
+        let (passes, layouts, bind_groups) = Self::bindings(
+            graph,
+            settings,
+            passes,
+            ref_table,
+            &alloc_table,
+            &allocations,
+        );
 
         CompiledRenderGraph {
             passes: passes.into_boxed_slice(),
-            resources: resources.into_boxed_slice(),
+            resources: alloc_table.into_boxed_slice(),
             allocations,
             bind_group_layouts: layouts,
             bind_groups,
@@ -46,10 +52,11 @@ impl RenderGraphCompiler {
         graph: &RenderGraph,
         settings: &RenderSettings,
         cameras: &CameraQueue,
-    ) -> (Vec<PassRef>, Vec<ResourceRef>) {
+    ) -> (Vec<PassRef>, Vec<ResourceRef>, Vec<u32>) {
         let mut passes = Vec::with_capacity(cameras.slice().len() * graph.nodes.len());
         let mut resources =
             Vec::<ResourceRef>::with_capacity(passes.len() * graph.resources().nodes().len());
+        let mut table = vec![0; resources.len()];
 
         for index in 0..cameras.slice().len() {
             let camera = &cameras.slice()[index];
@@ -62,7 +69,7 @@ impl RenderGraphCompiler {
                 let mut ref_count = 0;
 
                 for entry in pass.entries() {
-                    let resource = entry.node + cursor;
+                    let resource = cursor + entry.node;
 
                     match entry.access {
                         ResourceAccess::Create => {
@@ -70,23 +77,34 @@ impl RenderGraphCompiler {
                             let ty = graph.resources().ty(node.ty);
                             let desc =
                                 ty.resolve(world, settings, &mut resolver, ty.clone(&node.desc));
-                            resources.push(ResourceRef {
-                                id: resources.len() as u32,
-                                node: node.id,
-                                ref_count: 0,
-                                producer: Some(id),
-                                first_user: None,
-                                last_user: None,
-                                desc,
-                            });
+
+                            if let Some(index) = resources.iter().position(|r| {
+                                let node = graph.resources().node(r.node);
+                                let ty = graph.resources().ty(node.ty);
+
+                                ty.compatible(&desc, &r.desc)
+                            }) {
+                                table[resource as usize] = index as u32;
+                            } else {
+                                table[resource as usize] = resources.len() as u32;
+                                resources.push(ResourceRef {
+                                    id: resources.len() as u32,
+                                    node: node.id,
+                                    ref_count: 0,
+                                    producer: Some(id),
+                                    first_user: None,
+                                    last_user: None,
+                                    desc,
+                                });
+                            }
                         }
                         ResourceAccess::Read => {
                             reads.push(resource);
-                            resources[resource as usize].read(id);
+                            resources[table[resource as usize] as usize].read(id);
                         }
                         ResourceAccess::Write => {
                             ref_count += 1;
-                            resources[resource as usize].write(id);
+                            resources[table[resource as usize] as usize].write(id);
                         }
                     }
                 }
@@ -101,11 +119,15 @@ impl RenderGraphCompiler {
             }
         }
 
-        (passes, resources)
+        (passes, resources, table)
     }
 
     /// Cull unused passes and resources.
-    fn cull(mut passes: Vec<PassRef>, resources: &mut [ResourceRef]) -> Vec<PassRef> {
+    fn cull(
+        mut passes: Vec<PassRef>,
+        resources: &mut [ResourceRef],
+        table: &[u32],
+    ) -> Vec<PassRef> {
         let mut dead_resources = resources
             .iter()
             .filter_map(|r| (r.ref_count == 0).then_some(r.id))
@@ -127,7 +149,7 @@ impl RenderGraphCompiler {
             }
 
             for index in &pass.reads {
-                let resource = &mut resources[*index as usize];
+                let resource = &mut resources[table[*index as usize] as usize];
                 resource.ref_count -= 1;
                 if resource.ref_count == 0 {
                     dead_resources.push_back(*index);
@@ -185,7 +207,8 @@ impl RenderGraphCompiler {
         graph: &RenderGraph,
         settings: &RenderSettings,
         passes: Vec<PassRef>,
-        resources: &[u32],
+        ref_table: Vec<u32>, // Node -> Resource Ref Index
+        alloc_table: &[u32], // Ref -> Allocation index
         allocations: &[GpuAllocationDesc],
     ) -> (
         Vec<PassInstance>,
@@ -199,8 +222,8 @@ impl RenderGraphCompiler {
         for pass in passes {
             let mut groups = HashMap::new();
             for binding in &graph.nodes[pass.node as usize].bindings {
-                let resource = pass.cursor + binding.node;
-                let alloc = resources[resource as usize];
+                let resource = ref_table[(pass.cursor + binding.node) as usize];
+                let alloc = alloc_table[resource as usize];
                 let node = &graph.resources.nodes[binding.node as usize];
                 let ty = &graph.resources.types[node.ty as usize];
                 let desc = &allocations[alloc as usize].desc;
@@ -270,7 +293,6 @@ impl ResourceRef {
         self.producer = Some(pass);
         self.first_user.get_or_insert(pass);
         self.last_user = Some(pass);
-        self.ref_count += 1;
     }
 }
 
