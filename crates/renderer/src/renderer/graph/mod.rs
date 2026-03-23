@@ -83,13 +83,14 @@ pub enum ResourceUsage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResourceAccess {
+    Create,
     Read,
     Write,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResourceBinding {
-    entry: u32,
+    node: u32,
     group: u32,
     binding: u32,
     visiblitiy: ShaderStages,
@@ -140,9 +141,7 @@ pub trait GraphResource: Send + Sync + Sized + 'static {
 
 pub struct PassBuilder<'a> {
     resources: &'a mut GraphResources,
-    refs: u32,
-    creates: Vec<u32>,
-    entries: Vec<u32>,
+    entries: Vec<ResourceEntry>,
     bindings: Vec<ResourceBinding>,
 }
 
@@ -150,8 +149,6 @@ impl<'a> PassBuilder<'a> {
     pub fn new(resources: &'a mut GraphResources) -> Self {
         Self {
             resources,
-            refs: 0,
-            creates: Vec::new(),
             entries: Vec::new(),
             bindings: Vec::new(),
         }
@@ -159,7 +156,11 @@ impl<'a> PassBuilder<'a> {
 
     pub fn create<R: GraphResource>(&mut self, name: Name, desc: R::Desc) -> GraphResourceId<R> {
         let id = self.resources.create(name, desc);
-        self.creates.push(id.0);
+        self.entries.push(ResourceEntry {
+            node: id.0,
+            access: ResourceAccess::Create,
+        });
+
         id
     }
 
@@ -167,36 +168,10 @@ impl<'a> PassBuilder<'a> {
         &mut self,
         resource: GraphResourceId<R>,
         usage: ResourceUsage,
-    ) -> GraphEntryId<R> {
-        let id = self.add_entry(resource, usage, ResourceAccess::Read);
-        self.entries.push(id.0);
-
-        id
-    }
-
-    pub fn write<R: GraphResource>(
-        &mut self,
-        resource: GraphResourceId<R>,
-        usage: ResourceUsage,
-    ) -> GraphEntryId<R> {
-        let id = self.add_entry(resource, usage, ResourceAccess::Write);
-        self.entries.push(id.0);
-        self.refs += 1;
-
-        id
-    }
-
-    fn add_entry<R: GraphResource>(
-        &mut self,
-        resource: GraphResourceId<R>,
-        usage: ResourceUsage,
-        access: ResourceAccess,
-    ) -> GraphEntryId<R> {
-        let id = self.resources.entries.len() as u32;
-        self.resources.entries.push(ResourceEntry {
-            id,
+    ) -> GraphResourceId<R> {
+        self.entries.push(ResourceEntry {
             node: resource.0,
-            access,
+            access: ResourceAccess::Read,
         });
 
         if let ResourceUsage::Binding {
@@ -206,15 +181,43 @@ impl<'a> PassBuilder<'a> {
         } = usage
         {
             self.bindings.push(ResourceBinding {
-                entry: id,
+                node: resource.0,
                 group,
                 binding,
                 visiblitiy,
-                access,
+                access: ResourceAccess::Read,
             });
         }
 
-        GraphEntryId::new(id)
+        resource
+    }
+
+    pub fn write<R: GraphResource>(
+        &mut self,
+        resource: GraphResourceId<R>,
+        usage: ResourceUsage,
+    ) -> GraphResourceId<R> {
+        self.entries.push(ResourceEntry {
+            node: resource.0,
+            access: ResourceAccess::Write,
+        });
+
+        if let ResourceUsage::Binding {
+            group,
+            binding,
+            visiblitiy,
+        } = usage
+        {
+            self.bindings.push(ResourceBinding {
+                node: resource.0,
+                group,
+                binding,
+                visiblitiy,
+                access: ResourceAccess::Write,
+            });
+        }
+
+        resource
     }
 
     fn build<P: GraphPass>(mut self, id: u32) -> PassNode {
@@ -225,8 +228,6 @@ impl<'a> PassBuilder<'a> {
         PassNode {
             id,
             name: P::NAME,
-            refs: self.refs,
-            creates: self.creates.into_boxed_slice(),
             entries: self.entries.into_boxed_slice(),
             bindings: self.bindings.into_boxed_slice(),
             execute: Box::new(execute),
@@ -352,7 +353,6 @@ impl ResourceNode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResourceEntry {
-    id: u32,
     node: u32,
     access: ResourceAccess,
 }
@@ -366,6 +366,10 @@ impl<R: GraphResource> GraphResourceId<R> {
     pub fn get(&self) -> u32 {
         self.0
     }
+
+    pub fn offset(&self, offset: u32) -> Self {
+        Self(self.0 + offset, PhantomData)
+    }
 }
 
 impl<R: GraphResource> Copy for GraphResourceId<R> {}
@@ -375,32 +379,9 @@ impl<R: GraphResource> Clone for GraphResourceId<R> {
     }
 }
 
-pub struct GraphEntryId<R: GraphResource>(u32, PhantomData<R>);
-impl<R: GraphResource> GraphEntryId<R> {
-    fn new(id: u32) -> Self {
-        Self(id, PhantomData)
-    }
-
-    pub fn offset(&self, offset: u32) -> Self {
-        Self::new(self.0 + offset)
-    }
-
-    pub fn get(&self) -> u32 {
-        self.0
-    }
-}
-
-impl<R: GraphResource> Copy for GraphEntryId<R> {}
-impl<R: GraphResource> Clone for GraphEntryId<R> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone(), self.1.clone())
-    }
-}
-
 pub struct GraphResources {
     types: Vec<ResourceType>,
     nodes: Vec<ResourceNode>,
-    entries: Vec<ResourceEntry>,
 
     type_map: HashMap<TypeId, usize>,
     node_map: HashMap<Name, usize>,
@@ -411,10 +392,21 @@ impl GraphResources {
         Self {
             types: Vec::new(),
             nodes: Vec::new(),
-            entries: Vec::new(),
             type_map: HashMap::new(),
             node_map: HashMap::new(),
         }
+    }
+
+    pub fn ty(&self, ty: u32) -> &ResourceType {
+        &self.types[ty as usize]
+    }
+
+    pub fn node(&self, id: u32) -> &ResourceNode {
+        &self.nodes[id as usize]
+    }
+
+    pub fn nodes(&self) -> &[ResourceNode] {
+        &self.nodes
     }
 
     fn create<R: GraphResource>(&mut self, name: Name, desc: R::Desc) -> GraphResourceId<R> {
@@ -445,9 +437,7 @@ impl GraphResources {
 pub struct PassNode {
     id: u32,
     name: Name,
-    refs: u32,
-    creates: Box<[u32]>,
-    entries: Box<[u32]>,
+    entries: Box<[ResourceEntry]>,
     bindings: Box<[ResourceBinding]>,
     execute: Box<dyn Fn(&mut RenderContext) + Send + Sync + 'static>,
 }
@@ -461,11 +451,7 @@ impl PassNode {
         self.name
     }
 
-    pub fn creates(&self) -> &[u32] {
-        &self.creates
-    }
-
-    pub fn entries(&self) -> &[u32] {
+    pub fn entries(&self) -> &[ResourceEntry] {
         &self.entries
     }
 
@@ -515,7 +501,7 @@ impl<'a> RenderContext<'a> {
         self.camera
     }
 
-    pub fn get<R: GraphResource>(&self, id: GraphEntryId<R>) -> &R {
+    pub fn get<R: GraphResource>(&self, id: GraphResourceId<R>) -> &R {
         let id = id.offset(self.resource_offset);
         self.state.allocator.resource(id)
     }
@@ -538,7 +524,7 @@ impl<'a> RenderContext<'a> {
 
 pub struct PassInstance {
     pub node: u32,
-    pub resources: u32,
+    pub cursor: u32,
     pub camera: Option<u32>,
     pub bindings: Box<[PassBindGroup]>,
 }
@@ -640,7 +626,7 @@ impl RenderGraph {
             let mut ctx = RenderContext::new(world, device, state);
             for pass in &state.passes {
                 ctx.camera = pass.camera.map(|i| &state.cameras.slice()[i as usize]);
-                ctx.resource_offset = pass.resources;
+                ctx.resource_offset = pass.cursor;
 
                 let node = &nodes[pass.node as usize];
                 node.execute(&mut ctx);

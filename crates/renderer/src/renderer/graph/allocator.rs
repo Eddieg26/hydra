@@ -1,7 +1,7 @@
 use crate::{
     core::RenderDevice,
     renderer::graph::{
-        BoxData, DynData, GraphEntryId, GraphResource, GraphResources, RenderGraph, ResourceKind,
+        BoxData, DynData, GraphResource, GraphResourceId, GraphResources, RenderGraph, ResourceKind,
     },
     resources::{BindGroupBuilder, BindGroupLayoutBuilder, BindGroupLayoutRegistry, GpuResourceId},
 };
@@ -26,7 +26,7 @@ pub struct GpuAllocationDesc {
     pub id: u32,
     pub node: u32,
     pub kind: ResourceKind,
-    pub last_use: Option<u32>,
+    pub last_user: Option<u32>,
     pub desc: BoxData,
 }
 
@@ -91,7 +91,7 @@ impl GpuResourceAllocator {
         &self.bind_groups
     }
 
-    pub fn resource<R: GraphResource>(&self, id: GraphEntryId<R>) -> &R {
+    pub fn resource<R: GraphResource>(&self, id: GraphResourceId<R>) -> &R {
         let index = self.resources[id.0 as usize];
         self.allocations[index as usize]
             .instance

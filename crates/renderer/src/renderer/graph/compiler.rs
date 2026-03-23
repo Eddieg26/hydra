@@ -22,112 +22,97 @@ impl RenderGraphCompiler {
         settings: &RenderSettings,
         cameras: &CameraQueue,
     ) -> CompiledRenderGraph {
-        let mut resources = vec![0u32; graph.resources.nodes.len()];
-        let mut layouts = IndexSet::<Vec<BindGroupLayoutEntry>>::new();
-        let mut bind_groups = IndexSet::<BindGroupKey>::new();
+        let (passes, mut resources) = Self::expand(world, graph, settings, cameras);
 
-        let (passes, versions) = Self::expand(world, settings, graph, cameras, &mut resources);
+        let passes = Self::cull(passes, &mut resources);
 
-        let passes = Self::cull(passes, &mut resources, &versions);
+        let (allocations, resources) = Self::allocate(graph, resources);
 
-        let (allocations, table) = Self::allocate(graph, &resources, versions);
-
-        let instances = passes.iter().map(|pass| {
-            let bindings = Self::get_bindings(
-                graph,
-                settings,
-                pass,
-                &table,
-                &allocations,
-                &mut layouts,
-                &mut bind_groups,
-            );
-            PassInstance {
-                node: pass.node,
-                resources: pass.resources,
-                camera: pass.camera,
-                bindings: bindings.into_boxed_slice(),
-            }
-        });
+        let (passes, layouts, bind_groups) =
+            Self::bindings(graph, settings, passes, &resources, &allocations);
 
         CompiledRenderGraph {
-            passes: instances.collect(),
-            resources: table.into_boxed_slice(),
+            passes: passes.into_boxed_slice(),
+            resources: resources.into_boxed_slice(),
             allocations,
             bind_group_layouts: layouts,
             bind_groups,
         }
     }
 
-    fn expand(
+    /// Expand render graph by instantiating camera passes.
+    pub fn expand(
         world: &World,
-        settings: &RenderSettings,
         graph: &RenderGraph,
+        settings: &RenderSettings,
         cameras: &CameraQueue,
-        resources: &mut [u32],
-    ) -> (Vec<PassRef>, Vec<ResourceVersion>) {
-        let mut passes = Vec::new();
-        let mut versions = Vec::new();
+    ) -> (Vec<PassRef>, Vec<ResourceRef>) {
+        let mut passes = Vec::with_capacity(cameras.slice().len() * graph.nodes.len());
+        let mut resources =
+            Vec::<ResourceRef>::with_capacity(passes.len() * graph.resources().nodes().len());
+
         for index in 0..cameras.slice().len() {
             let camera = &cameras.slice()[index];
-            let offset = versions.len() as u32;
             let mut resolver = ResourceResolver::new(world, Some(camera));
+            let cursor = resources.len() as u32;
 
             for pass in &graph.nodes {
-                let pass_id = passes.len() as u32;
+                let id = passes.len() as u32;
                 let mut reads = Vec::new();
+                let mut ref_count = 0;
 
-                for index in pass.entries() {
-                    let version = versions.len() as u32;
-                    let entry = graph.resources.entries[*index as usize];
-                    let node = &graph.resources.nodes[entry.node as usize];
-                    let ty = &graph.resources.types[node.ty as usize];
+                for entry in pass.entries() {
+                    let resource = entry.node + cursor;
 
-                    resolver.resource = node.id;
-
-                    let desc = ty.resolve(world, settings, &mut resolver, ty.clone(&node.desc));
-                    let (producer, user) = match entry.access {
-                        ResourceAccess::Read => {
-                            resources[node.id as usize] += 1;
-                            reads.push(version);
-                            (None, Some(pass_id))
+                    match entry.access {
+                        ResourceAccess::Create => {
+                            let node = graph.resources().node(entry.node);
+                            let ty = graph.resources().ty(node.ty);
+                            let desc =
+                                ty.resolve(world, settings, &mut resolver, ty.clone(&node.desc));
+                            resources.push(ResourceRef {
+                                id: resources.len() as u32,
+                                node: node.id,
+                                ref_count: 0,
+                                producer: Some(id),
+                                first_user: None,
+                                last_user: None,
+                                desc,
+                            });
                         }
-                        ResourceAccess::Write => (Some(pass_id), Some(pass_id)),
-                    };
-
-                    versions.push(ResourceVersion {
-                        id: version,
-                        node: node.id,
-                        producer,
-                        user,
-                        desc,
-                    });
+                        ResourceAccess::Read => {
+                            reads.push(resource);
+                            resources[resource as usize].read(id);
+                        }
+                        ResourceAccess::Write => {
+                            ref_count += 1;
+                            resources[resource as usize].write(id);
+                        }
+                    }
                 }
 
                 passes.push(PassRef {
                     node: pass.id,
-                    resources: offset,
                     camera: Some(index as u32),
+                    ref_count,
+                    cursor,
                     reads,
-                    ref_count: pass.refs,
                 });
             }
         }
 
-        (passes, versions)
+        (passes, resources)
     }
 
-    fn cull(
-        mut passes: Vec<PassRef>,
-        resources: &mut [u32],
-        versions: &[ResourceVersion],
-    ) -> Vec<PassRef> {
-        let mut dead_versions = (0..versions.len())
-            .filter(|i| resources[versions[*i].node as usize] == 0)
+    /// Cull unused passes and resources.
+    fn cull(mut passes: Vec<PassRef>, resources: &mut [ResourceRef]) -> Vec<PassRef> {
+        let mut dead_resources = resources
+            .iter()
+            .filter_map(|r| (r.ref_count == 0).then_some(r.id))
             .collect::<VecDeque<_>>();
 
-        while let Some(version) = dead_versions.pop_front() {
-            let Some(producer) = versions[version].producer else {
+        while let Some(resource) = dead_resources.pop_front() {
+            let Some(producer) = resources[resource as usize].producer else {
                 continue;
             };
 
@@ -141,62 +126,53 @@ impl RenderGraphCompiler {
                 continue;
             }
 
-            let mut unused = Vec::new();
             for index in &pass.reads {
-                let version = &versions[*index as usize];
-                resources[version.node as usize] -= 1;
-                if resources[version.node as usize] == 0 {
-                    unused.push(version.node);
+                let resource = &mut resources[*index as usize];
+                resource.ref_count -= 1;
+                if resource.ref_count == 0 {
+                    dead_resources.push_back(*index);
                 }
             }
-
-            dead_versions.extend(
-                versions
-                    .iter()
-                    .filter(|v| unused.contains(&v.node))
-                    .map(|v| v.id as usize),
-            );
         }
 
         passes.retain(|p| p.ref_count > 0);
         passes
     }
 
+    /// Allocate GPU resources.
     fn allocate(
         graph: &RenderGraph,
-        resources: &[u32],
-        mut versions: Vec<ResourceVersion>,
+        mut resources: Vec<ResourceRef>,
     ) -> (Vec<GpuAllocationDesc>, Vec<u32>) {
-        let mut allocations = Vec::<GpuAllocationDesc>::new();
-        let mut table = vec![0u32; versions.len()];
+        let mut allocations = Vec::<GpuAllocationDesc>::with_capacity(resources.len());
+        let mut table = vec![0; resources.len()];
 
-        versions.retain(|v| resources[v.node as usize] > 0);
-        versions.sort_by(|a, b| a.user.cmp(&b.user));
+        resources.retain(|r| r.ref_count > 0);
+        resources.sort_by(|a, b| a.first_user.cmp(&b.first_user));
 
-        for version in versions {
+        for resource in resources {
+            let node = graph.resources().node(resource.node);
+            let ty = graph.resources().ty(node.ty);
+
             if let Some(index) = allocations.iter().position(|alloc| {
-                let node = &graph.resources.nodes[alloc.node as usize];
-                let version_node = &graph.resources.nodes[version.node as usize];
-                let ty = &graph.resources.types[node.ty as usize];
-
-                version.user.cmp(&alloc.last_use) == core::cmp::Ordering::Greater
-                    && version_node.ty == node.ty
-                    && version_node.kind == node.kind
-                    && ty.compatible(&version.desc, &alloc.desc)
+                let other_node = graph.resources().node(alloc.node);
+                alloc.last_user.cmp(&resource.first_user) == core::cmp::Ordering::Greater
+                    && other_node.ty == node.ty
+                    && other_node.kind == node.kind
+                    && ty.compatible(&resource.desc, &alloc.desc)
             }) {
-                allocations[index].last_use = version.user;
-                table[version.id as usize] = index as u32;
+                allocations[index].last_user = resource.last_user;
+                table[resource.id as usize] = index as u32;
             } else {
                 let id = allocations.len() as u32;
-                let node = &graph.resources.nodes[version.node as usize];
-                table[version.id as usize] = id;
 
+                table[resource.id as usize] = id;
                 allocations.push(GpuAllocationDesc {
-                    id,
+                    id: id as u32,
                     node: node.id,
                     kind: node.kind,
-                    last_use: version.user,
-                    desc: version.desc,
+                    last_user: resource.last_user,
+                    desc: resource.desc,
                 });
             }
         }
@@ -204,46 +180,64 @@ impl RenderGraphCompiler {
         (allocations, table)
     }
 
-    fn get_bindings(
+    /// Build bind groups for each pass.
+    fn bindings(
         graph: &RenderGraph,
         settings: &RenderSettings,
-        pass: &PassRef,
+        passes: Vec<PassRef>,
         resources: &[u32],
         allocations: &[GpuAllocationDesc],
-        layouts: &mut IndexSet<Vec<BindGroupLayoutEntry>>,
-        bind_groups: &mut IndexSet<BindGroupKey>,
-    ) -> Vec<PassBindGroup> {
-        let mut groups = HashMap::new();
-        for binding in &graph.nodes[pass.node as usize].bindings {
-            let entry = graph.resources.entries[binding.entry as usize];
-            let node = &graph.resources.nodes[entry.node as usize];
-            let ty = &graph.resources.types[node.ty as usize];
-            let alloc = resources[(pass.resources + entry.id) as usize];
-            let desc = &allocations[alloc as usize].desc;
-            let group = groups
-                .entry(binding.group)
-                .or_insert_with(|| ResourceGroup::new(binding.group));
+    ) -> (
+        Vec<PassInstance>,
+        IndexSet<Vec<BindGroupLayoutEntry>>,
+        IndexSet<BindGroupKey>,
+    ) {
+        let mut instances = Vec::with_capacity(passes.len());
+        let mut layouts = IndexSet::new();
+        let mut bind_groups = IndexSet::new();
 
-            group.allocations.push(alloc);
-            ty.entry(settings, desc, &mut group.builder, binding.visiblitiy);
+        for pass in passes {
+            let mut groups = HashMap::new();
+            for binding in &graph.nodes[pass.node as usize].bindings {
+                let resource = pass.cursor + binding.node;
+                let alloc = resources[resource as usize];
+                let node = &graph.resources.nodes[binding.node as usize];
+                let ty = &graph.resources.types[node.ty as usize];
+                let desc = &allocations[alloc as usize].desc;
+                let group = groups
+                    .entry(binding.group)
+                    .or_insert_with(|| ResourceGroup::new(binding.group));
+
+                group.allocations.push(alloc);
+                ty.entry(settings, desc, &mut group.builder, binding.visiblitiy);
+            }
+
+            let mut groups = groups.into_values().collect::<Vec<_>>();
+            groups.sort_by(|a, b| a.group.cmp(&b.group));
+
+            let bindings = groups
+                .drain(..)
+                .map(|group| {
+                    let (layout, _) = layouts.insert_full(group.builder.entries);
+                    let allocations = group.allocations.into_boxed_slice();
+                    let (bind_group, _) =
+                        bind_groups.insert_full(BindGroupKey::new(layout as u32, allocations));
+                    PassBindGroup {
+                        layout: layout as u32,
+                        bind_group: bind_group as u32,
+                    }
+                })
+                .collect();
+
+            instances.push(PassInstance {
+                node: pass.node,
+                cursor: pass.cursor,
+                camera: pass.camera,
+                bindings,
+            });
         }
 
-        let mut groups = groups.into_values().collect::<Vec<_>>();
-        groups.sort_by(|a, b| a.group.cmp(&b.group));
-
-        groups
-            .drain(..)
-            .map(|group| {
-                let (layout, _) = layouts.insert_full(group.builder.entries);
-                let allocations = group.allocations.into_boxed_slice();
-                let (bind_group, _) =
-                    bind_groups.insert_full(BindGroupKey::new(layout as u32, allocations));
-                PassBindGroup {
-                    layout: layout as u32,
-                    bind_group: bind_group as u32,
-                }
-            })
-            .collect()
+        (instances, layouts, bind_groups)
     }
 }
 
@@ -251,16 +245,33 @@ pub struct PassRef {
     node: u32,
     camera: Option<u32>,
     ref_count: u32,
-    resources: u32,
+    cursor: u32,
     reads: Vec<u32>,
 }
 
-pub struct ResourceVersion {
+pub struct ResourceRef {
     id: u32,
     node: u32,
+    ref_count: u32,
     producer: Option<u32>,
-    user: Option<u32>,
+    first_user: Option<u32>,
+    last_user: Option<u32>,
     desc: BoxData,
+}
+
+impl ResourceRef {
+    pub fn read(&mut self, pass: u32) {
+        self.first_user.get_or_insert(pass);
+        self.last_user = Some(pass);
+        self.ref_count += 1;
+    }
+
+    pub fn write(&mut self, pass: u32) {
+        self.producer = Some(pass);
+        self.first_user.get_or_insert(pass);
+        self.last_user = Some(pass);
+        self.ref_count += 1;
+    }
 }
 
 pub struct ResourceGroup {
