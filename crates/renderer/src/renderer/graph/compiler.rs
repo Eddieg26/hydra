@@ -71,8 +71,8 @@ impl RenderGraphCompiler {
     ) -> (Vec<PassRef>, Vec<ResourceRef>, Vec<u32>) {
         let mut passes = Vec::with_capacity(cameras.slice().len() * graph.nodes.len());
         let mut resources =
-            Vec::<ResourceRef>::with_capacity(passes.len() * graph.resources().nodes().len());
-        let mut table = vec![0; resources.len()];
+            Vec::<ResourceRef>::with_capacity(passes.capacity() * graph.resources().nodes().len());
+        let mut table = vec![0; resources.capacity()];
 
         for index in 0..cameras.slice().len() {
             let camera = &cameras.slice()[index];
@@ -99,10 +99,10 @@ impl RenderGraphCompiler {
                                 ty.resolve(world, settings, &mut resolver, ty.clone(&node.desc));
 
                             if let Some(index) = resources.iter().position(|r| {
-                                let node = graph.resources().node(r.node);
-                                let ty = graph.resources().ty(node.ty);
+                                let other_node = graph.resources().node(r.node);
+                                let ty = graph.resources().ty(other_node.ty);
 
-                                ty.compatible(&desc, &r.desc)
+                                other_node.ty == node.ty && ty.compatible(&desc, &r.desc)
                             }) {
                                 table[resource as usize] = index as u32;
                             } else {
@@ -172,7 +172,7 @@ impl RenderGraphCompiler {
                 let resource = &mut resources[table[*index as usize] as usize];
                 resource.ref_count -= 1;
                 if resource.ref_count == 0 {
-                    dead_resources.push_back(*index);
+                    dead_resources.push_back(resource.id);
                 }
             }
         }
@@ -198,7 +198,7 @@ impl RenderGraphCompiler {
 
             if let Some(index) = allocations.iter().position(|alloc| {
                 let other_node = graph.resources().node(alloc.node);
-                alloc.last_user.cmp(&resource.first_user) == core::cmp::Ordering::Greater
+                alloc.last_user.cmp(&resource.first_user) == core::cmp::Ordering::Less
                     && other_node.ty == node.ty
                     && other_node.kind == node.kind
                     && ty.compatible(&resource.desc, &alloc.desc)

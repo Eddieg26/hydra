@@ -699,7 +699,7 @@ impl Condition for RenderGraphDirty {
         let cameras = world.resource::<CameraQueue>();
         !graph
             .state()
-            .is_some_and(|state| &state.settings == settings && &state.cameras != cameras)
+            .is_some_and(|state| &state.settings == settings && &state.cameras == cameras)
     }
 }
 
