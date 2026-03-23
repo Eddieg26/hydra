@@ -218,8 +218,7 @@ impl RenderAssetRegistry {
         let asset = self.register::<R>();
         let dependency = self.register::<Dep>();
 
-        self.configs[asset].dependencies.grow(dependency + 1);
-        self.configs[asset].dependencies.set(dependency, true);
+        self.configs[asset].dependencies.grow_and_insert(dependency + 1);
     }
 
     pub fn build(self) -> Vec<RenderAssetConfig> {

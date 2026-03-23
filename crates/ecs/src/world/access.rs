@@ -60,8 +60,7 @@ impl<I: SparseIndex> Access<I> {
     }
 
     pub fn read(&mut self, bit: I) -> bool {
-        self.read.grow(bit.to_usize() + 1);
-        self.read.set(bit.to_usize(), true);
+        self.read.grow_and_insert(bit.to_usize() + 1);
 
         self.read[bit.to_usize()] && !self.write[bit.to_usize()]
     }
@@ -147,15 +146,13 @@ impl ArchetypeAccess {
 
     pub fn read(&mut self, component: ComponentId) -> ComponentId {
         self.access.read(component);
-        self.includes.grow(component.to_usize() + 1);
-        self.includes.set(component.to_usize(), true);
+        self.includes.grow_and_insert(component.to_usize() + 1);
         component
     }
 
     pub fn write(&mut self, component: ComponentId) -> ComponentId {
         self.access.write(component);
-        self.includes.grow(component.to_usize() + 1);
-        self.includes.set(component.to_usize(), true);
+        self.includes.grow_and_insert(component.to_usize() + 1);
         component
     }
 
@@ -170,14 +167,12 @@ impl ArchetypeAccess {
     }
 
     pub fn include(&mut self, component: ComponentId) -> ComponentId {
-        self.includes.grow(component.to_usize() + 1);
-        self.includes.set(component.to_usize(), true);
+        self.includes.grow_and_insert(component.to_usize() + 1);
         component
     }
 
     pub fn exclude(&mut self, component: ComponentId) -> ComponentId {
-        self.excludes.grow(component.to_usize() + 1);
-        self.excludes.set(component.to_usize(), true);
+        self.excludes.grow_and_insert(component.to_usize() + 1);
         component
     }
 
