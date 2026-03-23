@@ -3,13 +3,13 @@ use crate::{
     renderer::{
         camera::CameraQueue,
         graph::{
-            BoxData, PassInstance, RenderGraph, ResourceAccess, ResourceResolver,
+            BoxData, PassId, PassInstance, RenderGraph, ResourceAccess, ResourceResolver,
             allocator::{BindGroupKey, GpuAllocationDesc, PassBindGroup},
         },
     },
     resources::BindGroupLayoutBuilder,
 };
-use ecs::{IndexSet, World};
+use ecs::{IndexDag, IndexSet, World, core::ImmutableIndexDag};
 use std::collections::{HashMap, VecDeque};
 use wgpu::BindGroupLayoutEntry;
 
@@ -22,7 +22,10 @@ impl RenderGraphCompiler {
         settings: &RenderSettings,
         cameras: &CameraQueue,
     ) -> CompiledRenderGraph {
-        let (passes, mut resources, ref_table) = Self::expand(world, graph, settings, cameras);
+        let sorted = Self::sort(graph);
+
+        let (passes, mut resources, ref_table) =
+            Self::expand(world, graph, settings, cameras, sorted);
 
         let passes = Self::cull(passes, &mut resources, &ref_table);
 
@@ -46,12 +49,25 @@ impl RenderGraphCompiler {
         }
     }
 
+    fn sort(graph: &RenderGraph) -> ImmutableIndexDag<PassId> {
+        let mut dag = IndexDag::new();
+        for pass in &graph.nodes {
+            let node = dag.add_node(pass.id);
+            for dependency in pass.dependencies().0.ones() {
+                dag.add_dependency(dependency, node);
+            }
+        }
+
+        dag.build_immutable().unwrap()
+    }
+
     /// Expand render graph by instantiating camera passes.
-    pub fn expand(
+    fn expand(
         world: &World,
         graph: &RenderGraph,
         settings: &RenderSettings,
         cameras: &CameraQueue,
+        sorted: ImmutableIndexDag<PassId>,
     ) -> (Vec<PassRef>, Vec<ResourceRef>, Vec<u32>) {
         let mut passes = Vec::with_capacity(cameras.slice().len() * graph.nodes.len());
         let mut resources =
@@ -63,11 +79,11 @@ impl RenderGraphCompiler {
             let mut resolver = ResourceResolver::new(world, Some(camera));
             let cursor = resources.len() as u32;
 
-            for pass in graph
-                .nodes
+            for pass in sorted
                 .iter()
-                .filter(|p| !camera.mask.as_ref().is_some_and(|mask| mask.get(p.id)))
+                .filter(|p| !camera.mask.as_ref().is_some_and(|mask| mask.get(**p)))
             {
+                let pass = &graph.nodes[pass.0 as usize];
                 let id = passes.len() as u32;
                 let mut reads = Vec::new();
                 let mut ref_count = 0;
@@ -288,15 +304,34 @@ pub struct ResourceRef {
 
 impl ResourceRef {
     pub fn read(&mut self, pass: u32) {
-        self.first_user.get_or_insert(pass);
-        self.last_user = Some(pass);
+        self.first_user = match self.first_user {
+            Some(first) => Some(first.min(pass)),
+            None => Some(pass),
+        };
+
+        self.last_user = match self.last_user {
+            Some(last) => Some(last.max(pass)),
+            None => Some(pass),
+        };
+
         self.ref_count += 1;
     }
 
     pub fn write(&mut self, pass: u32) {
-        self.producer = Some(pass);
-        self.first_user.get_or_insert(pass);
-        self.last_user = Some(pass);
+        self.producer = match self.producer {
+            Some(first) => Some(first.min(pass)),
+            None => Some(pass),
+        };
+
+        self.first_user = match self.first_user {
+            Some(first) => Some(first.min(pass)),
+            None => Some(pass),
+        };
+
+        self.last_user = match self.last_user {
+            Some(last) => Some(last.max(pass)),
+            None => Some(pass),
+        };
     }
 }
 

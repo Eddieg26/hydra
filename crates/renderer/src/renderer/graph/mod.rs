@@ -230,6 +230,7 @@ impl<'a> PassBuilder<'a> {
             name: P::NAME,
             entries: self.entries.into_boxed_slice(),
             bindings: self.bindings.into_boxed_slice(),
+            dependencies: RenderGraphMask::new(id as usize),
             execute: Box::new(execute),
         }
     }
@@ -449,6 +450,7 @@ pub struct PassNode {
     name: Name,
     entries: Box<[ResourceEntry]>,
     bindings: Box<[ResourceBinding]>,
+    dependencies: RenderGraphMask,
     execute: Box<dyn Fn(&mut RenderContext) + Send + Sync + 'static>,
 }
 
@@ -467,6 +469,10 @@ impl PassNode {
 
     pub fn bindings(&self) -> &[ResourceBinding] {
         &self.bindings
+    }
+
+    pub fn dependencies(&self) -> &RenderGraphMask {
+        &self.dependencies
     }
 
     pub fn execute(&self, ctx: &mut RenderContext) {
@@ -588,16 +594,37 @@ pub struct RenderGraph {
 }
 
 impl RenderGraph {
-    pub fn add_pass<P: GraphPass>(&mut self) {
+    pub fn add_pass<P: GraphPass>(&mut self) -> PassId {
         let ty = TypeId::of::<P>();
 
-        if !self.node_map.contains_key(&ty) {
+        if let Some(id) = self.node_map.get(&ty) {
+            PassId(*id as u32)
+        } else {
             let id = self.nodes.len();
             let node = PassBuilder::new(&mut self.resources).build::<P>(id as u32);
 
             self.nodes.push(node);
             self.node_map.insert(ty, id);
+            PassId(id as u32)
         }
+    }
+
+    pub fn add_before<P: GraphPass>(&mut self, target: PassId) -> PassId {
+        let id = self.add_pass::<P>();
+
+        let target = &mut self.nodes[target.0 as usize];
+        target.dependencies.set(id, true);
+
+        id
+    }
+
+    pub fn add_after<P: GraphPass>(&mut self, target: PassId) -> PassId {
+        let id = self.add_pass::<P>();
+
+        let pass = &mut self.nodes[id.0 as usize];
+        pass.dependencies.set(target, true);
+
+        id
     }
 
     pub fn resources(&self) -> &GraphResources {
