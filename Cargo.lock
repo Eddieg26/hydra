@@ -2075,6 +2075,8 @@ dependencies = [
  "encase",
  "math",
  "offset-allocator",
+ "quickcheck",
+ "quickcheck_macros",
  "serde",
  "smol",
  "transform",

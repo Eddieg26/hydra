@@ -358,3 +358,221 @@ pub struct CompiledRenderGraph {
     pub bind_group_layouts: IndexSet<Vec<BindGroupLayoutEntry>>,
     pub bind_groups: IndexSet<BindGroupKey>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        core::{ColorFormat, RenderSettings},
+        renderer::{
+            camera::{CameraQueue, CameraSettings, SettingState},
+            graph::{
+                GraphPass, GraphResource, Name, PassBuilder, RenderContext, RenderGraphMask,
+                ResourceKind, ResourceUsage, RenderGraph,
+            },
+        },
+        resources::{BindGroupBuilder, BindGroupLayoutBuilder},
+    };
+    use ecs::{Entity, World};
+    use wgpu::ShaderStages;
+
+    // ── Mock Resources ──────────────────────────────────────────────────
+
+    struct MockResource;
+
+    impl GraphResource for MockResource {
+        type Desc = u32;
+
+        fn resolve(
+            _world: &World,
+            _settings: &RenderSettings,
+            _resolver: &mut crate::renderer::graph::ResourceResolver,
+            desc: u32,
+        ) -> u32 {
+            desc
+        }
+
+        fn create(
+            _device: &crate::core::RenderDevice,
+            _name: Name,
+            _desc: &u32,
+        ) -> Self {
+            MockResource
+        }
+
+        fn entry(
+            _settings: &RenderSettings,
+            _desc: &u32,
+            _builder: &mut BindGroupLayoutBuilder,
+            _visibility: ShaderStages,
+        ) {
+        }
+
+        fn bind<'a>(&'a self, _builder: &mut BindGroupBuilder<'a>) {}
+
+        fn compatible(a: &u32, b: &u32) -> bool {
+            a == b
+        }
+
+        fn generation(&self) -> u32 {
+            0
+        }
+
+        fn kind() -> ResourceKind {
+            ResourceKind::Transient
+        }
+    }
+
+    struct MockResourceB;
+
+    impl GraphResource for MockResourceB {
+        type Desc = u32;
+
+        fn resolve(
+            _world: &World,
+            _settings: &RenderSettings,
+            _resolver: &mut crate::renderer::graph::ResourceResolver,
+            desc: u32,
+        ) -> u32 {
+            desc
+        }
+
+        fn create(
+            _device: &crate::core::RenderDevice,
+            _name: Name,
+            _desc: &u32,
+        ) -> Self {
+            MockResourceB
+        }
+
+        fn entry(
+            _settings: &RenderSettings,
+            _desc: &u32,
+            _builder: &mut BindGroupLayoutBuilder,
+            _visibility: ShaderStages,
+        ) {
+        }
+
+        fn bind<'a>(&'a self, _builder: &mut BindGroupBuilder<'a>) {}
+
+        fn compatible(a: &u32, b: &u32) -> bool {
+            a == b
+        }
+
+        fn generation(&self) -> u32 {
+            0
+        }
+
+        fn kind() -> ResourceKind {
+            ResourceKind::Transient
+        }
+    }
+
+    struct MockResourceImported;
+
+    impl GraphResource for MockResourceImported {
+        type Desc = u32;
+
+        fn resolve(
+            _world: &World,
+            _settings: &RenderSettings,
+            _resolver: &mut crate::renderer::graph::ResourceResolver,
+            desc: u32,
+        ) -> u32 {
+            desc
+        }
+
+        fn create(
+            _device: &crate::core::RenderDevice,
+            _name: Name,
+            _desc: &u32,
+        ) -> Self {
+            MockResourceImported
+        }
+
+        fn entry(
+            _settings: &RenderSettings,
+            _desc: &u32,
+            _builder: &mut BindGroupLayoutBuilder,
+            _visibility: ShaderStages,
+        ) {
+        }
+
+        fn bind<'a>(&'a self, _builder: &mut BindGroupBuilder<'a>) {}
+
+        fn compatible(a: &u32, b: &u32) -> bool {
+            a == b
+        }
+
+        fn generation(&self) -> u32 {
+            0
+        }
+
+        fn kind() -> ResourceKind {
+            ResourceKind::Imported
+        }
+    }
+
+    // ── Mock Passes ─────────────────────────────────────────────────────
+
+    struct PassA;
+    impl GraphPass for PassA {
+        const NAME: Name = "pass_a";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let _res = builder.create::<MockResource>("res_a", 1024);
+            move |_ctx| {}
+        }
+    }
+
+    struct PassB;
+    impl GraphPass for PassB {
+        const NAME: Name = "pass_b";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            move |_ctx| {}
+        }
+    }
+
+    struct PassC;
+    impl GraphPass for PassC {
+        const NAME: Name = "pass_c";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            move |_ctx| {}
+        }
+    }
+
+    struct PassD;
+    impl GraphPass for PassD {
+        const NAME: Name = "pass_d";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            move |_ctx| {}
+        }
+    }
+
+    // ── Helper Functions ────────────────────────────────────────────────
+
+    fn make_camera(mask: Option<RenderGraphMask>) -> CameraSettings {
+        CameraSettings {
+            entity: Entity::new(0, 0),
+            priority: 0,
+            target: None,
+            msaa: SettingState::Auto,
+            width: 1920,
+            height: 1080,
+            format: ColorFormat::Standard { srgb: false },
+            mask,
+            generation: 1,
+        }
+    }
+
+    fn make_camera_queue(cameras: Vec<CameraSettings>) -> CameraQueue {
+        CameraQueue::from(cameras)
+    }
+
+    fn default_settings() -> RenderSettings {
+        RenderSettings::default()
+    }
+
+    fn default_world() -> World {
+        World::default()
+    }
+}

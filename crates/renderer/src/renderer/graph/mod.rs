@@ -594,6 +594,15 @@ pub struct RenderGraph {
 }
 
 impl RenderGraph {
+    pub fn new() -> Self {
+        Self {
+            resources: GraphResources::new(),
+            nodes: Vec::new(),
+            node_map: HashMap::new(),
+            state: None,
+        }
+    }
+
     pub fn add_pass<P: GraphPass>(&mut self) -> PassId {
         let ty = TypeId::of::<P>();
 

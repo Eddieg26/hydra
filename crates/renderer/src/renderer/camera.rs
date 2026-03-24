@@ -114,6 +114,12 @@ impl From<CameraQueue> for Vec<CameraSettings> {
     }
 }
 
+impl From<Vec<CameraSettings>> for CameraQueue {
+    fn from(value: Vec<CameraSettings>) -> Self {
+        Self(value)
+    }
+}
+
 impl CameraQueue {
     pub(crate) fn queue(
         cameras: Query<(Entity, &Camera, Option<&RenderGraphMask>)>,
