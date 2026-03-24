@@ -527,7 +527,7 @@ mod tests {
     struct PassB;
     impl GraphPass for PassB {
         const NAME: Name = "pass_b";
-        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+        fn setup(_builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
             move |_ctx| {}
         }
     }
@@ -535,7 +535,7 @@ mod tests {
     struct PassC;
     impl GraphPass for PassC {
         const NAME: Name = "pass_c";
-        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+        fn setup(_builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
             move |_ctx| {}
         }
     }
@@ -543,7 +543,7 @@ mod tests {
     struct PassD;
     impl GraphPass for PassD {
         const NAME: Name = "pass_d";
-        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+        fn setup(_builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
             move |_ctx| {}
         }
     }
