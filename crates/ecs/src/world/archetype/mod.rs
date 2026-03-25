@@ -438,7 +438,7 @@ impl Archetypes {
                 let mut bits = self.archetypes[current.to_usize()].bitset.clone();
                 match edge {
                     ArchetypeEdgeId::Component(id) => {
-                        bits.grow_and_insert(id.to_usize() + 1);
+                        bits.grow_and_insert(id.to_usize());
                     }
                     ArchetypeEdgeId::Kit(id) => {
                         bits.union_with(&self.components.kits()[id.to_usize()])
@@ -566,11 +566,11 @@ impl ArchetypeQuery {
     }
 
     pub fn include(&mut self, component: ComponentId) {
-        self.included.grow_and_insert(component.to_usize() + 1);
+        self.included.grow_and_insert(component.to_usize());
     }
 
     pub fn exclude(&mut self, component: ComponentId) {
-        self.excluded.grow_and_insert(component.to_usize() + 1);
+        self.excluded.grow_and_insert(component.to_usize());
     }
 }
 

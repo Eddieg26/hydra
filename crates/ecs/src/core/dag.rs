@@ -55,7 +55,7 @@ impl<N> IndexDag<N> {
 
     pub fn add_dependency(&mut self, dependency: usize, index: usize) {
         self.dependencies[index] += 1;
-        self.dependents[dependency].grow_and_insert(index + 1);
+        self.dependents[dependency].grow_and_insert(index);
     }
 
     pub fn remove_dependency(&mut self, dependency: usize, index: usize) -> bool {

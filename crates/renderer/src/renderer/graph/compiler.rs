@@ -107,10 +107,11 @@ impl RenderGraphCompiler {
                                 table[resource as usize] = index as u32;
                             } else {
                                 table[resource as usize] = resources.len() as u32;
+                                let ref_count = if ty.root() { 1 } else { 0 };
                                 resources.push(ResourceRef {
                                     id: resources.len() as u32,
                                     node: node.id,
-                                    ref_count: 0,
+                                    ref_count,
                                     producer: Some(id),
                                     first_user: None,
                                     last_user: None,
@@ -367,8 +368,8 @@ mod tests {
         renderer::{
             camera::{CameraQueue, CameraSettings, SettingState},
             graph::{
-                GraphPass, GraphResource, Name, PassBuilder, RenderContext, RenderGraphMask,
-                ResourceKind, ResourceUsage, RenderGraph,
+                GraphPass, GraphResource, Name, PassBuilder, RenderContext, RenderGraph,
+                RenderGraphMask, ResourceKind, ResourceUsage,
             },
         },
         resources::{BindGroupBuilder, BindGroupLayoutBuilder},
@@ -392,11 +393,7 @@ mod tests {
             desc
         }
 
-        fn create(
-            _device: &crate::core::RenderDevice,
-            _name: Name,
-            _desc: &u32,
-        ) -> Self {
+        fn create(_device: &crate::core::RenderDevice, _name: Name, _desc: &u32) -> Self {
             MockResource
         }
 
@@ -437,11 +434,7 @@ mod tests {
             desc
         }
 
-        fn create(
-            _device: &crate::core::RenderDevice,
-            _name: Name,
-            _desc: &u32,
-        ) -> Self {
+        fn create(_device: &crate::core::RenderDevice, _name: Name, _desc: &u32) -> Self {
             MockResourceB
         }
 
@@ -482,11 +475,7 @@ mod tests {
             desc
         }
 
-        fn create(
-            _device: &crate::core::RenderDevice,
-            _name: Name,
-            _desc: &u32,
-        ) -> Self {
+        fn create(_device: &crate::core::RenderDevice, _name: Name, _desc: &u32) -> Self {
             MockResourceImported
         }
 
@@ -527,7 +516,9 @@ mod tests {
     struct PassB;
     impl GraphPass for PassB {
         const NAME: Name = "pass_b";
-        fn setup(_builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+        fn setup(
+            _builder: &mut PassBuilder,
+        ) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
             move |_ctx| {}
         }
     }
@@ -535,7 +526,9 @@ mod tests {
     struct PassC;
     impl GraphPass for PassC {
         const NAME: Name = "pass_c";
-        fn setup(_builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+        fn setup(
+            _builder: &mut PassBuilder,
+        ) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
             move |_ctx| {}
         }
     }
@@ -543,7 +536,9 @@ mod tests {
     struct PassD;
     impl GraphPass for PassD {
         const NAME: Name = "pass_d";
-        fn setup(_builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+        fn setup(
+            _builder: &mut PassBuilder,
+        ) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
             move |_ctx| {}
         }
     }
@@ -574,5 +569,157 @@ mod tests {
 
     fn default_world() -> World {
         World::default()
+    }
+
+    // ── Diamond Test Passes ─────────────────────────────────────────────
+    // Each pass creates (deduped) and writes "res_diamond" so it survives
+    // culling. B, C, D also read it so the resource stays alive.
+
+    struct DiamondA;
+    impl GraphPass for DiamondA {
+        const NAME: Name = "diamond_a";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("res_diamond", 1024);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct DiamondB;
+    impl GraphPass for DiamondB {
+        const NAME: Name = "diamond_b";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("res_diamond", 1024);
+            builder.read::<MockResource>(res, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct DiamondC;
+    impl GraphPass for DiamondC {
+        const NAME: Name = "diamond_c";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("res_diamond", 1024);
+            builder.read::<MockResource>(res, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct DiamondD;
+    impl GraphPass for DiamondD {
+        const NAME: Name = "diamond_d";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("res_diamond", 1024);
+            builder.read::<MockResource>(res, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    // ── Single Pass Test Pass ───────────────────────────────────────────
+    // Creates, reads, and writes a resource so it survives culling alone.
+
+    struct SinglePass;
+    impl GraphPass for SinglePass {
+        const NAME: Name = "single_pass";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("res_single", 512);
+            builder.read::<MockResource>(res, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    // ── Sort Stage Tests ────────────────────────────────────────────────
+
+    #[test]
+    fn diamond_dependency_ordering() {
+        // Build diamond: A → B, A → C, B → D, C → D
+        let mut graph = RenderGraph::new();
+        let a = graph.add_pass::<DiamondA>();
+        let b = graph.add_after::<DiamondB>(a); // B depends on A
+        let c = graph.add_after::<DiamondC>(a); // C depends on A
+        graph.add_after::<DiamondD>(b); // D depends on B
+        graph.add_after::<DiamondD>(c); // D also depends on C (same PassId, adds dep)
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        // All 4 passes should survive culling
+        assert_eq!(compiled.passes.len(), 4, "expected 4 pass instances");
+
+        // Map node ids to positions in the compiled output
+        let pos = |node: u32| -> usize {
+            compiled
+                .passes
+                .iter()
+                .position(|p| p.node == node)
+                .unwrap_or_else(|| panic!("pass node {} not found in compiled output", node))
+        };
+
+        let pos_a = pos(*a);
+        let pos_b = pos(*b);
+        let pos_c = pos(*c);
+        // D's PassId: add_after returns the same PassId for DiamondD both times
+        let d = graph.add_pass::<DiamondD>(); // returns existing PassId
+        let pos_d = pos(*d);
+
+        // A must appear before B and C
+        assert!(
+            pos_a < pos_b,
+            "A (pos {pos_a}) must appear before B (pos {pos_b})"
+        );
+        assert!(
+            pos_a < pos_c,
+            "A (pos {pos_a}) must appear before C (pos {pos_c})"
+        );
+        // B and C must appear before D
+        assert!(
+            pos_b < pos_d,
+            "B (pos {pos_b}) must appear before D (pos {pos_d})"
+        );
+        assert!(
+            pos_c < pos_d,
+            "C (pos {pos_c}) must appear before D (pos {pos_d})"
+        );
+    }
+
+    #[test]
+    fn single_pass_produces_one_instance() {
+        let mut graph = RenderGraph::new();
+        graph.add_pass::<SinglePass>();
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        assert_eq!(
+            compiled.passes.len(),
+            1,
+            "single pass should produce exactly one instance"
+        );
+    }
+
+    #[test]
+    fn empty_graph_produces_empty_passes() {
+        let graph = RenderGraph::new();
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        assert!(
+            compiled.passes.is_empty(),
+            "empty graph should produce zero pass instances"
+        );
     }
 }

@@ -137,6 +137,10 @@ pub trait GraphResource: Send + Sync + Sized + 'static {
     fn generation(&self) -> u32;
 
     fn kind() -> ResourceKind;
+
+    /// Root resources are never culled during dead code elimination.
+    /// They start with ref_count = 1 so the cull stage always considers them alive.
+    const ROOT: bool = false;
 }
 
 pub struct PassBuilder<'a> {
@@ -245,11 +249,12 @@ pub trait GraphPass: Send + Sync + Sized + 'static {
 pub struct ResourceType {
     resolve: fn(&World, &RenderSettings, &mut ResourceResolver, BoxData) -> BoxData,
     create: fn(&RenderDevice, Name, &dyn Any) -> BoxData,
-    entry: fn(&RenderSettings, &DynData, &mut BindGroupLayoutBuilder, ShaderStages),
-    bind: for<'a> fn(&'a DynData, &mut BindGroupBuilder<'a>),
-    clone: fn(&DynData) -> BoxData,
-    compatible: fn(&DynData, &DynData) -> bool,
-    generation: fn(&DynData) -> u32,
+    entry: fn(&RenderSettings, &BoxData, &mut BindGroupLayoutBuilder, ShaderStages),
+    bind: for<'a> fn(&'a BoxData, &mut BindGroupBuilder<'a>),
+    clone: fn(&BoxData) -> BoxData,
+    compatible: fn(&BoxData, &BoxData) -> bool,
+    generation: fn(&BoxData) -> u32,
+    root: bool,
 }
 
 impl ResourceType {
@@ -282,6 +287,7 @@ impl ResourceType {
                 R::compatible(desc_a, desc_b)
             },
             generation: |resource| resource.downcast_ref::<R>().unwrap().generation(),
+            root: R::ROOT,
         }
     }
 
@@ -302,27 +308,31 @@ impl ResourceType {
     pub fn entry(
         &self,
         settings: &RenderSettings,
-        desc: &DynData,
+        desc: &BoxData,
         builder: &mut BindGroupLayoutBuilder,
         visibility: ShaderStages,
     ) {
         (self.entry)(settings, desc, builder, visibility);
     }
 
-    pub fn bind<'a>(&self, resource: &'a DynData, builder: &mut BindGroupBuilder<'a>) {
+    pub fn bind<'a>(&self, resource: &'a BoxData, builder: &mut BindGroupBuilder<'a>) {
         (self.bind)(resource, builder)
     }
 
-    pub fn clone(&self, desc: &DynData) -> BoxData {
+    pub fn clone(&self, desc: &BoxData) -> BoxData {
         (self.clone)(desc)
     }
 
-    pub fn compatible(&self, desc_a: &DynData, desc_b: &DynData) -> bool {
+    pub fn compatible(&self, desc_a: &BoxData, desc_b: &BoxData) -> bool {
         (self.compatible)(desc_a, desc_b)
     }
 
-    pub fn generation(&self, resource: &DynData) -> u32 {
+    pub fn generation(&self, resource: &BoxData) -> u32 {
         (self.generation)(resource)
+    }
+
+    pub fn root(&self) -> bool {
+        self.root
     }
 }
 
@@ -385,7 +395,6 @@ pub struct GraphResources {
     nodes: Vec<ResourceNode>,
 
     type_map: HashMap<TypeId, usize>,
-    node_map: HashMap<Name, usize>,
 }
 
 impl GraphResources {
@@ -394,7 +403,6 @@ impl GraphResources {
             types: Vec::new(),
             nodes: Vec::new(),
             type_map: HashMap::new(),
-            node_map: HashMap::new(),
         }
     }
 
@@ -411,15 +419,14 @@ impl GraphResources {
     }
 
     fn create<R: GraphResource>(&mut self, name: Name, desc: R::Desc) -> GraphResourceId<R> {
+        let id = self.nodes.len() as u32;
         let ty = self.register::<R>() as u32;
         let kind = R::kind();
-        let id = self.nodes.len();
-        let node = ResourceNode::new::<R>(id as u32, ty, name, kind, desc);
+        let node = ResourceNode::new::<R>(id, ty, name, kind, desc);
 
         self.nodes.push(node);
-        self.node_map.insert(name, id);
 
-        GraphResourceId::new(id as u32)
+        GraphResourceId::new(id)
     }
 
     fn register<R: GraphResource>(&mut self) -> usize {
