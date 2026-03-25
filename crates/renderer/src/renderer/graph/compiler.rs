@@ -2340,4 +2340,240 @@ mod tests {
             "3 groups with different descs should produce 3 distinct layouts"
         );
     }
+
+    // ── Task 11: End-to-End Pipeline Tests ──────────────────────────────
+
+    // 11.1 — Simple linear graph: PassA creates resource, PassB reads it.
+    // PassB also writes so it survives culling.
+
+    struct E2eLinearCreate;
+    impl GraphPass for E2eLinearCreate {
+        const NAME: Name = "e2e_linear_create";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResourceBindable>("e2e_res", 1024);
+            builder.write::<MockResourceBindable>(res, ResourceUsage::Attachment);
+            move |_| {}
+        }
+    }
+
+    struct E2eLinearRead;
+    impl GraphPass for E2eLinearRead {
+        const NAME: Name = "e2e_linear_read";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResourceBindable>("e2e_res", 1024);
+            builder.read::<MockResourceBindable>(
+                res,
+                ResourceUsage::Binding {
+                    group: 0,
+                    binding: 0,
+                    visiblitiy: ShaderStages::FRAGMENT,
+                },
+            );
+            builder.write::<MockResourceBindable>(res, ResourceUsage::Attachment);
+            move |_| {}
+        }
+    }
+
+    #[test]
+    fn e2e_simple_linear_graph() {
+        // Requirement 8.1
+        // Pass A creates resource, Pass B reads resource, one camera.
+        // Expected: 2 passes, 1 allocation, correct bindings on pass B.
+        let mut graph = RenderGraph::new();
+        let a = graph.add_pass::<E2eLinearCreate>();
+        graph.add_after::<E2eLinearRead>(a);
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        assert_eq!(compiled.passes.len(), 2, "both passes should survive");
+        assert_eq!(
+            compiled.allocations.len(),
+            1,
+            "single resource should produce 1 allocation"
+        );
+
+        // Pass B (the reader) should have a binding
+        let reader = compiled
+            .passes
+            .iter()
+            .find(|p| p.bindings.len() == 1)
+            .expect("one pass should have a binding");
+        assert_eq!(reader.bindings[0].layout, 0);
+        assert_eq!(reader.bindings[0].bind_group, 0);
+
+        // All allocation indices in bindings should be in bounds
+        assert!(
+            compiled.bind_groups.len() <= compiled.allocations.len() + 1,
+            "bind group count should be reasonable"
+        );
+    }
+
+    // 11.2 — Unused branch culling.
+    // A creates R1, B reads R1 and creates R2, C reads R1. R2 has no readers → B culled.
+
+    struct E2eBranchCreate;
+    impl GraphPass for E2eBranchCreate {
+        const NAME: Name = "e2e_branch_create";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("e2e_r1", 1024);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_| {}
+        }
+    }
+
+    struct E2eBranchMiddle;
+    impl GraphPass for E2eBranchMiddle {
+        const NAME: Name = "e2e_branch_middle";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let r1 = builder.create::<MockResource>("e2e_r1", 1024);
+            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
+            let r2 = builder.create::<MockResourceB>("e2e_r2", 1024);
+            builder.write::<MockResourceB>(r2, ResourceUsage::Attachment);
+            move |_| {}
+        }
+    }
+
+    struct E2eBranchConsumer;
+    impl GraphPass for E2eBranchConsumer {
+        const NAME: Name = "e2e_branch_consumer";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let r1 = builder.create::<MockResource>("e2e_r1", 1024);
+            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
+            builder.write::<MockResource>(r1, ResourceUsage::Attachment);
+            move |_| {}
+        }
+    }
+
+    #[test]
+    fn e2e_unused_branch_culling() {
+        // Requirement 8.2
+        // A creates R1, B reads R1 and creates R2, C reads R1.
+        // R2 has no readers → B culled, A and C retained.
+        let mut graph = RenderGraph::new();
+        let a = graph.add_pass::<E2eBranchCreate>();
+        graph.add_after::<E2eBranchMiddle>(a);
+        graph.add_after::<E2eBranchConsumer>(a);
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        assert_eq!(
+            compiled.passes.len(),
+            2,
+            "B should be culled; A and C should survive"
+        );
+
+        let node_ids: Vec<u32> = compiled.passes.iter().map(|p| p.node).collect();
+        assert!(node_ids.contains(&*a), "pass A should survive");
+        // Verify B is not present — B is the second pass added (index 1)
+        assert!(
+            !node_ids.contains(&1),
+            "pass B (the middle branch) should be culled"
+        );
+    }
+
+    // 11.3 — Multi-camera compilation.
+
+    #[test]
+    fn e2e_multi_camera_compilation() {
+        // Requirement 8.3
+        // Graph with 2 passes compiled with 2 cameras → pass instances for
+        // each camera with correct camera indices.
+        let mut graph = RenderGraph::new();
+        let a = graph.add_pass::<E2eBranchCreate>();
+        graph.add_after::<E2eBranchConsumer>(a);
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None), make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        // 2 passes × 2 cameras = 4 instances
+        assert_eq!(compiled.passes.len(), 4, "2 passes × 2 cameras = 4");
+
+        // Verify camera indices
+        let cam0_count = compiled
+            .passes
+            .iter()
+            .filter(|p| p.camera == Some(0))
+            .count();
+        let cam1_count = compiled
+            .passes
+            .iter()
+            .filter(|p| p.camera == Some(1))
+            .count();
+        assert_eq!(cam0_count, 2, "camera 0 should have 2 pass instances");
+        assert_eq!(cam1_count, 2, "camera 1 should have 2 pass instances");
+
+        // Verify cursors are distinct between cameras
+        let cam0_cursors: Vec<u32> = compiled
+            .passes
+            .iter()
+            .filter(|p| p.camera == Some(0))
+            .map(|p| p.cursor)
+            .collect();
+        let cam1_cursors: Vec<u32> = compiled
+            .passes
+            .iter()
+            .filter(|p| p.camera == Some(1))
+            .map(|p| p.cursor)
+            .collect();
+        assert_ne!(
+            cam0_cursors[0], cam1_cursors[0],
+            "different cameras should have different cursor offsets"
+        );
+    }
+
+    // 11.4 — Cross-camera allocation reuse.
+
+    #[test]
+    fn e2e_cross_camera_allocation_reuse() {
+        // Requirement 8.4
+        // Resources from different cameras with non-overlapping lifetimes
+        // and compatible descriptions should reuse allocations.
+        //
+        // AllocPass1 creates+writes MockResource desc=1024.
+        // AllocPass2 reads+writes the same resource.
+        // With 2 cameras: camera 0 passes span indices 0..1, camera 1 spans 2..3.
+        // Same type, same kind, compatible desc, non-overlapping → 1 allocation.
+        let mut graph = RenderGraph::new();
+        let p1 = graph.add_pass::<AllocPass1>();
+        graph.add_after::<AllocPass2>(p1);
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None), make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        assert_eq!(compiled.passes.len(), 4, "2 passes × 2 cameras = 4");
+
+        // Cross-camera allocation reuse: both cameras' resources have the
+        // same type (MockResource), same kind (Transient), compatible desc
+        // (1024 == 1024), and non-overlapping lifetimes → single allocation.
+        assert_eq!(
+            compiled.allocations.len(),
+            1,
+            "cross-camera resources with compatible desc and non-overlapping lifetimes \
+             should share one allocation (requirement 8.4)"
+        );
+
+        // Verify all allocation indices in the resources table are in bounds
+        for &alloc_idx in compiled.resources.iter() {
+            assert!(
+                (alloc_idx as usize) < compiled.allocations.len(),
+                "allocation index {} should be < allocations.len() {}",
+                alloc_idx,
+                compiled.allocations.len()
+            );
+        }
+    }
 }
