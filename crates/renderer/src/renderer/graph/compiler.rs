@@ -1562,6 +1562,68 @@ mod tests {
         );
     }
 
+    // ── Allocate Stage Unit Tests ───────────────────────────────────────
+
+    // AllocPass1: creates + writes a MockResource with desc=1024.
+    // AllocPass2: reads + writes the same resource so it has a reader and both passes survive.
+    // When run with 2 cameras, camera 0 gets pass indices 0..1 and camera 1 gets 2..3.
+    // The resource is deduplicated across cameras (same type + compatible desc), resulting
+    // in a single allocation — validating that compatible resources share an allocation.
+
+    struct AllocPass1;
+    impl GraphPass for AllocPass1 {
+        const NAME: Name = "alloc_pass_1";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("res_alloc", 1024);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct AllocPass2;
+    impl GraphPass for AllocPass2 {
+        const NAME: Name = "alloc_pass_2";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("res_alloc", 1024);
+            builder.read::<MockResource>(res, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    #[test]
+    fn allocation_reuse_non_overlapping_lifetimes() {
+        // Two cameras each run AllocPass1 → AllocPass2 on the same MockResource desc=1024.
+        // Camera 0's resource spans pass indices 0..1, camera 1's spans 2..3.
+        // Same type (MockResource), same kind (Transient), compatible desc (1024 == 1024),
+        // non-overlapping lifetimes → the compiler should produce a single allocation.
+        let mut graph = RenderGraph::new();
+        let p1 = graph.add_pass::<AllocPass1>();
+        graph.add_after::<AllocPass2>(p1);
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None), make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        // 2 passes × 2 cameras = 4 pass instances
+        assert_eq!(
+            compiled.passes.len(),
+            4,
+            "2 passes × 2 cameras should produce 4 pass instances"
+        );
+
+        // Both cameras' resources have the same type and compatible desc, so the
+        // compiler should share a single allocation.
+        assert_eq!(
+            compiled.allocations.len(),
+            1,
+            "resources with same type, same kind, compatible desc, and non-overlapping lifetimes \
+             should share one allocation (requirement 6.1)"
+        );
+    }
+
     #[test]
     fn pass_with_ref_count_zero_before_culling() {
         // ReadOnlyProducer creates+writes R1, ReadOnlyPass only reads R1 (no writes).
@@ -1590,6 +1652,357 @@ mod tests {
         assert_eq!(
             compiled.passes[0].node, *producer,
             "surviving pass should be the producer"
+        );
+    }
+
+    // ── Separate Allocation Tests (Task 9.2) ────────────────────────────
+
+    // Passes for testing separate allocations due to different types.
+    // AllocDiffTypeA: creates + writes MockResource desc=1024
+    // AllocDiffTypeB: creates + writes MockResourceB desc=1024
+    // AllocDiffTypeReader: reads both resources so they survive cull
+
+    struct AllocDiffTypeA;
+    impl GraphPass for AllocDiffTypeA {
+        const NAME: Name = "alloc_diff_type_a";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("res_diff_type_a", 1024);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct AllocDiffTypeB;
+    impl GraphPass for AllocDiffTypeB {
+        const NAME: Name = "alloc_diff_type_b";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResourceB>("res_diff_type_b", 1024);
+            builder.write::<MockResourceB>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct AllocDiffTypeReader;
+    impl GraphPass for AllocDiffTypeReader {
+        const NAME: Name = "alloc_diff_type_reader";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let r1 = builder.create::<MockResource>("res_diff_type_a", 1024);
+            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
+            builder.write::<MockResource>(r1, ResourceUsage::Attachment);
+            let r2 = builder.create::<MockResourceB>("res_diff_type_b", 1024);
+            builder.read::<MockResourceB>(r2, ResourceUsage::Attachment);
+            builder.write::<MockResourceB>(r2, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    #[test]
+    fn separate_allocations_different_types() {
+        // MockResource desc=1024 vs MockResourceB desc=1024.
+        // Same desc value, same kind (both Transient), but different types →
+        // the allocator should produce separate allocations (requirement 6.3).
+        let mut graph = RenderGraph::new();
+        let a = graph.add_pass::<AllocDiffTypeA>();
+        let b = graph.add_pass::<AllocDiffTypeB>();
+        graph.add_after::<AllocDiffTypeReader>(a);
+        graph.add_after::<AllocDiffTypeReader>(b);
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        assert_eq!(
+            compiled.passes.len(),
+            3,
+            "all three passes should survive culling"
+        );
+        assert_eq!(
+            compiled.allocations.len(),
+            2,
+            "different resource types (MockResource vs MockResourceB) should produce \
+             separate allocations even with compatible desc values (requirement 6.3)"
+        );
+    }
+
+    // Passes for testing separate allocations due to different kinds.
+    // AllocDiffKindTransient: creates + writes MockResource (Transient) desc=1024
+    // AllocDiffKindImported: creates + writes MockResourceImported (Imported) desc=1024
+    // AllocDiffKindReader: reads both resources so they survive cull
+
+    struct AllocDiffKindTransient;
+    impl GraphPass for AllocDiffKindTransient {
+        const NAME: Name = "alloc_diff_kind_transient";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("res_diff_kind_t", 1024);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct AllocDiffKindImported;
+    impl GraphPass for AllocDiffKindImported {
+        const NAME: Name = "alloc_diff_kind_imported";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResourceImported>("res_diff_kind_i", 1024);
+            builder.write::<MockResourceImported>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct AllocDiffKindReader;
+    impl GraphPass for AllocDiffKindReader {
+        const NAME: Name = "alloc_diff_kind_reader";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let r1 = builder.create::<MockResource>("res_diff_kind_t", 1024);
+            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
+            builder.write::<MockResource>(r1, ResourceUsage::Attachment);
+            let r2 = builder.create::<MockResourceImported>("res_diff_kind_i", 1024);
+            builder.read::<MockResourceImported>(r2, ResourceUsage::Attachment);
+            builder.write::<MockResourceImported>(r2, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    #[test]
+    fn separate_allocations_different_kinds() {
+        // MockResource (Transient) desc=1024 vs MockResourceImported (Imported) desc=1024.
+        // Same desc value but different kinds → the allocator should produce
+        // separate allocations (requirement 6.4).
+        let mut graph = RenderGraph::new();
+        let t = graph.add_pass::<AllocDiffKindTransient>();
+        let i = graph.add_pass::<AllocDiffKindImported>();
+        graph.add_after::<AllocDiffKindReader>(t);
+        graph.add_after::<AllocDiffKindReader>(i);
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        assert_eq!(
+            compiled.passes.len(),
+            3,
+            "all three passes should survive culling"
+        );
+        assert_eq!(
+            compiled.allocations.len(),
+            2,
+            "different resource kinds (Transient vs Imported) should produce \
+             separate allocations (requirement 6.4)"
+        );
+    }
+
+    // Passes for testing separate allocations due to incompatible descriptions.
+    // AllocIncompatA: creates + writes MockResource desc=1024
+    // AllocIncompatB: creates + writes MockResource desc=2048
+    // AllocIncompatReader: reads both resources so they survive cull
+
+    struct AllocIncompatA;
+    impl GraphPass for AllocIncompatA {
+        const NAME: Name = "alloc_incompat_a";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("res_incompat_a", 1024);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct AllocIncompatB;
+    impl GraphPass for AllocIncompatB {
+        const NAME: Name = "alloc_incompat_b";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("res_incompat_b", 2048);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct AllocIncompatReader;
+    impl GraphPass for AllocIncompatReader {
+        const NAME: Name = "alloc_incompat_reader";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let r1 = builder.create::<MockResource>("res_incompat_a", 1024);
+            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
+            builder.write::<MockResource>(r1, ResourceUsage::Attachment);
+            let r2 = builder.create::<MockResource>("res_incompat_b", 2048);
+            builder.read::<MockResource>(r2, ResourceUsage::Attachment);
+            builder.write::<MockResource>(r2, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    #[test]
+    fn separate_allocations_incompatible_descs() {
+        // MockResource desc=1024 vs MockResource desc=2048.
+        // Same type, same kind (both Transient), but incompatible descriptions
+        // (compatible(1024, 2048) = false) → separate allocations (requirement 6.5).
+        let mut graph = RenderGraph::new();
+        let a = graph.add_pass::<AllocIncompatA>();
+        let b = graph.add_pass::<AllocIncompatB>();
+        graph.add_after::<AllocIncompatReader>(a);
+        graph.add_after::<AllocIncompatReader>(b);
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        assert_eq!(
+            compiled.passes.len(),
+            3,
+            "all three passes should survive culling"
+        );
+        assert_eq!(
+            compiled.allocations.len(),
+            2,
+            "incompatible descriptions (1024 vs 2048) should produce \
+             separate allocations even with same type and kind (requirement 6.5)"
+        );
+    }
+
+    #[test]
+    fn allocation_last_user_updated_on_reuse() {
+        // 3 cameras, each running AllocPass1 → AllocPass2 on MockResource desc=1024.
+        // Camera 0: pass indices 0,1 → resource lifetime first_user=0, last_user=1
+        // Camera 1: pass indices 2,3 → resource lifetime first_user=2, last_user=3
+        // Camera 2: pass indices 4,5 → resource lifetime first_user=4, last_user=5
+        //
+        // All three resources have same type (MockResource), same kind (Transient),
+        // compatible desc (1024). Non-overlapping lifetimes allow reuse:
+        // - Camera 0's resource creates the allocation with last_user=Some(1)
+        // - Camera 1's resource reuses it, updating last_user to Some(3)
+        // - Camera 2's resource reuses it again, updating last_user to Some(5)
+        //
+        // Result: 1 allocation with last_user=Some(5) (requirement 6.6).
+        let mut graph = RenderGraph::new();
+        let p1 = graph.add_pass::<AllocPass1>();
+        graph.add_after::<AllocPass2>(p1);
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![
+            make_camera(None),
+            make_camera(None),
+            make_camera(None),
+        ]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        // 2 passes × 3 cameras = 6 pass instances
+        assert_eq!(
+            compiled.passes.len(),
+            6,
+            "2 passes × 3 cameras should produce 6 pass instances"
+        );
+
+        // All three resources reuse into a single allocation
+        assert_eq!(
+            compiled.allocations.len(),
+            1,
+            "three compatible resources with non-overlapping lifetimes should share one allocation"
+        );
+
+        // The allocation's last_user should be updated to the last reusing resource's last_user
+        assert_eq!(
+            compiled.allocations[0].last_user,
+            Some(5),
+            "allocation last_user should be updated to Some(5) after two reuses (requirement 6.6)"
+        );
+    }
+
+    // ── Sort-Order-Dependent Reuse & Zero-Ref Filtering Tests (Task 9.4) ─
+
+    #[test]
+    fn zero_ref_resources_filtered_before_allocation() {
+        // MultiOutputPass creates+writes R1 (MockResource) and R2 (MockResourceB).
+        // MultiOutputReader reads+writes R1. R2 has no readers → ref_count=0 after cull.
+        //
+        // The allocate stage filters out resources with ref_count == 0 before allocation.
+        // Only R1 (which has readers) should get an allocation. R2 should be filtered out.
+        // This validates requirements 6.8 (zero-ref filtering).
+        let mut graph = RenderGraph::new();
+        let producer = graph.add_pass::<MultiOutputPass>();
+        graph.add_after::<MultiOutputReader>(producer);
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        // Both passes survive culling (MultiOutputPass has ref_count > 0 from R1's write)
+        assert_eq!(
+            compiled.passes.len(),
+            2,
+            "both passes should survive culling"
+        );
+
+        // Only R1 should have an allocation; R2 (ref_count=0, no readers) is filtered out
+        assert_eq!(
+            compiled.allocations.len(),
+            1,
+            "resources with ref_count == 0 should be filtered out before allocation \
+             (requirement 6.8) — only R1 should get an allocation"
+        );
+    }
+
+    #[test]
+    fn allocation_sort_order_enables_reuse() {
+        // 3 cameras, each running AllocPass1 → AllocPass2 on MockResource desc=1024.
+        // After expand, each camera produces a deduplicated resource. The resources
+        // have first_user values corresponding to their camera's pass indices:
+        //   Camera 0: first_user=0, last_user=1
+        //   Camera 1: first_user=2, last_user=3
+        //   Camera 2: first_user=4, last_user=5
+        //
+        // The allocate stage sorts resources by first_user (requirement 6.7) before
+        // attempting reuse. This ensures resources are processed in chronological order:
+        //   1. Process resource with first_user=0 → create new allocation (last_user=1)
+        //   2. Process resource with first_user=2 → reuse (1 < 2), update last_user=3
+        //   3. Process resource with first_user=4 → reuse (3 < 4), update last_user=5
+        //
+        // Without sorting, resources might be processed out of order, potentially
+        // preventing valid reuse. The sort guarantees optimal reuse.
+        let mut graph = RenderGraph::new();
+        let p1 = graph.add_pass::<AllocPass1>();
+        graph.add_after::<AllocPass2>(p1);
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![
+            make_camera(None),
+            make_camera(None),
+            make_camera(None),
+        ]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        // 2 passes × 3 cameras = 6 pass instances
+        assert_eq!(
+            compiled.passes.len(),
+            6,
+            "2 passes × 3 cameras should produce 6 pass instances"
+        );
+
+        // All three resources should reuse into a single allocation because
+        // sorting by first_user ensures they are processed in the correct order
+        // for sequential reuse (requirement 6.7).
+        assert_eq!(
+            compiled.allocations.len(),
+            1,
+            "sorting resources by first_user before allocation should enable sequential \
+             reuse of compatible resources with non-overlapping lifetimes (requirement 6.7)"
+        );
+
+        // Verify the final allocation's last_user reflects the last resource processed
+        assert_eq!(
+            compiled.allocations[0].last_user,
+            Some(5),
+            "allocation last_user should reflect the last reusing resource's lifetime end"
         );
     }
 }
