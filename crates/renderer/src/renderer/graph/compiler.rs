@@ -2005,4 +2005,339 @@ mod tests {
             "allocation last_user should reflect the last reusing resource's lifetime end"
         );
     }
+
+    // ── Bindings-aware mock resource ────────────────────────────────────
+    //
+    // MockResourceBindable pushes a uniform-buffer entry into the layout
+    // builder so that bind_group_layouts are non-empty and comparable.
+    // The entry uses the desc value as the binding index, allowing tests
+    // to distinguish layouts by their desc.
+
+    struct MockResourceBindable;
+
+    impl GraphResource for MockResourceBindable {
+        type Desc = u32;
+
+        fn resolve(
+            _world: &World,
+            _settings: &RenderSettings,
+            _resolver: &mut crate::renderer::graph::ResourceResolver,
+            desc: u32,
+        ) -> u32 {
+            desc
+        }
+
+        fn create(_device: &crate::core::RenderDevice, _name: Name, _desc: &u32) -> Self {
+            MockResourceBindable
+        }
+
+        fn entry(
+            _settings: &RenderSettings,
+            desc: &u32,
+            builder: &mut BindGroupLayoutBuilder,
+            visibility: ShaderStages,
+        ) {
+            // Use desc as the binding index so different descs produce
+            // different layout entries, enabling layout deduplication tests.
+            builder.entries.push(wgpu::BindGroupLayoutEntry {
+                binding: *desc,
+                visibility,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            });
+        }
+
+        fn bind<'a>(&'a self, _builder: &mut BindGroupBuilder<'a>) {}
+
+        fn compatible(a: &u32, b: &u32) -> bool {
+            a == b
+        }
+
+        fn generation(&self) -> u32 {
+            0
+        }
+
+        fn kind() -> ResourceKind {
+            ResourceKind::Transient
+        }
+    }
+
+    // ── Task 10.1: Bind group construction ──────────────────────────────
+
+    /// Pass that creates a bindable resource, reads it via group 0 binding,
+    /// and writes to it (to survive culling with ref_count > 0).
+    struct BindReadPassA;
+    impl GraphPass for BindReadPassA {
+        const NAME: Name = "bind_read_a";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResourceBindable>("bind_res", 1024);
+            builder.read::<MockResourceBindable>(
+                res,
+                ResourceUsage::Binding {
+                    group: 0,
+                    binding: 0,
+                    visiblitiy: ShaderStages::FRAGMENT,
+                },
+            );
+            builder.write::<MockResourceBindable>(res, ResourceUsage::Attachment);
+            move |_| {}
+        }
+    }
+
+    /// Second pass with identical binding layout (group 0, binding 0, FRAGMENT)
+    /// and same resource desc — used to test layout and key deduplication.
+    struct BindReadPassB;
+    impl GraphPass for BindReadPassB {
+        const NAME: Name = "bind_read_b";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResourceBindable>("bind_res", 1024);
+            builder.read::<MockResourceBindable>(
+                res,
+                ResourceUsage::Binding {
+                    group: 0,
+                    binding: 0,
+                    visiblitiy: ShaderStages::FRAGMENT,
+                },
+            );
+            builder.write::<MockResourceBindable>(res, ResourceUsage::Attachment);
+            move |_| {}
+        }
+    }
+
+    #[test]
+    fn bind_group_construction_and_deduplication() {
+        // Requirements 7.1, 7.3, 7.4
+        //
+        // BindReadPassA and BindReadPassB each create MockResourceBindable
+        // with desc=1024 (deduplicated), read it via group 0 binding 0
+        // FRAGMENT, and write to it (to survive culling).
+        //
+        // Because the resource is deduplicated (same type, compatible desc),
+        // both passes produce identical layout entries and identical
+        // BindGroupKeys (same layout index + same allocation indices).
+        //
+        // Expected:
+        //   - bind_group_layouts.len() == 1 (layout deduplication via IndexSet)
+        //   - bind_groups.len() == 1 (key deduplication via IndexSet)
+        //   - Each pass has exactly 1 binding group (group 0)
+        //   - Both passes reference the same layout and bind_group index
+
+        let mut graph = RenderGraph::new();
+        let pa = graph.add_pass::<BindReadPassA>();
+        graph.add_after::<BindReadPassB>(pa);
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        // Both passes survive (each has ref_count=1 from the write)
+        assert_eq!(compiled.passes.len(), 2);
+
+        // Bindings are grouped by group index — each pass has 1 group
+        for (i, pass) in compiled.passes.iter().enumerate() {
+            assert_eq!(
+                pass.bindings.len(),
+                1,
+                "pass {i} should have exactly 1 bind group"
+            );
+        }
+
+        // Layout deduplication: identical layouts share the same index
+        assert_eq!(
+            compiled.bind_group_layouts.len(),
+            1,
+            "identical layouts should be deduplicated via IndexSet (requirement 7.3)"
+        );
+        assert_eq!(
+            compiled.passes[0].bindings[0].layout,
+            compiled.passes[1].bindings[0].layout,
+            "both passes should reference the same layout index"
+        );
+
+        // Bind group key deduplication: same layout + same allocations → same key
+        assert_eq!(
+            compiled.bind_groups.len(),
+            1,
+            "identical bind group keys should be deduplicated via IndexSet (requirement 7.4)"
+        );
+        assert_eq!(
+            compiled.passes[0].bindings[0].bind_group,
+            compiled.passes[1].bindings[0].bind_group,
+            "both passes should reference the same bind_group index"
+        );
+    }
+
+    // ── Task 10.2: Binding resolution through ref_table and alloc_table ─
+
+    /// Pass that creates a bindable resource, reads it via a binding, and
+    /// writes to it (to survive culling). The binding's resource must be
+    /// resolved through ref_table and alloc_table to get the correct
+    /// allocation index.
+    struct BindResConsumer;
+    impl GraphPass for BindResConsumer {
+        const NAME: Name = "bind_res_consumer";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResourceBindable>("bind_res", 1024);
+            builder.read::<MockResourceBindable>(
+                res,
+                ResourceUsage::Binding {
+                    group: 0,
+                    binding: 0,
+                    visiblitiy: ShaderStages::VERTEX,
+                },
+            );
+            builder.write::<MockResourceBindable>(res, ResourceUsage::Attachment);
+            move |_| {}
+        }
+    }
+
+    #[test]
+    fn binding_resolution_through_ref_and_alloc_tables() {
+        // Requirement 7.2
+        //
+        // BindResConsumer creates a resource, reads it via a binding, and
+        // writes to it. The bindings stage resolves each binding's resource
+        // through ref_table (cursor + node -> resource ref index) and
+        // alloc_table (ref index -> allocation index).
+        //
+        // We verify that:
+        //   1. The pass's binding resolves to the correct allocation.
+        //   2. There is exactly 1 allocation.
+
+        let mut graph = RenderGraph::new();
+        graph.add_pass::<BindResConsumer>();
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        // Pass survives (ref_count=1 from write)
+        assert_eq!(compiled.passes.len(), 1);
+
+        // Exactly 1 allocation
+        assert_eq!(
+            compiled.allocations.len(),
+            1,
+            "single resource should produce 1 allocation"
+        );
+
+        // The pass has a binding
+        let pass = &compiled.passes[0];
+        assert_eq!(
+            pass.bindings.len(),
+            1,
+            "pass should have 1 bind group"
+        );
+
+        // Verify the resources table (alloc_table) maps correctly:
+        // The pass's cursor + binding node should resolve to allocation 0.
+        let cursor = pass.cursor as usize;
+        let alloc_index = compiled.resources[cursor];
+        assert_eq!(
+            alloc_index, 0,
+            "binding resource should resolve to allocation index 0 through ref_table and alloc_table"
+        );
+    }
+
+    // ── Task 10.3: Multi-group bindings sorted by group index ───────────
+
+    /// Pass with bindings in groups 2, 0, 1 (declared out of order).
+    /// Also writes to each resource so it survives culling (ref_count > 0).
+    struct MultiGroupPass;
+    impl GraphPass for MultiGroupPass {
+        const NAME: Name = "multi_group_pass";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let r0 = builder.create::<MockResourceBindable>("res_g2", 1024);
+            let r1 = builder.create::<MockResourceBindable>("res_g0", 2048);
+            let r2 = builder.create::<MockResourceBindable>("res_g1", 4096);
+
+            // Read in group 2 first, then group 0, then group 1
+            builder.read::<MockResourceBindable>(
+                r0,
+                ResourceUsage::Binding {
+                    group: 2,
+                    binding: 0,
+                    visiblitiy: ShaderStages::FRAGMENT,
+                },
+            );
+            builder.read::<MockResourceBindable>(
+                r1,
+                ResourceUsage::Binding {
+                    group: 0,
+                    binding: 0,
+                    visiblitiy: ShaderStages::FRAGMENT,
+                },
+            );
+            builder.read::<MockResourceBindable>(
+                r2,
+                ResourceUsage::Binding {
+                    group: 1,
+                    binding: 0,
+                    visiblitiy: ShaderStages::FRAGMENT,
+                },
+            );
+            // Write to each resource so this pass has ref_count = 3
+            builder.write::<MockResourceBindable>(r0, ResourceUsage::Attachment);
+            builder.write::<MockResourceBindable>(r1, ResourceUsage::Attachment);
+            builder.write::<MockResourceBindable>(r2, ResourceUsage::Attachment);
+            move |_| {}
+        }
+    }
+
+    #[test]
+    fn multi_group_bindings_sorted_by_group_index() {
+        // Requirement 7.5
+        //
+        // MultiGroupPass declares bindings in groups 2, 0, 1 (out of order).
+        // The bindings stage must sort them so PassInstance.bindings is
+        // ordered [group 0, group 1, group 2].
+
+        let mut graph = RenderGraph::new();
+        graph.add_pass::<MultiGroupPass>();
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        assert_eq!(compiled.passes.len(), 1, "MultiGroupPass should survive");
+
+        let mg_pass = &compiled.passes[0];
+        assert_eq!(
+            mg_pass.bindings.len(),
+            3,
+            "MultiGroupPass should have 3 bind groups"
+        );
+
+        // Verify bindings are sorted by group index (ascending).
+        // Each group has a different desc (1024, 2048, 4096) so they produce
+        // different layout entries → distinct layout indices.
+        // The sorted order should be group 0 (desc 2048), group 1 (desc 4096),
+        // group 2 (desc 1024).
+        //
+        // Since layouts are inserted into the IndexSet in sorted group order
+        // (0, 1, 2), the layout indices should be monotonically increasing.
+        for i in 1..mg_pass.bindings.len() {
+            assert!(
+                mg_pass.bindings[i - 1].layout < mg_pass.bindings[i].layout,
+                "bindings should be sorted by group index — layout indices should be ascending"
+            );
+        }
+
+        // Verify there are exactly 3 distinct layouts (one per group)
+        assert_eq!(
+            compiled.bind_group_layouts.len(),
+            3,
+            "3 groups with different descs should produce 3 distinct layouts"
+        );
+    }
 }
