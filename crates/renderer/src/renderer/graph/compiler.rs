@@ -502,47 +502,6 @@ mod tests {
         }
     }
 
-    // ── Mock Passes ─────────────────────────────────────────────────────
-
-    struct PassA;
-    impl GraphPass for PassA {
-        const NAME: Name = "pass_a";
-        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let _res = builder.create::<MockResource>("res_a", 1024);
-            move |_ctx| {}
-        }
-    }
-
-    struct PassB;
-    impl GraphPass for PassB {
-        const NAME: Name = "pass_b";
-        fn setup(
-            _builder: &mut PassBuilder,
-        ) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            move |_ctx| {}
-        }
-    }
-
-    struct PassC;
-    impl GraphPass for PassC {
-        const NAME: Name = "pass_c";
-        fn setup(
-            _builder: &mut PassBuilder,
-        ) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            move |_ctx| {}
-        }
-    }
-
-    struct PassD;
-    impl GraphPass for PassD {
-        const NAME: Name = "pass_d";
-        fn setup(
-            _builder: &mut PassBuilder,
-        ) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            move |_ctx| {}
-        }
-    }
-
     // ── Helper Functions ────────────────────────────────────────────────
 
     fn make_camera(mask: Option<RenderGraphMask>) -> CameraSettings {
