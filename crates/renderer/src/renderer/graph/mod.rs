@@ -564,7 +564,7 @@ impl RenderGraphMask {
     }
 
     pub fn set(&mut self, pass: PassId, enabled: bool) {
-        self.0.grow(pass.0 as usize);
+        self.0.grow(pass.0 as usize + 1);
         self.0.set(pass.0 as usize, enabled);
     }
 }

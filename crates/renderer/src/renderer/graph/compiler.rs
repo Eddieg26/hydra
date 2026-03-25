@@ -632,6 +632,150 @@ mod tests {
         }
     }
 
+    // ── DAG Property Test Passes ────────────────────────────────────────
+    // Six fixed pass types for property-based topological ordering tests.
+    // Each creates, reads, and writes a shared resource so it survives culling.
+
+    macro_rules! dag_pass {
+        ($name:ident, $label:expr) => {
+            struct $name;
+            impl GraphPass for $name {
+                const NAME: Name = $label;
+                fn setup(
+                    builder: &mut PassBuilder,
+                ) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+                    let res = builder.create::<MockResource>("res_dag", 42);
+                    builder.read::<MockResource>(res, ResourceUsage::Attachment);
+                    builder.write::<MockResource>(res, ResourceUsage::Attachment);
+                    move |_ctx| {}
+                }
+            }
+        };
+    }
+
+    dag_pass!(DagPass0, "dag_0");
+    dag_pass!(DagPass1, "dag_1");
+    dag_pass!(DagPass2, "dag_2");
+    dag_pass!(DagPass3, "dag_3");
+    dag_pass!(DagPass4, "dag_4");
+    dag_pass!(DagPass5, "dag_5");
+
+    /// A small DAG description for property-based testing.
+    /// `num_nodes` is 0..=6, `edges` are (from, to) pairs with from != to.
+    #[derive(Clone, Debug)]
+    struct DagInput {
+        num_nodes: usize,
+        edges: Vec<(usize, usize)>,
+    }
+
+    impl quickcheck::Arbitrary for DagInput {
+        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+            let num_nodes = usize::arbitrary(g) % 7; // 0..=6
+            if num_nodes <= 1 {
+                return DagInput {
+                    num_nodes,
+                    edges: vec![],
+                };
+            }
+
+            // Generate random forward edges (u < v) to guarantee a DAG.
+            // This also ensures the dependency PassId fits in the dependent
+            // pass's FixedBitSet mask (capacity == pass index).
+            let mut edges = Vec::new();
+            let mut seen = vec![vec![false; num_nodes]; num_nodes];
+
+            let max_edges = num_nodes * (num_nodes - 1) / 2;
+            let candidate_count = usize::arbitrary(g) % (max_edges + 1);
+
+            for _ in 0..candidate_count {
+                let u = usize::arbitrary(g) % num_nodes;
+                let v = usize::arbitrary(g) % num_nodes;
+                if u >= v || seen[u][v] {
+                    continue;
+                }
+                seen[u][v] = true;
+                edges.push((u, v));
+            }
+
+            DagInput { num_nodes, edges }
+        }
+    }
+
+    /// Helper: build a RenderGraph from a DagInput, returning (graph, pass_ids).
+    fn build_dag_graph(input: &DagInput) -> (RenderGraph, Vec<PassId>) {
+        let mut graph = RenderGraph::new();
+        // Register passes in order. Each type is unique so add_pass won't dedup.
+        let ids: Vec<PassId> = (0..input.num_nodes)
+            .map(|i| match i {
+                0 => graph.add_pass::<DagPass0>(),
+                1 => graph.add_pass::<DagPass1>(),
+                2 => graph.add_pass::<DagPass2>(),
+                3 => graph.add_pass::<DagPass3>(),
+                4 => graph.add_pass::<DagPass4>(),
+                5 => graph.add_pass::<DagPass5>(),
+                _ => unreachable!(),
+            })
+            .collect();
+
+        // Wire dependency edges: edge (u, v) means v depends on u (u runs before v).
+        // add_after::<PassV>(ids[u]) registers ids[u] as a dependency of PassV.
+        for &(u, v) in &input.edges {
+            match v {
+                0 => { graph.add_after::<DagPass0>(ids[u]); }
+                1 => { graph.add_after::<DagPass1>(ids[u]); }
+                2 => { graph.add_after::<DagPass2>(ids[u]); }
+                3 => { graph.add_after::<DagPass3>(ids[u]); }
+                4 => { graph.add_after::<DagPass4>(ids[u]); }
+                5 => { graph.add_after::<DagPass5>(ids[u]); }
+                _ => unreachable!(),
+            }
+        }
+
+        (graph, ids)
+    }
+
+    // Feature: render-graph-compiler-tests, Property 1: Topological ordering preserves dependencies
+    #[quickcheck_macros::quickcheck]
+    fn prop_topological_order(input: DagInput) -> bool {
+        let (graph, ids) = build_dag_graph(&input);
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        // With one camera and no masks, every pass should appear exactly once
+        if compiled.passes.len() != input.num_nodes {
+            return false;
+        }
+
+        // Build a map from node id → position in compiled output
+        let mut pos_map: HashMap<u32, usize> = HashMap::new();
+        for (pos, pass) in compiled.passes.iter().enumerate() {
+            if pos_map.insert(pass.node, pos).is_some() {
+                return false; // duplicate node — fail
+            }
+        }
+
+        // Every pass node should be present
+        for id in &ids {
+            if !pos_map.contains_key(&**id) {
+                return false;
+            }
+        }
+
+        // Every dependency edge (u, v) must satisfy: pos(u) < pos(v)
+        for &(u, v) in &input.edges {
+            let pos_u = pos_map[&*ids[u]];
+            let pos_v = pos_map[&*ids[v]];
+            if pos_u >= pos_v {
+                return false;
+            }
+        }
+
+        true
+    }
+
     // ── Sort Stage Tests ────────────────────────────────────────────────
 
     #[test]

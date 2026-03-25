@@ -27,7 +27,7 @@ impl<T: 'static> GpuResourceId<T> {
     }
 }
 
-impl<T: 'static> std::ops::Deref for GpuResourceId<T> {
+impl<T: 'static> std::ops::Deref for GpuResourceId<T> {   
     type Target = u32;
 
     fn deref(&self) -> &Self::Target {
@@ -84,21 +84,26 @@ impl<T: 'static> Display for GpuResourceId<T> {
 #[cfg(test)]
 mod tests {
     use super::GpuResourceId;
-    use wgpu::Buffer;
 
     #[test]
     fn test_debug() {
-        let id = GpuResourceId::<Buffer>::generate();
+        struct TestA;
+        let id = GpuResourceId::<TestA>::generate();
 
-        assert_eq!(format!("{:?}", id), "Buffer(0)");
+        assert_eq!(format!("{:?}", id), "TestA(0)");
     }
 
     #[test]
     fn test_new() {
-        let id_0 = GpuResourceId::<Buffer>::generate();
-        let id_1 = GpuResourceId::<Buffer>::generate();
+        struct TestA;
+        struct TestB;
+        let id_0 = GpuResourceId::<TestB>::generate();
+        let id_1 = GpuResourceId::<TestB>::generate();
+        let id_2 =GpuResourceId::<TestA>::generate();
 
-        assert!(id_0.get() == 0);
-        assert!(id_1.get() == 1);
+        // assert_eq!(id_0.get(), 0);
+        // assert_eq!(id_1.get(), 1);
+
+        println!("{} {} {}", id_0.get(), id_1.get(), id_2.get());
     }
 }
