@@ -866,4 +866,352 @@ mod tests {
             "empty graph should produce zero pass instances"
         );
     }
+
+    // ── Expand Stage Tests — Camera Instantiation & Mask Filtering ──────
+
+    #[test]
+    fn n_cameras_times_m_passes_expansion() {
+        // 2 passes that survive culling, 3 cameras with no masks → 6 instances
+        let mut graph = RenderGraph::new();
+        graph.add_pass::<DagPass0>();
+        graph.add_pass::<DagPass1>();
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![
+            make_camera(None),
+            make_camera(None),
+            make_camera(None),
+        ]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        assert_eq!(
+            compiled.passes.len(),
+            6,
+            "2 passes × 3 cameras should produce 6 pass instances"
+        );
+    }
+
+    #[test]
+    fn camera_mask_excludes_one_pass() {
+        // 2 passes, 2 cameras: camera 0 has no mask (all passes), camera 1 excludes pass 0
+        let mut graph = RenderGraph::new();
+        let pass0 = graph.add_pass::<DagPass0>();
+        let pass1 = graph.add_pass::<DagPass1>();
+
+        let mut mask = RenderGraphMask::new(2);
+        mask.set(pass0, true); // exclude pass 0 for camera 1
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![
+            make_camera(None),          // gets both passes
+            make_camera(Some(mask)),    // gets only pass 1
+        ]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        // Camera 0: 2 passes, Camera 1: 1 pass → total 3
+        assert_eq!(
+            compiled.passes.len(),
+            3,
+            "camera 0 gets 2 passes, camera 1 (mask excludes pass 0) gets 1 pass → 3 total"
+        );
+
+        // Verify camera 1 only has pass 1 instances
+        let camera1_passes: Vec<_> = compiled
+            .passes
+            .iter()
+            .filter(|p| p.camera == Some(1))
+            .collect();
+        assert_eq!(camera1_passes.len(), 1, "camera 1 should have 1 pass instance");
+        assert_eq!(
+            camera1_passes[0].node, *pass1,
+            "camera 1's only pass should be pass 1"
+        );
+    }
+
+    #[test]
+    fn mask_excludes_all_passes_and_mask_excludes_no_passes() {
+        let mut graph = RenderGraph::new();
+        let pass0 = graph.add_pass::<DagPass0>();
+        let pass1 = graph.add_pass::<DagPass1>();
+
+        // Mask with all bits set → excludes all passes
+        let mut mask_all = RenderGraphMask::new(2);
+        mask_all.set(pass0, true);
+        mask_all.set(pass1, true);
+
+        // Mask with all bits false → excludes no passes (same as None)
+        let mask_none = RenderGraphMask::new(2);
+
+        let world = default_world();
+        let settings = default_settings();
+
+        // Test: mask excludes all passes → zero instances for that camera
+        let cameras_all_excluded = make_camera_queue(vec![
+            make_camera(Some(mask_all)),
+        ]);
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras_all_excluded);
+        assert_eq!(
+            compiled.passes.len(),
+            0,
+            "camera with mask excluding all passes should produce zero instances"
+        );
+
+        // Test: mask excludes no passes → all passes instantiated (same as None)
+        let cameras_none_excluded = make_camera_queue(vec![
+            make_camera(Some(mask_none)),
+        ]);
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras_none_excluded);
+        assert_eq!(
+            compiled.passes.len(),
+            2,
+            "camera with mask excluding no passes should produce all pass instances"
+        );
+    }
+
+    // ── Expand Stage Tests — Resource Deduplication & Access Tracking ────
+
+    // Passes for deduplication tests: each creates, reads, and writes a
+    // MockResource with desc=1024 so they survive culling and exercise
+    // the deduplication path (same type + compatible desc).
+
+    struct DedupPassA;
+    impl GraphPass for DedupPassA {
+        const NAME: Name = "dedup_a";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("res_dedup", 1024);
+            builder.read::<MockResource>(res, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct DedupPassB;
+    impl GraphPass for DedupPassB {
+        const NAME: Name = "dedup_b";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("res_dedup", 1024);
+            builder.read::<MockResource>(res, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    #[test]
+    fn resource_deduplication_same_type_compatible_desc() {
+        // Two passes both create MockResource with desc=1024 → same allocation
+        let mut graph = RenderGraph::new();
+        graph.add_pass::<DedupPassA>();
+        graph.add_pass::<DedupPassB>();
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        // Both passes should survive culling
+        assert_eq!(compiled.passes.len(), 2, "both passes should survive culling");
+
+        // Since both create MockResource with desc=1024 (compatible), the expand
+        // stage should deduplicate them into the same ResourceRef, leading to a
+        // single allocation.
+        assert_eq!(
+            compiled.allocations.len(),
+            1,
+            "two passes creating MockResource with same desc should share one allocation"
+        );
+    }
+
+    // Passes for non-deduplication tests (different type)
+
+    struct DedupPassTypeB;
+    impl GraphPass for DedupPassTypeB {
+        const NAME: Name = "dedup_type_b";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResourceB>("res_dedup_b", 1024);
+            builder.read::<MockResourceB>(res, ResourceUsage::Attachment);
+            builder.write::<MockResourceB>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    // Pass creating MockResource with desc=2048 (incompatible with 1024)
+
+    struct DedupPassIncompat;
+    impl GraphPass for DedupPassIncompat {
+        const NAME: Name = "dedup_incompat";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("res_dedup_incompat", 2048);
+            builder.read::<MockResource>(res, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    #[test]
+    fn resource_non_deduplication_different_type() {
+        // MockResource desc=1024 vs MockResourceB desc=1024 → separate allocations
+        let mut graph = RenderGraph::new();
+        graph.add_pass::<DedupPassA>();
+        graph.add_pass::<DedupPassTypeB>();
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        assert_eq!(compiled.passes.len(), 2, "both passes should survive culling");
+        assert_eq!(
+            compiled.allocations.len(),
+            2,
+            "different resource types should produce separate allocations"
+        );
+    }
+
+    #[test]
+    fn resource_non_deduplication_incompatible_desc() {
+        // MockResource desc=1024 vs MockResource desc=2048 → separate allocations
+        let mut graph = RenderGraph::new();
+        graph.add_pass::<DedupPassA>();
+        graph.add_pass::<DedupPassIncompat>();
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        assert_eq!(compiled.passes.len(), 2, "both passes should survive culling");
+        assert_eq!(
+            compiled.allocations.len(),
+            2,
+            "incompatible descriptions should produce separate allocations"
+        );
+    }
+
+    // ── Resource Resolution Test ────────────────────────────────────────
+
+    // A mock resource whose resolve() doubles the description value.
+    // This lets us verify that resolve() is called during expansion and
+    // the resolved description is used for compatibility checks.
+
+    struct MockResourceDoubling;
+    impl GraphResource for MockResourceDoubling {
+        type Desc = u32;
+
+        fn resolve(
+            _world: &World,
+            _settings: &RenderSettings,
+            _resolver: &mut ResourceResolver,
+            desc: u32,
+        ) -> u32 {
+            desc * 2 // doubles the description
+        }
+
+        fn create(_device: &crate::core::RenderDevice, _name: Name, _desc: &u32) -> Self {
+            MockResourceDoubling
+        }
+
+        fn entry(
+            _settings: &RenderSettings,
+            _desc: &u32,
+            _builder: &mut BindGroupLayoutBuilder,
+            _vis: ShaderStages,
+        ) {
+        }
+
+        fn bind<'a>(&'a self, _builder: &mut BindGroupBuilder<'a>) {}
+
+        fn compatible(a: &u32, b: &u32) -> bool {
+            a == b
+        }
+
+        fn generation(&self) -> u32 {
+            0
+        }
+
+        fn kind() -> ResourceKind {
+            ResourceKind::Transient
+        }
+    }
+
+    // Pass creating MockResourceDoubling with desc=512 → resolves to 1024
+    struct ResolvePassA;
+    impl GraphPass for ResolvePassA {
+        const NAME: Name = "resolve_a";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResourceDoubling>("res_resolve", 512);
+            builder.read::<MockResourceDoubling>(res, ResourceUsage::Attachment);
+            builder.write::<MockResourceDoubling>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    // Pass creating MockResourceDoubling with desc=1024 → resolves to 2048
+    struct ResolvePassB;
+    impl GraphPass for ResolvePassB {
+        const NAME: Name = "resolve_b";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResourceDoubling>("res_resolve", 1024);
+            builder.read::<MockResourceDoubling>(res, ResourceUsage::Attachment);
+            builder.write::<MockResourceDoubling>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    // Pass creating MockResourceDoubling with desc=512 → resolves to 1024 (same as ResolvePassA)
+    struct ResolvePassC;
+    impl GraphPass for ResolvePassC {
+        const NAME: Name = "resolve_c";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResourceDoubling>("res_resolve", 512);
+            builder.read::<MockResourceDoubling>(res, ResourceUsage::Attachment);
+            builder.write::<MockResourceDoubling>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    #[test]
+    fn resource_resolution_uses_resolved_desc_for_compatibility() {
+        // ResolvePassA: desc=512 → resolved=1024
+        // ResolvePassB: desc=1024 → resolved=2048
+        // Different resolved descs → separate allocations (proves resolve() is used)
+        let mut graph = RenderGraph::new();
+        graph.add_pass::<ResolvePassA>();
+        graph.add_pass::<ResolvePassB>();
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        assert_eq!(compiled.passes.len(), 2);
+        assert_eq!(
+            compiled.allocations.len(),
+            2,
+            "resolved descs 1024 vs 2048 are incompatible → separate allocations"
+        );
+
+        // ResolvePassA: desc=512 → resolved=1024
+        // ResolvePassC: desc=512 → resolved=1024
+        // Same resolved descs → should deduplicate into one allocation
+        let mut graph2 = RenderGraph::new();
+        graph2.add_pass::<ResolvePassA>();
+        graph2.add_pass::<ResolvePassC>();
+
+        let compiled2 = RenderGraphCompiler::run(&world, &graph2, &settings, &cameras);
+
+        assert_eq!(compiled2.passes.len(), 2);
+        assert_eq!(
+            compiled2.allocations.len(),
+            1,
+            "both resolve to 1024 → compatible → shared allocation (proves resolve() is called)"
+        );
+    }
 }
