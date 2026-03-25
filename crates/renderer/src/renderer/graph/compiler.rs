@@ -1214,4 +1214,382 @@ mod tests {
             "both resolve to 1024 → compatible → shared allocation (proves resolve() is called)"
         );
     }
+
+    // ── ResourceRef direct tests (Task 6.1) ──────────────────────────
+
+    fn fresh_resource_ref() -> ResourceRef {
+        ResourceRef {
+            id: 0,
+            node: 0,
+            ref_count: 0,
+            producer: None,
+            first_user: None,
+            last_user: None,
+            desc: Box::new(0u32),
+        }
+    }
+
+    #[test]
+    fn resource_ref_read_on_fresh_sets_first_and_last_user() {
+        let mut r = fresh_resource_ref();
+        r.read(5);
+        assert_eq!(r.first_user, Some(5));
+        assert_eq!(r.last_user, Some(5));
+        assert_eq!(r.ref_count, 1);
+    }
+
+    #[test]
+    fn resource_ref_read_lower_updates_first_user() {
+        let mut r = fresh_resource_ref();
+        r.read(10);
+        r.read(3);
+        assert_eq!(r.first_user, Some(3));
+        assert_eq!(r.last_user, Some(10));
+        assert_eq!(r.ref_count, 2);
+    }
+
+    #[test]
+    fn resource_ref_read_higher_updates_last_user() {
+        let mut r = fresh_resource_ref();
+        r.read(3);
+        r.read(10);
+        assert_eq!(r.first_user, Some(3));
+        assert_eq!(r.last_user, Some(10));
+        assert_eq!(r.ref_count, 2);
+    }
+
+    #[test]
+    fn resource_ref_write_on_fresh_sets_producer_and_users() {
+        let mut r = fresh_resource_ref();
+        r.write(7);
+        assert_eq!(r.producer, Some(7));
+        assert_eq!(r.first_user, Some(7));
+        assert_eq!(r.last_user, Some(7));
+        // write does not increment ref_count
+        assert_eq!(r.ref_count, 0);
+    }
+
+    #[test]
+    fn resource_ref_write_lower_updates_producer_to_minimum() {
+        let mut r = fresh_resource_ref();
+        r.write(10);
+        r.write(4);
+        assert_eq!(r.producer, Some(4));
+        assert_eq!(r.first_user, Some(4));
+        assert_eq!(r.last_user, Some(10));
+    }
+
+    #[test]
+    fn resource_ref_write_higher_keeps_producer_updates_last_user() {
+        let mut r = fresh_resource_ref();
+        r.write(4);
+        r.write(10);
+        assert_eq!(r.producer, Some(4));
+        assert_eq!(r.first_user, Some(4));
+        assert_eq!(r.last_user, Some(10));
+    }
+
+    #[test]
+    fn resource_ref_interleaved_read_write_maintains_invariants() {
+        let mut r = fresh_resource_ref();
+        // write at 5, read at 3, write at 8, read at 1, read at 10
+        r.write(5);
+        r.read(3);
+        r.write(8);
+        r.read(1);
+        r.read(10);
+
+        assert_eq!(r.producer, Some(5), "producer = min of write indices (5, 8)");
+        assert_eq!(r.first_user, Some(1), "first_user = min of all indices");
+        assert_eq!(r.last_user, Some(10), "last_user = max of all indices");
+        assert_eq!(r.ref_count, 3, "ref_count = number of reads");
+        assert!(r.first_user.unwrap() <= r.last_user.unwrap());
+    }
+
+    #[test]
+    fn resource_ref_reads_only_no_producer() {
+        let mut r = fresh_resource_ref();
+        r.read(2);
+        r.read(7);
+        r.read(4);
+        assert_eq!(r.producer, None);
+        assert_eq!(r.first_user, Some(2));
+        assert_eq!(r.last_user, Some(7));
+        assert_eq!(r.ref_count, 3);
+    }
+
+    #[test]
+    fn resource_ref_writes_only_no_ref_count() {
+        let mut r = fresh_resource_ref();
+        r.write(6);
+        r.write(2);
+        r.write(9);
+        assert_eq!(r.producer, Some(2));
+        assert_eq!(r.first_user, Some(2));
+        assert_eq!(r.last_user, Some(9));
+        assert_eq!(r.ref_count, 0);
+    }
+
+    #[test]
+    fn resource_ref_same_pass_read_and_write() {
+        let mut r = fresh_resource_ref();
+        r.write(5);
+        r.read(5);
+        assert_eq!(r.producer, Some(5));
+        assert_eq!(r.first_user, Some(5));
+        assert_eq!(r.last_user, Some(5));
+        assert_eq!(r.ref_count, 1);
+        assert!(r.first_user.unwrap() <= r.last_user.unwrap());
+    }
+
+    // ── Cull Stage Tests ────────────────────────────────────────────────
+
+    // Cull test passes: designed to exercise dead code elimination.
+    //
+    // CullCreateA: creates + writes "res_cull" (MockResource 1024) → survives if resource has readers
+    // CullReadWriteB: creates (deduped) + reads "res_cull", creates + writes "res_cull_b" (MockResourceB 1024)
+    //   → B's ref_count comes from writing res_cull_b; if res_cull_b has no readers, B is culled
+    // CullReadWriteC: creates (deduped) + reads "res_cull", writes "res_cull" → survives via write
+
+    struct CullCreateA;
+    impl GraphPass for CullCreateA {
+        const NAME: Name = "cull_create_a";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("res_cull", 1024);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct CullReadWriteB;
+    impl GraphPass for CullReadWriteB {
+        const NAME: Name = "cull_rw_b";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            // Read R1 (deduped via create with same name/type/desc)
+            let r1 = builder.create::<MockResource>("res_cull", 1024);
+            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
+            // Create + write R2 (different type → separate resource)
+            let r2 = builder.create::<MockResourceB>("res_cull_b", 1024);
+            builder.write::<MockResourceB>(r2, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct CullReadWriteC;
+    impl GraphPass for CullReadWriteC {
+        const NAME: Name = "cull_rw_c";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            // Read + write R1 (deduped via create with same name/type/desc)
+            let r1 = builder.create::<MockResource>("res_cull", 1024);
+            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
+            builder.write::<MockResource>(r1, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    // Cascade cull passes: A→B→C chain where R3 has no readers.
+    // CascadeA: creates+writes R1
+    // CascadeB: reads R1, creates+writes R2 (MockResourceB)
+    // CascadeC: reads R2, creates+writes R3 (MockResourceImported)
+
+    struct CascadeA;
+    impl GraphPass for CascadeA {
+        const NAME: Name = "cascade_a";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let res = builder.create::<MockResource>("res_cascade_r1", 1024);
+            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct CascadeB;
+    impl GraphPass for CascadeB {
+        const NAME: Name = "cascade_b";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let r1 = builder.create::<MockResource>("res_cascade_r1", 1024);
+            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
+            let r2 = builder.create::<MockResourceB>("res_cascade_r2", 1024);
+            builder.write::<MockResourceB>(r2, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct CascadeC;
+    impl GraphPass for CascadeC {
+        const NAME: Name = "cascade_c";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let r2 = builder.create::<MockResourceB>("res_cascade_r2", 1024);
+            builder.read::<MockResourceB>(r2, ResourceUsage::Attachment);
+            let r3 = builder.create::<MockResourceImported>("res_cascade_r3", 1024);
+            builder.write::<MockResourceImported>(r3, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    // Multi-output pass: creates+writes R1 and R2. R1 has a reader, R2 does not.
+    // Pass survives because ref_count > 0 from R1's write.
+
+    struct MultiOutputPass;
+    impl GraphPass for MultiOutputPass {
+        const NAME: Name = "multi_output";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let r1 = builder.create::<MockResource>("res_multi_r1", 1024);
+            builder.write::<MockResource>(r1, ResourceUsage::Attachment);
+            let r2 = builder.create::<MockResourceB>("res_multi_r2", 1024);
+            builder.write::<MockResourceB>(r2, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct MultiOutputReader;
+    impl GraphPass for MultiOutputReader {
+        const NAME: Name = "multi_output_reader";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let r1 = builder.create::<MockResource>("res_multi_r1", 1024);
+            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
+            builder.write::<MockResource>(r1, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    // ReadOnlyPass: only reads a resource (no writes) → ref_count = 0 before culling.
+
+    struct ReadOnlyPass;
+    impl GraphPass for ReadOnlyPass {
+        const NAME: Name = "read_only";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let r1 = builder.create::<MockResource>("res_readonly", 1024);
+            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    struct ReadOnlyProducer;
+    impl GraphPass for ReadOnlyProducer {
+        const NAME: Name = "read_only_producer";
+        fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+            let r1 = builder.create::<MockResource>("res_readonly", 1024);
+            builder.write::<MockResource>(r1, ResourceUsage::Attachment);
+            move |_ctx| {}
+        }
+    }
+
+    // ── Cull Stage Unit Tests ───────────────────────────────────────────
+
+    #[test]
+    fn dead_resource_chain_removal() {
+        // A creates+writes R1, B reads R1 and creates+writes R2, C reads+writes R1.
+        // R2 has no readers → B is culled, A and C survive.
+        let mut graph = RenderGraph::new();
+        let a = graph.add_pass::<CullCreateA>();
+        graph.add_after::<CullReadWriteB>(a);
+        graph.add_after::<CullReadWriteC>(a);
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        // B should be culled (R2 has no readers), A and C should survive
+        assert_eq!(
+            compiled.passes.len(),
+            2,
+            "B should be culled; A and C should survive"
+        );
+
+        let node_ids: Vec<u32> = compiled.passes.iter().map(|p| p.node).collect();
+        assert!(
+            node_ids.contains(&*a),
+            "pass A should survive culling"
+        );
+        // CullReadWriteC's PassId
+        let c = graph.add_pass::<CullReadWriteC>(); // returns existing PassId
+        assert!(
+            node_ids.contains(&*c),
+            "pass C should survive culling"
+        );
+    }
+
+    #[test]
+    fn cascading_cull_propagation() {
+        // A creates R1, B reads R1 and creates R2, C reads R2 and creates R3.
+        // R3 has no readers → C culled → R2 dead → B culled → R1 dead → A culled.
+        let mut graph = RenderGraph::new();
+        let a = graph.add_pass::<CascadeA>();
+        let b = graph.add_after::<CascadeB>(a);
+        graph.add_after::<CascadeC>(b);
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        assert_eq!(
+            compiled.passes.len(),
+            0,
+            "entire chain should be culled when terminal resource has no readers"
+        );
+    }
+
+    #[test]
+    fn multi_output_pass_retention() {
+        // MultiOutputPass creates+writes R1 and R2. MultiOutputReader reads+writes R1.
+        // R2 has no readers, but MultiOutputPass survives because R1's write keeps ref_count > 0.
+        let mut graph = RenderGraph::new();
+        let producer = graph.add_pass::<MultiOutputPass>();
+        graph.add_after::<MultiOutputReader>(producer);
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        // Both passes should survive: MultiOutputPass has ref_count=2 (two writes),
+        // R2 dead decrements it to 1, still > 0.
+        assert_eq!(
+            compiled.passes.len(),
+            2,
+            "multi-output pass should survive when at least one output has readers"
+        );
+
+        let node_ids: Vec<u32> = compiled.passes.iter().map(|p| p.node).collect();
+        assert!(
+            node_ids.contains(&*producer),
+            "multi-output producer pass should survive"
+        );
+    }
+
+    #[test]
+    fn pass_with_ref_count_zero_before_culling() {
+        // ReadOnlyProducer creates+writes R1, ReadOnlyPass only reads R1 (no writes).
+        // ReadOnlyPass has ref_count=0 (no writes) → culled by retain.
+        // R1 still has ref_count=1 from ReadOnlyPass's read, so ReadOnlyProducer survives.
+        // The cull loop only processes dead resources, not dead passes directly,
+        // so ReadOnlyPass being culled does NOT cascade to decrement R1.
+
+        let mut graph = RenderGraph::new();
+        let producer = graph.add_pass::<ReadOnlyProducer>();
+        graph.add_after::<ReadOnlyPass>(producer);
+
+        let world = default_world();
+        let settings = default_settings();
+        let cameras = make_camera_queue(vec![make_camera(None)]);
+
+        let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
+
+        // ReadOnlyPass (ref_count=0, no writes) is culled.
+        // ReadOnlyProducer survives because R1 had a reader during expand (ref_count=1).
+        assert_eq!(
+            compiled.passes.len(),
+            1,
+            "read-only pass (ref_count=0) should be culled, producer should survive"
+        );
+        assert_eq!(
+            compiled.passes[0].node, *producer,
+            "surviving pass should be the producer"
+        );
+    }
 }
