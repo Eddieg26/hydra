@@ -2,18 +2,21 @@ use crate::{
     core::{ColorFormat, Msaa},
     plugin::RenderApp,
     renderer::graph::{
-        GraphPass, Name, PassBuilder, RenderContext, RenderGraph, ResourceUsage,
-        SurfaceDesc, SurfaceKind, SurfaceSize, SurfaceTexture,
-        RenderOutput, RenderOutputDesc,
+        GraphPass, Name, PassBuilder, RenderContext, RenderGraph, RenderOutput, RenderOutputDesc,
+        ResourceUsage, SurfaceDesc, SurfaceKind, SurfaceTexture, TextureSize,
     },
     resources::{
-        FragmentState, PipelineCache, PipelineId, RenderPipelineDesc, Shader, VertexState,
+        BindGroupLayoutBuilder, BindGroupLayoutRegistry, FragmentState, PipelineCache, PipelineId,
+        RenderPipelineDesc, Shader, TextureSampler, VertexState,
     },
 };
 use asset::{AssetId, plugin::AssetAppExt};
 use ecs::{AppBuilder, Plugin, Resource};
 use std::borrow::Cow;
-use wgpu::{ColorTargetState, MultisampleState, PrimitiveState, ShaderStages, TextureFormat};
+use wgpu::{
+    BindGroupLayout, ColorTargetState, MultisampleState, PrimitiveState, Sampler, ShaderStages,
+    TextureFormat,
+};
 use wgsl_macro::ShaderConstants;
 
 /// Static asset ID for the tonemap shader.
@@ -71,37 +74,62 @@ impl Plugin for OutputPassPlugin {
     fn finish(&mut self, app: &mut AppBuilder) {
         let render_app = app.sub_app_mut(RenderApp);
 
-        let tonemap_id = render_app
-            .resource_mut::<PipelineCache>()
-            .queue_render_pipeline(make_pipeline_desc(
+        // Create the bind group layout for the source texture (group 0, binding 0).
+        let source_bgl = {
+            let device = render_app.resource::<crate::core::RenderDevice>().clone();
+            let registry = render_app.resource_mut::<BindGroupLayoutRegistry>();
+            let mut builder = BindGroupLayoutBuilder::new();
+            builder
+                .with_texture(
+                    ShaderStages::FRAGMENT,
+                    wgpu::TextureSampleType::Float { filterable: true },
+                    wgpu::TextureViewDimension::D2,
+                    false,
+                    None,
+                )
+                .with_sampler(
+                    ShaderStages::FRAGMENT,
+                    wgpu::SamplerBindingType::NonFiltering,
+                    None,
+                );
+
+            let id = registry.register(&device, builder);
+            registry.get(id).clone()
+        };
+
+        let pipelines = {
+            let cache = render_app.resource_mut::<PipelineCache>();
+
+            let tonemap_id = cache.queue_render_pipeline(make_pipeline_desc(
                 TONEMAP_SHADER,
                 TextureFormat::Bgra8Unorm,
                 "output_tonemap",
+                &source_bgl,
             ));
 
-        let tonemap_srgb_id = render_app
-            .resource_mut::<PipelineCache>()
-            .queue_render_pipeline(make_pipeline_desc(
+            let tonemap_srgb_id = cache.queue_render_pipeline(make_pipeline_desc(
                 TONEMAP_SHADER,
                 TextureFormat::Bgra8UnormSrgb,
                 "output_tonemap_srgb",
+                &source_bgl,
             ));
 
-        let copy_id = render_app
-            .resource_mut::<PipelineCache>()
-            .queue_render_pipeline(make_pipeline_desc(
+            let copy_id = cache.queue_render_pipeline(make_pipeline_desc(
                 COPY_SHADER,
                 TextureFormat::Bgra8Unorm,
                 "output_copy",
+                &source_bgl,
             ));
 
-        render_app.add_resource(OutputPassPipelines {
-            tonemap: tonemap_id,
-            tonemap_srgb: tonemap_srgb_id,
-            copy: copy_id,
-        });
+            OutputPassPipelines {
+                tonemap: tonemap_id,
+                tonemap_srgb: tonemap_srgb_id,
+                copy: copy_id,
+            }
+        };
 
         render_app
+            .add_resource(pipelines)
             .resource_mut::<RenderGraph>()
             .add_pass::<OutputPass>();
     }
@@ -111,10 +139,11 @@ fn make_pipeline_desc(
     shader: AssetId<Shader>,
     target_format: TextureFormat,
     label: &'static str,
+    source_bgl: &BindGroupLayout,
 ) -> RenderPipelineDesc {
     RenderPipelineDesc {
         label: Some(Cow::Borrowed(label)),
-        layout: vec![],
+        layout: vec![source_bgl.clone()],
         vertex: VertexState {
             shader,
             entry: Cow::Borrowed("vs_main"),
@@ -141,18 +170,17 @@ pub struct OutputPass;
 impl GraphPass for OutputPass {
     const NAME: Name = "OutputPass";
 
-    fn setup(
-        builder: &mut PassBuilder,
-    ) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
+    fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
         let color = builder.create::<SurfaceTexture>(
             "intermediate_color",
             SurfaceDesc {
-                size: SurfaceSize::Auto,
+                size: TextureSize::Auto,
                 kind: SurfaceKind::Color(ColorFormat::HDR),
                 msaa: Msaa::Disabled,
             },
         );
         let output = builder.create::<RenderOutput>("output", RenderOutputDesc::Auto);
+        let sampler = builder.create::<Sampler>("default_sampler", TextureSampler::Default);
 
         let _src = builder.read(
             color,
@@ -163,6 +191,14 @@ impl GraphPass for OutputPass {
             },
         );
         let dst = builder.write(output, ResourceUsage::Attachment);
+        let sampler = builder.read(
+            sampler,
+            ResourceUsage::Binding {
+                group: 0,
+                binding: 0,
+                visiblitiy: ShaderStages::FRAGMENT,
+            },
+        );
 
         move |ctx: &mut RenderContext<'_>| {
             let camera = ctx.camera().expect("Missing camera for OutputPass");

@@ -603,8 +603,8 @@ pub struct RenderGraph {
     state: Option<RenderGraphState>,
 }
 
-impl RenderGraph {
-    pub fn new() -> Self {
+impl Default for RenderGraph {
+    fn default() -> Self {
         Self {
             resources: GraphResources::new(),
             nodes: Vec::new(),
@@ -612,7 +612,9 @@ impl RenderGraph {
             state: None,
         }
     }
+}
 
+impl RenderGraph {
     pub fn add_pass<P: GraphPass>(&mut self) -> PassId {
         let ty = TypeId::of::<P>();
 

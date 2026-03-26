@@ -8,3 +8,15 @@ pub struct Viewport {
     pub height: f32,
     pub depth: Range<f32>,
 }
+
+impl Default for Viewport {
+    fn default() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            depth: 0.0..1.0,
+        }
+    }
+}

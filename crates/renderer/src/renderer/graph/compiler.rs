@@ -50,7 +50,7 @@ impl RenderGraphCompiler {
     }
 
     fn sort(graph: &RenderGraph) -> ImmutableIndexDag<PassId> {
-        let mut dag = IndexDag::new();
+        let mut dag = IndexDag::default();
         for pass in &graph.nodes {
             let node = dag.add_node(pass.id);
             for dependency in pass.dependencies().0.ones() {
@@ -85,7 +85,7 @@ impl RenderGraphCompiler {
             {
                 let pass = &graph.nodes[pass.0 as usize];
                 let id = passes.len() as u32;
-                let mut reads = Vec::new();
+                let mut reads = Vec::default();
                 let mut ref_count = 0;
 
                 for entry in pass.entries() {
@@ -237,8 +237,8 @@ impl RenderGraphCompiler {
         IndexSet<BindGroupKey>,
     ) {
         let mut instances = Vec::with_capacity(passes.len());
-        let mut layouts = IndexSet::new();
-        let mut bind_groups = IndexSet::new();
+        let mut layouts = IndexSet::default();
+        let mut bind_groups = IndexSet::default();
 
         for pass in passes {
             let mut groups = HashMap::new();
@@ -346,8 +346,8 @@ impl ResourceGroup {
     pub fn new(group: u32) -> Self {
         Self {
             group,
-            builder: BindGroupLayoutBuilder::new(),
-            allocations: Vec::new(),
+            builder: BindGroupLayoutBuilder::default(),
+            allocations: Vec::default(),
         }
     }
 }
@@ -373,6 +373,7 @@ mod tests {
             },
         },
         resources::{BindGroupBuilder, BindGroupLayoutBuilder},
+        types::Viewport,
     };
     use ecs::{Entity, World};
     use wgpu::ShaderStages;
@@ -509,6 +510,8 @@ mod tests {
             entity: Entity::new(0, 0),
             priority: 0,
             target: None,
+            clear: None,
+            viewport: Viewport::default(),
             msaa: SettingState::Auto,
             width: 1920,
             height: 1080,
@@ -640,7 +643,7 @@ mod tests {
             // Generate random forward edges (u < v) to guarantee a DAG.
             // This also ensures the dependency PassId fits in the dependent
             // pass's FixedBitSet mask (capacity == pass index).
-            let mut edges = Vec::new();
+            let mut edges = Vec::default();
             let mut seen = vec![vec![false; num_nodes]; num_nodes];
 
             let max_edges = num_nodes * (num_nodes - 1) / 2;
@@ -662,7 +665,7 @@ mod tests {
 
     /// Helper: build a RenderGraph from a DagInput, returning (graph, pass_ids).
     fn build_dag_graph(input: &DagInput) -> (RenderGraph, Vec<PassId>) {
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         // Register passes in order. Each type is unique so add_pass won't dedup.
         let ids: Vec<PassId> = (0..input.num_nodes)
             .map(|i| match i {
@@ -680,12 +683,24 @@ mod tests {
         // add_after::<PassV>(ids[u]) registers ids[u] as a dependency of PassV.
         for &(u, v) in &input.edges {
             match v {
-                0 => { graph.add_after::<DagPass0>(ids[u]); }
-                1 => { graph.add_after::<DagPass1>(ids[u]); }
-                2 => { graph.add_after::<DagPass2>(ids[u]); }
-                3 => { graph.add_after::<DagPass3>(ids[u]); }
-                4 => { graph.add_after::<DagPass4>(ids[u]); }
-                5 => { graph.add_after::<DagPass5>(ids[u]); }
+                0 => {
+                    graph.add_after::<DagPass0>(ids[u]);
+                }
+                1 => {
+                    graph.add_after::<DagPass1>(ids[u]);
+                }
+                2 => {
+                    graph.add_after::<DagPass2>(ids[u]);
+                }
+                3 => {
+                    graph.add_after::<DagPass3>(ids[u]);
+                }
+                4 => {
+                    graph.add_after::<DagPass4>(ids[u]);
+                }
+                5 => {
+                    graph.add_after::<DagPass5>(ids[u]);
+                }
                 _ => unreachable!(),
             }
         }
@@ -709,7 +724,7 @@ mod tests {
         }
 
         // Build a map from node id → position in compiled output
-        let mut pos_map: HashMap<u32, usize> = HashMap::new();
+        let mut pos_map: HashMap<u32, usize> = HashMap::default();
         for (pos, pass) in compiled.passes.iter().enumerate() {
             if pos_map.insert(pass.node, pos).is_some() {
                 return false; // duplicate node — fail
@@ -740,7 +755,7 @@ mod tests {
     #[test]
     fn diamond_dependency_ordering() {
         // Build diamond: A → B, A → C, B → D, C → D
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let a = graph.add_pass::<DiamondA>();
         let b = graph.add_after::<DiamondB>(a); // B depends on A
         let c = graph.add_after::<DiamondC>(a); // C depends on A
@@ -794,7 +809,7 @@ mod tests {
 
     #[test]
     fn single_pass_produces_one_instance() {
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         graph.add_pass::<SinglePass>();
 
         let world = default_world();
@@ -812,7 +827,7 @@ mod tests {
 
     #[test]
     fn empty_graph_produces_empty_passes() {
-        let graph = RenderGraph::new();
+        let graph = RenderGraph::default();
 
         let world = default_world();
         let settings = default_settings();
@@ -831,7 +846,7 @@ mod tests {
     #[test]
     fn n_cameras_times_m_passes_expansion() {
         // 2 passes that survive culling, 3 cameras with no masks → 6 instances
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         graph.add_pass::<DagPass0>();
         graph.add_pass::<DagPass1>();
 
@@ -855,7 +870,7 @@ mod tests {
     #[test]
     fn camera_mask_excludes_one_pass() {
         // 2 passes, 2 cameras: camera 0 has no mask (all passes), camera 1 excludes pass 0
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let pass0 = graph.add_pass::<DagPass0>();
         let pass1 = graph.add_pass::<DagPass1>();
 
@@ -865,8 +880,8 @@ mod tests {
         let world = default_world();
         let settings = default_settings();
         let cameras = make_camera_queue(vec![
-            make_camera(None),          // gets both passes
-            make_camera(Some(mask)),    // gets only pass 1
+            make_camera(None),       // gets both passes
+            make_camera(Some(mask)), // gets only pass 1
         ]);
 
         let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
@@ -884,7 +899,11 @@ mod tests {
             .iter()
             .filter(|p| p.camera == Some(1))
             .collect();
-        assert_eq!(camera1_passes.len(), 1, "camera 1 should have 1 pass instance");
+        assert_eq!(
+            camera1_passes.len(),
+            1,
+            "camera 1 should have 1 pass instance"
+        );
         assert_eq!(
             camera1_passes[0].node, *pass1,
             "camera 1's only pass should be pass 1"
@@ -893,7 +912,7 @@ mod tests {
 
     #[test]
     fn mask_excludes_all_passes_and_mask_excludes_no_passes() {
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let pass0 = graph.add_pass::<DagPass0>();
         let pass1 = graph.add_pass::<DagPass1>();
 
@@ -909,9 +928,7 @@ mod tests {
         let settings = default_settings();
 
         // Test: mask excludes all passes → zero instances for that camera
-        let cameras_all_excluded = make_camera_queue(vec![
-            make_camera(Some(mask_all)),
-        ]);
+        let cameras_all_excluded = make_camera_queue(vec![make_camera(Some(mask_all))]);
         let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras_all_excluded);
         assert_eq!(
             compiled.passes.len(),
@@ -920,9 +937,7 @@ mod tests {
         );
 
         // Test: mask excludes no passes → all passes instantiated (same as None)
-        let cameras_none_excluded = make_camera_queue(vec![
-            make_camera(Some(mask_none)),
-        ]);
+        let cameras_none_excluded = make_camera_queue(vec![make_camera(Some(mask_none))]);
         let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras_none_excluded);
         assert_eq!(
             compiled.passes.len(),
@@ -962,7 +977,7 @@ mod tests {
     #[test]
     fn resource_deduplication_same_type_compatible_desc() {
         // Two passes both create MockResource with desc=1024 → same allocation
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         graph.add_pass::<DedupPassA>();
         graph.add_pass::<DedupPassB>();
 
@@ -973,7 +988,11 @@ mod tests {
         let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
 
         // Both passes should survive culling
-        assert_eq!(compiled.passes.len(), 2, "both passes should survive culling");
+        assert_eq!(
+            compiled.passes.len(),
+            2,
+            "both passes should survive culling"
+        );
 
         // Since both create MockResource with desc=1024 (compatible), the expand
         // stage should deduplicate them into the same ResourceRef, leading to a
@@ -1014,7 +1033,7 @@ mod tests {
     #[test]
     fn resource_non_deduplication_different_type() {
         // MockResource desc=1024 vs MockResourceB desc=1024 → separate allocations
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         graph.add_pass::<DedupPassA>();
         graph.add_pass::<DedupPassTypeB>();
 
@@ -1024,7 +1043,11 @@ mod tests {
 
         let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
 
-        assert_eq!(compiled.passes.len(), 2, "both passes should survive culling");
+        assert_eq!(
+            compiled.passes.len(),
+            2,
+            "both passes should survive culling"
+        );
         assert_eq!(
             compiled.allocations.len(),
             2,
@@ -1035,7 +1058,7 @@ mod tests {
     #[test]
     fn resource_non_deduplication_incompatible_desc() {
         // MockResource desc=1024 vs MockResource desc=2048 → separate allocations
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         graph.add_pass::<DedupPassA>();
         graph.add_pass::<DedupPassIncompat>();
 
@@ -1045,7 +1068,11 @@ mod tests {
 
         let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
 
-        assert_eq!(compiled.passes.len(), 2, "both passes should survive culling");
+        assert_eq!(
+            compiled.passes.len(),
+            2,
+            "both passes should survive culling"
+        );
         assert_eq!(
             compiled.allocations.len(),
             2,
@@ -1140,7 +1167,7 @@ mod tests {
         // ResolvePassA: desc=512 → resolved=1024
         // ResolvePassB: desc=1024 → resolved=2048
         // Different resolved descs → separate allocations (proves resolve() is used)
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         graph.add_pass::<ResolvePassA>();
         graph.add_pass::<ResolvePassB>();
 
@@ -1160,7 +1187,7 @@ mod tests {
         // ResolvePassA: desc=512 → resolved=1024
         // ResolvePassC: desc=512 → resolved=1024
         // Same resolved descs → should deduplicate into one allocation
-        let mut graph2 = RenderGraph::new();
+        let mut graph2 = RenderGraph::default();
         graph2.add_pass::<ResolvePassA>();
         graph2.add_pass::<ResolvePassC>();
 
@@ -1258,7 +1285,11 @@ mod tests {
         r.read(1);
         r.read(10);
 
-        assert_eq!(r.producer, Some(5), "producer = min of write indices (5, 8)");
+        assert_eq!(
+            r.producer,
+            Some(5),
+            "producer = min of write indices (5, 8)"
+        );
         assert_eq!(r.first_user, Some(1), "first_user = min of all indices");
         assert_eq!(r.last_user, Some(10), "last_user = max of all indices");
         assert_eq!(r.ref_count, 3, "ref_count = number of reads");
@@ -1439,7 +1470,7 @@ mod tests {
     fn dead_resource_chain_removal() {
         // A creates+writes R1, B reads R1 and creates+writes R2, C reads+writes R1.
         // R2 has no readers → B is culled, A and C survive.
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let a = graph.add_pass::<CullCreateA>();
         graph.add_after::<CullReadWriteB>(a);
         graph.add_after::<CullReadWriteC>(a);
@@ -1458,23 +1489,17 @@ mod tests {
         );
 
         let node_ids: Vec<u32> = compiled.passes.iter().map(|p| p.node).collect();
-        assert!(
-            node_ids.contains(&*a),
-            "pass A should survive culling"
-        );
+        assert!(node_ids.contains(&*a), "pass A should survive culling");
         // CullReadWriteC's PassId
         let c = graph.add_pass::<CullReadWriteC>(); // returns existing PassId
-        assert!(
-            node_ids.contains(&*c),
-            "pass C should survive culling"
-        );
+        assert!(node_ids.contains(&*c), "pass C should survive culling");
     }
 
     #[test]
     fn cascading_cull_propagation() {
         // A creates R1, B reads R1 and creates R2, C reads R2 and creates R3.
         // R3 has no readers → C culled → R2 dead → B culled → R1 dead → A culled.
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let a = graph.add_pass::<CascadeA>();
         let b = graph.add_after::<CascadeB>(a);
         graph.add_after::<CascadeC>(b);
@@ -1496,7 +1521,7 @@ mod tests {
     fn multi_output_pass_retention() {
         // MultiOutputPass creates+writes R1 and R2. MultiOutputReader reads+writes R1.
         // R2 has no readers, but MultiOutputPass survives because R1's write keeps ref_count > 0.
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let producer = graph.add_pass::<MultiOutputPass>();
         graph.add_after::<MultiOutputReader>(producer);
 
@@ -1556,7 +1581,7 @@ mod tests {
         // Camera 0's resource spans pass indices 0..1, camera 1's spans 2..3.
         // Same type (MockResource), same kind (Transient), compatible desc (1024 == 1024),
         // non-overlapping lifetimes → the compiler should produce a single allocation.
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let p1 = graph.add_pass::<AllocPass1>();
         graph.add_after::<AllocPass2>(p1);
 
@@ -1591,7 +1616,7 @@ mod tests {
         // The cull loop only processes dead resources, not dead passes directly,
         // so ReadOnlyPass being culled does NOT cascade to decrement R1.
 
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let producer = graph.add_pass::<ReadOnlyProducer>();
         graph.add_after::<ReadOnlyPass>(producer);
 
@@ -1660,7 +1685,7 @@ mod tests {
         // MockResource desc=1024 vs MockResourceB desc=1024.
         // Same desc value, same kind (both Transient), but different types →
         // the allocator should produce separate allocations (requirement 6.3).
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let a = graph.add_pass::<AllocDiffTypeA>();
         let b = graph.add_pass::<AllocDiffTypeB>();
         graph.add_after::<AllocDiffTypeReader>(a);
@@ -1729,7 +1754,7 @@ mod tests {
         // MockResource (Transient) desc=1024 vs MockResourceImported (Imported) desc=1024.
         // Same desc value but different kinds → the allocator should produce
         // separate allocations (requirement 6.4).
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let t = graph.add_pass::<AllocDiffKindTransient>();
         let i = graph.add_pass::<AllocDiffKindImported>();
         graph.add_after::<AllocDiffKindReader>(t);
@@ -1798,7 +1823,7 @@ mod tests {
         // MockResource desc=1024 vs MockResource desc=2048.
         // Same type, same kind (both Transient), but incompatible descriptions
         // (compatible(1024, 2048) = false) → separate allocations (requirement 6.5).
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let a = graph.add_pass::<AllocIncompatA>();
         let b = graph.add_pass::<AllocIncompatB>();
         graph.add_after::<AllocIncompatReader>(a);
@@ -1837,7 +1862,7 @@ mod tests {
         // - Camera 2's resource reuses it again, updating last_user to Some(5)
         //
         // Result: 1 allocation with last_user=Some(5) (requirement 6.6).
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let p1 = graph.add_pass::<AllocPass1>();
         graph.add_after::<AllocPass2>(p1);
 
@@ -1883,7 +1908,7 @@ mod tests {
         // The allocate stage filters out resources with ref_count == 0 before allocation.
         // Only R1 (which has readers) should get an allocation. R2 should be filtered out.
         // This validates requirements 6.8 (zero-ref filtering).
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let producer = graph.add_pass::<MultiOutputPass>();
         graph.add_after::<MultiOutputReader>(producer);
 
@@ -1920,13 +1945,13 @@ mod tests {
         //
         // The allocate stage sorts resources by first_user (requirement 6.7) before
         // attempting reuse. This ensures resources are processed in chronological order:
-        //   1. Process resource with first_user=0 → create new allocation (last_user=1)
+        //   1. Process resource with first_user=0 → create default allocation (last_user=1)
         //   2. Process resource with first_user=2 → reuse (1 < 2), update last_user=3
         //   3. Process resource with first_user=4 → reuse (3 < 4), update last_user=5
         //
         // Without sorting, resources might be processed out of order, potentially
         // preventing valid reuse. The sort guarantees optimal reuse.
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let p1 = graph.add_pass::<AllocPass1>();
         graph.add_after::<AllocPass2>(p1);
 
@@ -2085,7 +2110,7 @@ mod tests {
         //   - Each pass has exactly 1 binding group (group 0)
         //   - Both passes reference the same layout and bind_group index
 
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let pa = graph.add_pass::<BindReadPassA>();
         graph.add_after::<BindReadPassB>(pa);
 
@@ -2114,8 +2139,7 @@ mod tests {
             "identical layouts should be deduplicated via IndexSet (requirement 7.3)"
         );
         assert_eq!(
-            compiled.passes[0].bindings[0].layout,
-            compiled.passes[1].bindings[0].layout,
+            compiled.passes[0].bindings[0].layout, compiled.passes[1].bindings[0].layout,
             "both passes should reference the same layout index"
         );
 
@@ -2126,8 +2150,7 @@ mod tests {
             "identical bind group keys should be deduplicated via IndexSet (requirement 7.4)"
         );
         assert_eq!(
-            compiled.passes[0].bindings[0].bind_group,
-            compiled.passes[1].bindings[0].bind_group,
+            compiled.passes[0].bindings[0].bind_group, compiled.passes[1].bindings[0].bind_group,
             "both passes should reference the same bind_group index"
         );
     }
@@ -2169,7 +2192,7 @@ mod tests {
         //   1. The pass's binding resolves to the correct allocation.
         //   2. There is exactly 1 allocation.
 
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         graph.add_pass::<BindResConsumer>();
 
         let world = default_world();
@@ -2190,11 +2213,7 @@ mod tests {
 
         // The pass has a binding
         let pass = &compiled.passes[0];
-        assert_eq!(
-            pass.bindings.len(),
-            1,
-            "pass should have 1 bind group"
-        );
+        assert_eq!(pass.bindings.len(), 1, "pass should have 1 bind group");
 
         // Verify the resources table (alloc_table) maps correctly:
         // The pass's cursor + binding node should resolve to allocation 0.
@@ -2259,7 +2278,7 @@ mod tests {
         // The bindings stage must sort them so PassInstance.bindings is
         // ordered [group 0, group 1, group 2].
 
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         graph.add_pass::<MultiGroupPass>();
 
         let world = default_world();
@@ -2338,7 +2357,7 @@ mod tests {
         // Requirement 8.1
         // Pass A creates resource, Pass B reads resource, one camera.
         // Expected: 2 passes, 1 allocation, correct bindings on pass B.
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let a = graph.add_pass::<E2eLinearCreate>();
         graph.add_after::<E2eLinearRead>(a);
 
@@ -2412,7 +2431,7 @@ mod tests {
         // Requirement 8.2
         // A creates R1, B reads R1 and creates R2, C reads R1.
         // R2 has no readers → B culled, A and C retained.
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let a = graph.add_pass::<E2eBranchCreate>();
         graph.add_after::<E2eBranchMiddle>(a);
         graph.add_after::<E2eBranchConsumer>(a);
@@ -2445,7 +2464,7 @@ mod tests {
         // Requirement 8.3
         // Graph with 2 passes compiled with 2 cameras → pass instances for
         // each camera with correct camera indices.
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let a = graph.add_pass::<E2eBranchCreate>();
         graph.add_after::<E2eBranchConsumer>(a);
 
@@ -2503,7 +2522,7 @@ mod tests {
         // AllocPass2 reads+writes the same resource.
         // With 2 cameras: camera 0 passes span indices 0..1, camera 1 spans 2..3.
         // Same type, same kind, compatible desc, non-overlapping → 1 allocation.
-        let mut graph = RenderGraph::new();
+        let mut graph = RenderGraph::default();
         let p1 = graph.add_pass::<AllocPass1>();
         graph.add_after::<AllocPass2>(p1);
 

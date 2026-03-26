@@ -4,8 +4,7 @@ use crate::{
 };
 use asset::{Asset, AssetId, Assets};
 use ecs::{
-    Command, Resource,
-    unlifetime::{Read, SCommands},
+    Command, Resource, system::Main, unlifetime::{Read, SCommands}
 };
 use std::{
     borrow::Cow,
@@ -155,7 +154,7 @@ impl ShaderVariants {
 
     pub(crate) fn extract(
         variants: &mut Self,
-        assets: &Assets<Shader>,
+        assets: Main<&Assets<Shader>>,
         extract_info: &mut ExtractInfo<GpuShader>,
     ) {
         for (shader_id, variants) in variants.queue.drain() {

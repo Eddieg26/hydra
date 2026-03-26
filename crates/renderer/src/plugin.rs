@@ -47,6 +47,7 @@ impl Plugin for RenderPlugin {
         .add_sub_phase(Run, PreRender)
         .add_sub_phase(Run, Render)
         .add_sub_phase(Run, Present)
+        .add_resource(RenderGraph::default())
         .add_resource(RenderSettings::default())
         .add_resource(CameraQueue::default())
         .add_resource(PipelineCache::default())

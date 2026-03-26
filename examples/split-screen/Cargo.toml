@@ -1,0 +1,12 @@
+[package]
+name = "split-screen-example"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ecs = { path = "../../crates/ecs" }
+renderer = { path = "../../crates/renderer" }
+asset = { path = "../../crates/asset" }
+bytemuck = { workspace = true }
+wgpu = { workspace = true }
+wgsl-macro = "0.4.0"

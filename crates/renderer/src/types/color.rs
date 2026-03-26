@@ -11,6 +11,10 @@ pub struct Color {
 }
 
 impl Color {
+    pub fn as_slice(&self) -> [f32; 4] {
+        [self.r, self.b, self.g, self.a]
+    }
+
     pub fn to_bytes(&self) -> (u8, u8, u8, u8) {
         let r = (self.r * 255.0) as u8;
         let g = (self.g * 255.0) as u8;

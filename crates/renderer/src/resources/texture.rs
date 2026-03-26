@@ -135,6 +135,30 @@ pub enum TextureSampler {
     },
 }
 
+impl TextureSampler {
+    pub fn desc<'a>(&self, label: Option<&'a str>) -> SamplerDesc<'a> {
+        let (filter, wrap, compare, anisotropy) = match *self {
+            TextureSampler::Default => (FilterMode::Linear, WrapMode::ClampToEdge, None, 1),
+            TextureSampler::Custom {
+                filter,
+                wrap,
+                compare,
+                anisotropy,
+            } => (filter, wrap, compare, anisotropy),
+        };
+
+        SamplerDesc {
+            label,
+            wrap,
+            filter,
+            compare,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 32.0,
+            anisotropy_clamp: anisotropy,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Asset)]
 pub struct Texture {
     pub dimension: TextureDimension,
@@ -266,6 +290,7 @@ impl RenderAsset for GpuTexture {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SamplerId(usize);
 
+#[derive(Clone)]
 pub struct SamplerDesc<'a> {
     pub label: Label<'a>,
     pub wrap: WrapMode,
@@ -290,6 +315,25 @@ impl Default for SamplerDesc<'_> {
     }
 }
 
+impl<'a> From<SamplerDesc<'a>> for wgpu::SamplerDescriptor<'a> {
+    fn from(value: SamplerDesc<'a>) -> Self {
+        wgpu::SamplerDescriptor {
+            label: value.label,
+            address_mode_u: value.wrap.into(),
+            address_mode_v: value.wrap.into(),
+            address_mode_w: value.wrap.into(),
+            mag_filter: value.filter,
+            min_filter: value.filter,
+            mipmap_filter: value.filter,
+            lod_min_clamp: value.lod_min_clamp,
+            lod_max_clamp: value.lod_max_clamp,
+            compare: value.compare,
+            anisotropy_clamp: value.anisotropy_clamp,
+            border_color: value.wrap.border_color(),
+        }
+    }
+}
+
 #[derive(Resource)]
 pub struct SamplerCache {
     samplers: Vec<Sampler>,
@@ -300,32 +344,12 @@ impl SamplerCache {
     pub const DEFAULT: SamplerId = SamplerId(0);
 
     pub fn new(device: &RenderDevice) -> Self {
-        let default = Self::new_sampler(device, &SamplerDesc::default());
+        let default = device.create_sampler(&TextureSampler::Default.desc(None).into());
 
         Self {
             samplers: vec![default],
             allocated: HashMap::from_iter(std::iter::once((TextureSampler::Default, SamplerId(0)))),
         }
-    }
-
-    fn new_sampler(device: &RenderDevice, desc: &SamplerDesc) -> Sampler {
-        let address_mode = desc.wrap.into();
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: desc.label,
-            address_mode_u: address_mode,
-            address_mode_v: address_mode,
-            address_mode_w: address_mode,
-            mag_filter: desc.filter,
-            min_filter: desc.filter,
-            mipmap_filter: desc.filter,
-            lod_min_clamp: desc.lod_min_clamp,
-            lod_max_clamp: desc.lod_max_clamp,
-            compare: desc.compare,
-            anisotropy_clamp: desc.anisotropy_clamp,
-            border_color: desc.wrap.border_color(),
-        });
-
-        sampler
     }
 
     pub fn get(&self, id: SamplerId) -> &Sampler {
@@ -337,27 +361,9 @@ impl SamplerCache {
             return *id;
         } else {
             let id = self.samplers.len();
-            let (filter, wrap, compare, anisotropy) = match sampler {
-                TextureSampler::Default => todo!(),
-                TextureSampler::Custom {
-                    filter,
-                    wrap,
-                    compare,
-                    anisotropy,
-                } => (filter, wrap, compare, anisotropy),
-            };
+            let desc = sampler.desc(None);
 
-            let desc = SamplerDesc {
-                label: None,
-                wrap,
-                filter,
-                compare,
-                anisotropy_clamp: anisotropy,
-                lod_min_clamp: 0.0,
-                lod_max_clamp: 32.0,
-            };
-
-            self.samplers.push(Self::new_sampler(device, &desc));
+            self.samplers.push(device.create_sampler(&desc.into()));
             self.allocated.insert(sampler, SamplerId(id));
 
             SamplerId(id)

@@ -35,7 +35,7 @@ pub struct Camera {
     pub msaa: SettingState,
 }
 
-#[derive(Clone, Hash)]
+#[derive(Clone)]
 pub struct CameraSettings {
     /// Camera Entity
     pub entity: Entity,
@@ -43,6 +43,10 @@ pub struct CameraSettings {
     pub priority: i8,
     /// Render target, if None - render to screen
     pub target: Option<AssetId<RenderTexture>>,
+    /// Clear color, if None - don't clear
+    pub clear: Option<Color>,
+    /// Viewport in normalized coordinates (0.0..1.0)
+    pub viewport: Viewport,
     /// MSAA samples, if Auto - use the same value as the main render target
     pub msaa: SettingState,
     /// Render target width
@@ -64,6 +68,8 @@ impl CameraSettings {
         self.target = camera.target;
         self.width = target.width;
         self.height = target.height;
+        self.clear = camera.clear;
+        self.viewport = camera.viewport.clone();
 
         if self.format != target.format || self.msaa != camera.msaa || camera.target == None {
             self.format = target.format;
@@ -92,7 +98,7 @@ impl CameraSettings {
     }
 }
 
-#[derive(Resource, Default, Clone, PartialEq, Eq, Hash)]
+#[derive(Resource, Default, Clone, PartialEq, Eq)]
 pub struct CameraQueue(Vec<CameraSettings>);
 impl CameraQueue {
     pub fn sort(&mut self) {
@@ -147,6 +153,8 @@ impl CameraQueue {
                     entity,
                     priority: camera.priority,
                     target: camera.target,
+                    clear: camera.clear,
+                    viewport: camera.viewport.clone(),
                     msaa: camera.msaa,
                     width: target.width,
                     height: target.height,
