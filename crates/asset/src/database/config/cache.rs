@@ -2,7 +2,7 @@ use crate::{
     asset::{Asset, AssetId, AssetType, ErasedId},
     database::{config::importer::AssetProcessorId, library::AssetLibrary},
     ext::{DeserializeExt, SerializeExt},
-    io::{AsyncIoError, AsyncReader, ErasedFileSystem, FileSystem, path::AssetPath},
+    io::{AsyncIoError, AsyncReader, AsyncWriter, ErasedFileSystem, FileSystem, path::AssetPath},
 };
 use futures::{AsyncReadExt, AsyncWriteExt};
 use serde::{Deserialize, Serialize, ser::SerializeStruct};
@@ -334,7 +334,7 @@ impl AssetCache {
         let mut writer = self.fs.writer(&path).await?;
 
         writer.write_all(&data).await.map_err(AsyncIoError::from)?;
-        writer.flush().await.map_err(AsyncIoError::from)
+        AsyncWriter::flush(&mut writer).await
     }
 
     pub async fn remove_artifact(
@@ -354,7 +354,7 @@ impl AssetCache {
         let mut writer = self.fs.writer(Self::LIBRARY.as_ref()).await?;
         let data = library.to_bytes().map_err(AsyncIoError::from)?;
         writer.write_all(&data).await.map_err(AsyncIoError::from)?;
-        writer.flush().await.map_err(AsyncIoError::from)?;
+        AsyncWriter::flush(&mut writer).await?;
 
         Ok(data)
     }

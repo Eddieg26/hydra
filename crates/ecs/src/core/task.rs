@@ -323,10 +323,7 @@ macro_rules! task_pool_type {
         impl $name {
             /// Initialize the pool singleton. Only the first call will set the pool.
             pub fn init(pool: $crate::core::task::TaskPool) {
-                $static_name
-                    .set(Self(pool))
-                    .ok()
-                    .expect(concat!(stringify!($name), " already initialized"));
+                let _ = $static_name.set(Self(pool));
             }
 
             /// Get a reference to the singleton pool.

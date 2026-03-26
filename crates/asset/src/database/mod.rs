@@ -717,6 +717,7 @@ impl Future for LoadTask {
     }
 }
 
+#[cfg(test)]
 #[allow(unused_imports, dead_code)]
 mod tests {
     use crate::{
@@ -729,7 +730,7 @@ mod tests {
             },
         },
         io::{
-            FileSystem,
+            AsyncWriter, FileSystem,
             embedded::EmbeddedFs,
             path::{AssetPath, AssetSource},
             vfs::VirtualFs,
@@ -738,6 +739,7 @@ mod tests {
     };
     use ecs::core::task::{IoTaskPool, TaskPoolBuilder};
     use serde::{Deserialize, Serialize};
+    use serial_test::serial;
     use smol::io::{AsyncReadExt, AsyncWriteExt};
 
     #[derive(Debug, Serialize, Deserialize)]
@@ -784,12 +786,28 @@ mod tests {
         }
     }
 
+    use std::sync::Once;
+
+    static INIT: Once = Once::new();
+    
+    fn init_pools() {
+        INIT.call_once(|| {
+            IoTaskPool::init(TaskPoolBuilder::new().build());
+        });
+    }
+
     fn setup() -> &'static AssetDatabase {
-        IoTaskPool::init(TaskPoolBuilder::new().build());
+        init_pools();
+
+        if AssetDatabase::is_initialized() {
+            return AssetDatabase::get();
+        }
+
         let source = smol::block_on(async {
             let source = VirtualFs::new();
             let mut writer = source.writer("test.txt".as_ref()).await.unwrap();
             writer.write_all(b"test").await.unwrap();
+            AsyncWriter::flush(&mut writer).await.unwrap();
 
             source
         });
@@ -804,12 +822,14 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_import() {
         let database = setup();
         smol::block_on(database.import());
 
         let library = database.library.try_read().unwrap();
         let id = library.get(&AssetPath::from("test.txt")).copied().unwrap();
+        drop(library);
 
         database.update(|event| match event {
             AssetDatabaseEvent::AssetScanError(error) => panic!("{error}"),
@@ -823,11 +843,16 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load() {
         let database = setup();
         smol::block_on(database.import());
 
+        // Drain any import events before loading
+        database.update(|_| {});
+
         let loaded = smol::block_on(database.load::<TextFile>("test.txt")).unwrap();
+        let mut found_load = false;
         database.update(|event| match event {
             AssetDatabaseEvent::AssetScanError(error) => panic!("{error}"),
             AssetDatabaseEvent::ImportError(error) => panic!("{error}"),
@@ -837,8 +862,10 @@ mod tests {
                 let file = unsafe { asset.into::<TextFile>() };
                 assert_eq!(loaded, id);
                 assert_eq!(file.0, "processed");
+                found_load = true;
             }
             _ => {}
         });
+        assert!(found_load, "Expected LoadedAsset event");
     }
 }
