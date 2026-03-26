@@ -1,5 +1,6 @@
 use crate::{
     core::{RenderDevice, RenderSettings, RenderSurface, RenderSurfaceTexture},
+    output::OutputPassPlugin,
     renderer::{
         camera::{Camera, CameraQueue},
         graph::{RenderGraph, RenderGraphDirty},
@@ -30,6 +31,7 @@ impl Plugin for RenderPlugin {
         app.add_plugins((
             WindowPlugin,
             AssetPlugin,
+            OutputPassPlugin,
             RenderAssetPlugin::<GpuShader>::new(),
             RenderAssetPlugin::<GpuTexture>::new(),
             RenderAssetPlugin::<GpuMesh>::new(),
