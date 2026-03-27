@@ -541,8 +541,9 @@ mod tests {
     impl GraphPass for DiamondA {
         const NAME: Name = "diamond_a";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("res_diamond", 1024);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res =
+                builder.create::<MockResource>("res_diamond", 1024, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res);
             move |_ctx| {}
         }
     }
@@ -551,9 +552,10 @@ mod tests {
     impl GraphPass for DiamondB {
         const NAME: Name = "diamond_b";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("res_diamond", 1024);
-            builder.read::<MockResource>(res, ResourceUsage::Attachment);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res =
+                builder.create::<MockResource>("res_diamond", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResource>(res);
+            builder.write::<MockResource>(res);
             move |_ctx| {}
         }
     }
@@ -562,9 +564,10 @@ mod tests {
     impl GraphPass for DiamondC {
         const NAME: Name = "diamond_c";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("res_diamond", 1024);
-            builder.read::<MockResource>(res, ResourceUsage::Attachment);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res =
+                builder.create::<MockResource>("res_diamond", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResource>(res);
+            builder.write::<MockResource>(res);
             move |_ctx| {}
         }
     }
@@ -573,9 +576,10 @@ mod tests {
     impl GraphPass for DiamondD {
         const NAME: Name = "diamond_d";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("res_diamond", 1024);
-            builder.read::<MockResource>(res, ResourceUsage::Attachment);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res =
+                builder.create::<MockResource>("res_diamond", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResource>(res);
+            builder.write::<MockResource>(res);
             move |_ctx| {}
         }
     }
@@ -587,9 +591,9 @@ mod tests {
     impl GraphPass for SinglePass {
         const NAME: Name = "single_pass";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("res_single", 512);
-            builder.read::<MockResource>(res, ResourceUsage::Attachment);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res = builder.create::<MockResource>("res_single", 512, ResourceUsage::Attachment);
+            builder.read::<MockResource>(res);
+            builder.write::<MockResource>(res);
             move |_ctx| {}
         }
     }
@@ -606,9 +610,10 @@ mod tests {
                 fn setup(
                     builder: &mut PassBuilder,
                 ) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-                    let res = builder.create::<MockResource>("res_dag", 42);
-                    builder.read::<MockResource>(res, ResourceUsage::Attachment);
-                    builder.write::<MockResource>(res, ResourceUsage::Attachment);
+                    let res =
+                        builder.create::<MockResource>("res_dag", 42, ResourceUsage::Attachment);
+                    builder.read::<MockResource>(res);
+                    builder.write::<MockResource>(res);
                     move |_ctx| {}
                 }
             }
@@ -956,9 +961,9 @@ mod tests {
     impl GraphPass for DedupPassA {
         const NAME: Name = "dedup_a";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("res_dedup", 1024);
-            builder.read::<MockResource>(res, ResourceUsage::Attachment);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res = builder.create::<MockResource>("res_dedup", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResource>(res);
+            builder.write::<MockResource>(res);
             move |_ctx| {}
         }
     }
@@ -967,9 +972,9 @@ mod tests {
     impl GraphPass for DedupPassB {
         const NAME: Name = "dedup_b";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("res_dedup", 1024);
-            builder.read::<MockResource>(res, ResourceUsage::Attachment);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res = builder.create::<MockResource>("res_dedup", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResource>(res);
+            builder.write::<MockResource>(res);
             move |_ctx| {}
         }
     }
@@ -1010,9 +1015,10 @@ mod tests {
     impl GraphPass for DedupPassTypeB {
         const NAME: Name = "dedup_type_b";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResourceB>("res_dedup_b", 1024);
-            builder.read::<MockResourceB>(res, ResourceUsage::Attachment);
-            builder.write::<MockResourceB>(res, ResourceUsage::Attachment);
+            let res =
+                builder.create::<MockResourceB>("res_dedup_b", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResourceB>(res);
+            builder.write::<MockResourceB>(res);
             move |_ctx| {}
         }
     }
@@ -1023,9 +1029,13 @@ mod tests {
     impl GraphPass for DedupPassIncompat {
         const NAME: Name = "dedup_incompat";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("res_dedup_incompat", 2048);
-            builder.read::<MockResource>(res, ResourceUsage::Attachment);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res = builder.create::<MockResource>(
+                "res_dedup_incompat",
+                2048,
+                ResourceUsage::Attachment,
+            );
+            builder.read::<MockResource>(res);
+            builder.write::<MockResource>(res);
             move |_ctx| {}
         }
     }
@@ -1131,9 +1141,13 @@ mod tests {
     impl GraphPass for ResolvePassA {
         const NAME: Name = "resolve_a";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResourceDoubling>("res_resolve", 512);
-            builder.read::<MockResourceDoubling>(res, ResourceUsage::Attachment);
-            builder.write::<MockResourceDoubling>(res, ResourceUsage::Attachment);
+            let res = builder.create::<MockResourceDoubling>(
+                "res_resolve",
+                512,
+                ResourceUsage::Attachment,
+            );
+            builder.read::<MockResourceDoubling>(res);
+            builder.write::<MockResourceDoubling>(res);
             move |_ctx| {}
         }
     }
@@ -1143,9 +1157,13 @@ mod tests {
     impl GraphPass for ResolvePassB {
         const NAME: Name = "resolve_b";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResourceDoubling>("res_resolve", 1024);
-            builder.read::<MockResourceDoubling>(res, ResourceUsage::Attachment);
-            builder.write::<MockResourceDoubling>(res, ResourceUsage::Attachment);
+            let res = builder.create::<MockResourceDoubling>(
+                "res_resolve",
+                1024,
+                ResourceUsage::Attachment,
+            );
+            builder.read::<MockResourceDoubling>(res);
+            builder.write::<MockResourceDoubling>(res);
             move |_ctx| {}
         }
     }
@@ -1155,9 +1173,13 @@ mod tests {
     impl GraphPass for ResolvePassC {
         const NAME: Name = "resolve_c";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResourceDoubling>("res_resolve", 512);
-            builder.read::<MockResourceDoubling>(res, ResourceUsage::Attachment);
-            builder.write::<MockResourceDoubling>(res, ResourceUsage::Attachment);
+            let res = builder.create::<MockResourceDoubling>(
+                "res_resolve",
+                512,
+                ResourceUsage::Attachment,
+            );
+            builder.read::<MockResourceDoubling>(res);
+            builder.write::<MockResourceDoubling>(res);
             move |_ctx| {}
         }
     }
@@ -1345,8 +1367,8 @@ mod tests {
     impl GraphPass for CullCreateA {
         const NAME: Name = "cull_create_a";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("res_cull", 1024);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res = builder.create::<MockResource>("res_cull", 1024, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res);
             move |_ctx| {}
         }
     }
@@ -1356,11 +1378,11 @@ mod tests {
         const NAME: Name = "cull_rw_b";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
             // Read R1 (deduped via create with same name/type/desc)
-            let r1 = builder.create::<MockResource>("res_cull", 1024);
-            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
+            let r1 = builder.create::<MockResource>("res_cull", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResource>(r1);
             // Create + write R2 (different type → separate resource)
-            let r2 = builder.create::<MockResourceB>("res_cull_b", 1024);
-            builder.write::<MockResourceB>(r2, ResourceUsage::Attachment);
+            let r2 = builder.create::<MockResourceB>("res_cull_b", 1024, ResourceUsage::Attachment);
+            builder.write::<MockResourceB>(r2);
             move |_ctx| {}
         }
     }
@@ -1370,9 +1392,9 @@ mod tests {
         const NAME: Name = "cull_rw_c";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
             // Read + write R1 (deduped via create with same name/type/desc)
-            let r1 = builder.create::<MockResource>("res_cull", 1024);
-            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
-            builder.write::<MockResource>(r1, ResourceUsage::Attachment);
+            let r1 = builder.create::<MockResource>("res_cull", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResource>(r1);
+            builder.write::<MockResource>(r1);
             move |_ctx| {}
         }
     }
@@ -1386,8 +1408,9 @@ mod tests {
     impl GraphPass for CascadeA {
         const NAME: Name = "cascade_a";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("res_cascade_r1", 1024);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res =
+                builder.create::<MockResource>("res_cascade_r1", 1024, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res);
             move |_ctx| {}
         }
     }
@@ -1396,10 +1419,12 @@ mod tests {
     impl GraphPass for CascadeB {
         const NAME: Name = "cascade_b";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let r1 = builder.create::<MockResource>("res_cascade_r1", 1024);
-            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
-            let r2 = builder.create::<MockResourceB>("res_cascade_r2", 1024);
-            builder.write::<MockResourceB>(r2, ResourceUsage::Attachment);
+            let r1 =
+                builder.create::<MockResource>("res_cascade_r1", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResource>(r1);
+            let r2 =
+                builder.create::<MockResourceB>("res_cascade_r2", 1024, ResourceUsage::Attachment);
+            builder.write::<MockResourceB>(r2);
             move |_ctx| {}
         }
     }
@@ -1408,10 +1433,15 @@ mod tests {
     impl GraphPass for CascadeC {
         const NAME: Name = "cascade_c";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let r2 = builder.create::<MockResourceB>("res_cascade_r2", 1024);
-            builder.read::<MockResourceB>(r2, ResourceUsage::Attachment);
-            let r3 = builder.create::<MockResourceImported>("res_cascade_r3", 1024);
-            builder.write::<MockResourceImported>(r3, ResourceUsage::Attachment);
+            let r2 =
+                builder.create::<MockResourceB>("res_cascade_r2", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResourceB>(r2);
+            let r3 = builder.create::<MockResourceImported>(
+                "res_cascade_r3",
+                1024,
+                ResourceUsage::Attachment,
+            );
+            builder.write::<MockResourceImported>(r3);
             move |_ctx| {}
         }
     }
@@ -1423,10 +1453,12 @@ mod tests {
     impl GraphPass for MultiOutputPass {
         const NAME: Name = "multi_output";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let r1 = builder.create::<MockResource>("res_multi_r1", 1024);
-            builder.write::<MockResource>(r1, ResourceUsage::Attachment);
-            let r2 = builder.create::<MockResourceB>("res_multi_r2", 1024);
-            builder.write::<MockResourceB>(r2, ResourceUsage::Attachment);
+            let r1 =
+                builder.create::<MockResource>("res_multi_r1", 1024, ResourceUsage::Attachment);
+            builder.write::<MockResource>(r1);
+            let r2 =
+                builder.create::<MockResourceB>("res_multi_r2", 1024, ResourceUsage::Attachment);
+            builder.write::<MockResourceB>(r2);
             move |_ctx| {}
         }
     }
@@ -1435,9 +1467,10 @@ mod tests {
     impl GraphPass for MultiOutputReader {
         const NAME: Name = "multi_output_reader";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let r1 = builder.create::<MockResource>("res_multi_r1", 1024);
-            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
-            builder.write::<MockResource>(r1, ResourceUsage::Attachment);
+            let r1 =
+                builder.create::<MockResource>("res_multi_r1", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResource>(r1);
+            builder.write::<MockResource>(r1);
             move |_ctx| {}
         }
     }
@@ -1448,8 +1481,9 @@ mod tests {
     impl GraphPass for ReadOnlyPass {
         const NAME: Name = "read_only";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let r1 = builder.create::<MockResource>("res_readonly", 1024);
-            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
+            let r1 =
+                builder.create::<MockResource>("res_readonly", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResource>(r1);
             move |_ctx| {}
         }
     }
@@ -1458,8 +1492,9 @@ mod tests {
     impl GraphPass for ReadOnlyProducer {
         const NAME: Name = "read_only_producer";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let r1 = builder.create::<MockResource>("res_readonly", 1024);
-            builder.write::<MockResource>(r1, ResourceUsage::Attachment);
+            let r1 =
+                builder.create::<MockResource>("res_readonly", 1024, ResourceUsage::Attachment);
+            builder.write::<MockResource>(r1);
             move |_ctx| {}
         }
     }
@@ -1558,8 +1593,8 @@ mod tests {
     impl GraphPass for AllocPass1 {
         const NAME: Name = "alloc_pass_1";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("res_alloc", 1024);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res = builder.create::<MockResource>("res_alloc", 1024, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res);
             move |_ctx| {}
         }
     }
@@ -1568,9 +1603,9 @@ mod tests {
     impl GraphPass for AllocPass2 {
         const NAME: Name = "alloc_pass_2";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("res_alloc", 1024);
-            builder.read::<MockResource>(res, ResourceUsage::Attachment);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res = builder.create::<MockResource>("res_alloc", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResource>(res);
+            builder.write::<MockResource>(res);
             move |_ctx| {}
         }
     }
@@ -1650,8 +1685,9 @@ mod tests {
     impl GraphPass for AllocDiffTypeA {
         const NAME: Name = "alloc_diff_type_a";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("res_diff_type_a", 1024);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res =
+                builder.create::<MockResource>("res_diff_type_a", 1024, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res);
             move |_ctx| {}
         }
     }
@@ -1660,8 +1696,9 @@ mod tests {
     impl GraphPass for AllocDiffTypeB {
         const NAME: Name = "alloc_diff_type_b";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResourceB>("res_diff_type_b", 1024);
-            builder.write::<MockResourceB>(res, ResourceUsage::Attachment);
+            let res =
+                builder.create::<MockResourceB>("res_diff_type_b", 1024, ResourceUsage::Attachment);
+            builder.write::<MockResourceB>(res);
             move |_ctx| {}
         }
     }
@@ -1670,12 +1707,14 @@ mod tests {
     impl GraphPass for AllocDiffTypeReader {
         const NAME: Name = "alloc_diff_type_reader";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let r1 = builder.create::<MockResource>("res_diff_type_a", 1024);
-            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
-            builder.write::<MockResource>(r1, ResourceUsage::Attachment);
-            let r2 = builder.create::<MockResourceB>("res_diff_type_b", 1024);
-            builder.read::<MockResourceB>(r2, ResourceUsage::Attachment);
-            builder.write::<MockResourceB>(r2, ResourceUsage::Attachment);
+            let r1 =
+                builder.create::<MockResource>("res_diff_type_a", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResource>(r1);
+            builder.write::<MockResource>(r1);
+            let r2 =
+                builder.create::<MockResourceB>("res_diff_type_b", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResourceB>(r2);
+            builder.write::<MockResourceB>(r2);
             move |_ctx| {}
         }
     }
@@ -1719,8 +1758,9 @@ mod tests {
     impl GraphPass for AllocDiffKindTransient {
         const NAME: Name = "alloc_diff_kind_transient";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("res_diff_kind_t", 1024);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res =
+                builder.create::<MockResource>("res_diff_kind_t", 1024, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res);
             move |_ctx| {}
         }
     }
@@ -1729,8 +1769,12 @@ mod tests {
     impl GraphPass for AllocDiffKindImported {
         const NAME: Name = "alloc_diff_kind_imported";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResourceImported>("res_diff_kind_i", 1024);
-            builder.write::<MockResourceImported>(res, ResourceUsage::Attachment);
+            let res = builder.create::<MockResourceImported>(
+                "res_diff_kind_i",
+                1024,
+                ResourceUsage::Attachment,
+            );
+            builder.write::<MockResourceImported>(res);
             move |_ctx| {}
         }
     }
@@ -1739,12 +1783,17 @@ mod tests {
     impl GraphPass for AllocDiffKindReader {
         const NAME: Name = "alloc_diff_kind_reader";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let r1 = builder.create::<MockResource>("res_diff_kind_t", 1024);
-            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
-            builder.write::<MockResource>(r1, ResourceUsage::Attachment);
-            let r2 = builder.create::<MockResourceImported>("res_diff_kind_i", 1024);
-            builder.read::<MockResourceImported>(r2, ResourceUsage::Attachment);
-            builder.write::<MockResourceImported>(r2, ResourceUsage::Attachment);
+            let r1 =
+                builder.create::<MockResource>("res_diff_kind_t", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResource>(r1);
+            builder.write::<MockResource>(r1);
+            let r2 = builder.create::<MockResourceImported>(
+                "res_diff_kind_i",
+                1024,
+                ResourceUsage::Attachment,
+            );
+            builder.read::<MockResourceImported>(r2);
+            builder.write::<MockResourceImported>(r2);
             move |_ctx| {}
         }
     }
@@ -1788,8 +1837,9 @@ mod tests {
     impl GraphPass for AllocIncompatA {
         const NAME: Name = "alloc_incompat_a";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("res_incompat_a", 1024);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res =
+                builder.create::<MockResource>("res_incompat_a", 1024, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res);
             move |_ctx| {}
         }
     }
@@ -1798,8 +1848,9 @@ mod tests {
     impl GraphPass for AllocIncompatB {
         const NAME: Name = "alloc_incompat_b";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("res_incompat_b", 2048);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res =
+                builder.create::<MockResource>("res_incompat_b", 2048, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res);
             move |_ctx| {}
         }
     }
@@ -1808,12 +1859,14 @@ mod tests {
     impl GraphPass for AllocIncompatReader {
         const NAME: Name = "alloc_incompat_reader";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let r1 = builder.create::<MockResource>("res_incompat_a", 1024);
-            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
-            builder.write::<MockResource>(r1, ResourceUsage::Attachment);
-            let r2 = builder.create::<MockResource>("res_incompat_b", 2048);
-            builder.read::<MockResource>(r2, ResourceUsage::Attachment);
-            builder.write::<MockResource>(r2, ResourceUsage::Attachment);
+            let r1 =
+                builder.create::<MockResource>("res_incompat_a", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResource>(r1);
+            builder.write::<MockResource>(r1);
+            let r2 =
+                builder.create::<MockResource>("res_incompat_b", 2048, ResourceUsage::Attachment);
+            builder.read::<MockResource>(r2);
+            builder.write::<MockResource>(r2);
             move |_ctx| {}
         }
     }
@@ -2058,16 +2111,17 @@ mod tests {
     impl GraphPass for BindReadPassA {
         const NAME: Name = "bind_read_a";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResourceBindable>("bind_res", 1024);
-            builder.read::<MockResourceBindable>(
-                res,
+            let res = builder.create::<MockResourceBindable>(
+                "bind_res",
+                1024,
                 ResourceUsage::Binding {
                     group: 0,
                     binding: 0,
                     visiblitiy: ShaderStages::FRAGMENT,
                 },
             );
-            builder.write::<MockResourceBindable>(res, ResourceUsage::Attachment);
+
+            builder.write::<MockResourceBindable>(res);
             move |_| {}
         }
     }
@@ -2078,16 +2132,17 @@ mod tests {
     impl GraphPass for BindReadPassB {
         const NAME: Name = "bind_read_b";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResourceBindable>("bind_res", 1024);
-            builder.read::<MockResourceBindable>(
-                res,
+            let res = builder.create::<MockResourceBindable>(
+                "bind_res",
+                1024,
                 ResourceUsage::Binding {
                     group: 0,
                     binding: 0,
                     visiblitiy: ShaderStages::FRAGMENT,
                 },
             );
-            builder.write::<MockResourceBindable>(res, ResourceUsage::Attachment);
+
+            builder.write::<MockResourceBindable>(res);
             move |_| {}
         }
     }
@@ -2165,16 +2220,17 @@ mod tests {
     impl GraphPass for BindResConsumer {
         const NAME: Name = "bind_res_consumer";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResourceBindable>("bind_res", 1024);
-            builder.read::<MockResourceBindable>(
-                res,
+            let res = builder.create::<MockResourceBindable>(
+                "bind_res",
+                1024,
                 ResourceUsage::Binding {
                     group: 0,
                     binding: 0,
                     visiblitiy: ShaderStages::VERTEX,
                 },
             );
-            builder.write::<MockResourceBindable>(res, ResourceUsage::Attachment);
+
+            builder.write::<MockResourceBindable>(res);
             move |_| {}
         }
     }
@@ -2233,39 +2289,38 @@ mod tests {
     impl GraphPass for MultiGroupPass {
         const NAME: Name = "multi_group_pass";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let r0 = builder.create::<MockResourceBindable>("res_g2", 1024);
-            let r1 = builder.create::<MockResourceBindable>("res_g0", 2048);
-            let r2 = builder.create::<MockResourceBindable>("res_g1", 4096);
-
-            // Read in group 2 first, then group 0, then group 1
-            builder.read::<MockResourceBindable>(
-                r0,
+            let r0 = builder.create::<MockResourceBindable>(
+                "res_g2",
+                1024,
                 ResourceUsage::Binding {
                     group: 2,
                     binding: 0,
                     visiblitiy: ShaderStages::FRAGMENT,
                 },
             );
-            builder.read::<MockResourceBindable>(
-                r1,
+            let r1 = builder.create::<MockResourceBindable>(
+                "res_g0",
+                2048,
                 ResourceUsage::Binding {
                     group: 0,
                     binding: 0,
                     visiblitiy: ShaderStages::FRAGMENT,
                 },
             );
-            builder.read::<MockResourceBindable>(
-                r2,
+            let r2 = builder.create::<MockResourceBindable>(
+                "res_g1",
+                4096,
                 ResourceUsage::Binding {
                     group: 1,
                     binding: 0,
                     visiblitiy: ShaderStages::FRAGMENT,
                 },
             );
+
             // Write to each resource so this pass has ref_count = 3
-            builder.write::<MockResourceBindable>(r0, ResourceUsage::Attachment);
-            builder.write::<MockResourceBindable>(r1, ResourceUsage::Attachment);
-            builder.write::<MockResourceBindable>(r2, ResourceUsage::Attachment);
+            builder.write::<MockResourceBindable>(r0);
+            builder.write::<MockResourceBindable>(r1);
+            builder.write::<MockResourceBindable>(r2);
             move |_| {}
         }
     }
@@ -2328,8 +2383,9 @@ mod tests {
     impl GraphPass for E2eLinearCreate {
         const NAME: Name = "e2e_linear_create";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResourceBindable>("e2e_res", 1024);
-            builder.write::<MockResourceBindable>(res, ResourceUsage::Attachment);
+            let res =
+                builder.create::<MockResourceBindable>("e2e_res", 1024, ResourceUsage::Attachment);
+            builder.write::<MockResourceBindable>(res);
             move |_| {}
         }
     }
@@ -2338,16 +2394,17 @@ mod tests {
     impl GraphPass for E2eLinearRead {
         const NAME: Name = "e2e_linear_read";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResourceBindable>("e2e_res", 1024);
-            builder.read::<MockResourceBindable>(
-                res,
+            let res = builder.create::<MockResourceBindable>(
+                "e2e_res",
+                1024,
                 ResourceUsage::Binding {
                     group: 0,
                     binding: 0,
                     visiblitiy: ShaderStages::FRAGMENT,
                 },
             );
-            builder.write::<MockResourceBindable>(res, ResourceUsage::Attachment);
+
+            builder.write::<MockResourceBindable>(res);
             move |_| {}
         }
     }
@@ -2397,8 +2454,8 @@ mod tests {
     impl GraphPass for E2eBranchCreate {
         const NAME: Name = "e2e_branch_create";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let res = builder.create::<MockResource>("e2e_r1", 1024);
-            builder.write::<MockResource>(res, ResourceUsage::Attachment);
+            let res = builder.create::<MockResource>("e2e_r1", 1024, ResourceUsage::Attachment);
+            builder.write::<MockResource>(res);
             move |_| {}
         }
     }
@@ -2407,10 +2464,10 @@ mod tests {
     impl GraphPass for E2eBranchMiddle {
         const NAME: Name = "e2e_branch_middle";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let r1 = builder.create::<MockResource>("e2e_r1", 1024);
-            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
-            let r2 = builder.create::<MockResourceB>("e2e_r2", 1024);
-            builder.write::<MockResourceB>(r2, ResourceUsage::Attachment);
+            let r1 = builder.create::<MockResource>("e2e_r1", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResource>(r1);
+            let r2 = builder.create::<MockResourceB>("e2e_r2", 1024, ResourceUsage::Attachment);
+            builder.write::<MockResourceB>(r2);
             move |_| {}
         }
     }
@@ -2419,9 +2476,9 @@ mod tests {
     impl GraphPass for E2eBranchConsumer {
         const NAME: Name = "e2e_branch_consumer";
         fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-            let r1 = builder.create::<MockResource>("e2e_r1", 1024);
-            builder.read::<MockResource>(r1, ResourceUsage::Attachment);
-            builder.write::<MockResource>(r1, ResourceUsage::Attachment);
+            let r1 = builder.create::<MockResource>("e2e_r1", 1024, ResourceUsage::Attachment);
+            builder.read::<MockResource>(r1);
+            builder.write::<MockResource>(r1);
             move |_| {}
         }
     }

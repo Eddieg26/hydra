@@ -9,7 +9,7 @@ use renderer::{
         camera::{Camera, Projection, SettingState},
         graph::{
             GraphPass, Name, PassBuilder, RenderContext, RenderGraph, ResourceUsage, SurfaceDesc,
-            SurfaceKind, TextureSize, SurfaceTexture,
+            SurfaceKind, SurfaceTexture, TextureSize,
         },
     },
     resources::{
@@ -148,8 +148,10 @@ impl GraphPass for ClearPass {
                 kind: SurfaceKind::Color(ColorFormat::HDR),
                 msaa: Msaa::Disabled,
             },
+            ResourceUsage::Attachment,
         );
-        let surface = builder.write(surface, ResourceUsage::Attachment);
+
+        builder.write(surface);
 
         move |ctx: &mut RenderContext<'_>| {
             let camera = ctx.camera().expect("ClearPass requires a camera");

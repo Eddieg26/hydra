@@ -161,24 +161,16 @@ impl<'a> PassBuilder<'a> {
         }
     }
 
-    pub fn create<R: GraphResource>(&mut self, name: Name, desc: R::Desc) -> GraphResourceId<R> {
+    pub fn create<R: GraphResource>(
+        &mut self,
+        name: Name,
+        desc: R::Desc,
+        usage: ResourceUsage,
+    ) -> GraphResourceId<R> {
         let id = self.resources.create(name, desc);
         self.entries.push(ResourceEntry {
             node: id.0,
             access: ResourceAccess::Create,
-        });
-
-        id
-    }
-
-    pub fn read<R: GraphResource>(
-        &mut self,
-        resource: GraphResourceId<R>,
-        usage: ResourceUsage,
-    ) -> GraphResourceId<R> {
-        self.entries.push(ResourceEntry {
-            node: resource.0,
-            access: ResourceAccess::Read,
         });
 
         if let ResourceUsage::Binding {
@@ -188,7 +180,7 @@ impl<'a> PassBuilder<'a> {
         } = usage
         {
             self.bindings.push(ResourceBinding {
-                node: resource.0,
+                node: id.0,
                 group,
                 binding,
                 visiblitiy,
@@ -196,33 +188,23 @@ impl<'a> PassBuilder<'a> {
             });
         }
 
+        id
+    }
+
+    pub fn read<R: GraphResource>(&mut self, resource: GraphResourceId<R>) -> GraphResourceId<R> {
+        self.entries.push(ResourceEntry {
+            node: resource.0,
+            access: ResourceAccess::Read,
+        });
+
         resource
     }
 
-    pub fn write<R: GraphResource>(
-        &mut self,
-        resource: GraphResourceId<R>,
-        usage: ResourceUsage,
-    ) -> GraphResourceId<R> {
+    pub fn write<R: GraphResource>(&mut self, resource: GraphResourceId<R>) -> GraphResourceId<R> {
         self.entries.push(ResourceEntry {
             node: resource.0,
             access: ResourceAccess::Write,
         });
-
-        if let ResourceUsage::Binding {
-            group,
-            binding,
-            visiblitiy,
-        } = usage
-        {
-            self.bindings.push(ResourceBinding {
-                node: resource.0,
-                group,
-                binding,
-                visiblitiy,
-                access: ResourceAccess::Write,
-            });
-        }
 
         resource
     }

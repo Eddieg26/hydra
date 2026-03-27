@@ -178,27 +178,31 @@ impl GraphPass for OutputPass {
                 kind: SurfaceKind::Color(ColorFormat::HDR),
                 msaa: Msaa::Disabled,
             },
+            ResourceUsage::Binding {
+                group: 0,
+                binding: 0,
+                visiblitiy: ShaderStages::FRAGMENT,
+            },
         );
-        let output = builder.create::<RenderOutput>("output", RenderOutputDesc::Auto);
-        let sampler = builder.create::<Sampler>("default_sampler", TextureSampler::Default);
 
-        let _src = builder.read(
-            color,
+        let output = builder.create::<RenderOutput>(
+            "output",
+            RenderOutputDesc::Auto,
+            ResourceUsage::Attachment,
+        );
+
+        builder.create::<Sampler>(
+            "sampler",
+            TextureSampler::Default,
             ResourceUsage::Binding {
                 group: 0,
-                binding: 0,
+                binding: 1,
                 visiblitiy: ShaderStages::FRAGMENT,
             },
         );
-        let dst = builder.write(output, ResourceUsage::Attachment);
-        let sampler = builder.read(
-            sampler,
-            ResourceUsage::Binding {
-                group: 0,
-                binding: 0,
-                visiblitiy: ShaderStages::FRAGMENT,
-            },
-        );
+
+        builder.read(color);
+        builder.write(output);
 
         move |ctx: &mut RenderContext<'_>| {
             let camera = ctx.camera().expect("Missing camera for OutputPass");
@@ -218,7 +222,7 @@ impl GraphPass for OutputPass {
                 return;
             };
 
-            let dst = ctx.get(dst);
+            let dst = ctx.get(output);
             let mut encoder = ctx.encoder("output_pass");
 
             {
