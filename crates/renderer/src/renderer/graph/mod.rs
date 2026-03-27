@@ -97,7 +97,6 @@ pub struct ResourceBinding {
     group: u32,
     binding: u32,
     visiblitiy: ShaderStages,
-    access: ResourceAccess,
 }
 
 impl Ord for ResourceBinding {
@@ -184,7 +183,6 @@ impl<'a> PassBuilder<'a> {
                 group,
                 binding,
                 visiblitiy,
-                access: ResourceAccess::Read,
             });
         }
 

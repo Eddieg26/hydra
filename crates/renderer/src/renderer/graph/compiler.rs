@@ -9,7 +9,7 @@ use crate::{
     },
     resources::BindGroupLayoutBuilder,
 };
-use ecs::{IndexDag, IndexSet, World, core::ImmutableIndexDag};
+use ecs::{FixedBitSet, IndexDag, IndexSet, World, core::ImmutableIndexDag};
 use std::collections::{HashMap, VecDeque};
 use wgpu::BindGroupLayoutEntry;
 
@@ -107,14 +107,13 @@ impl RenderGraphCompiler {
                                 table[resource as usize] = index as u32;
                             } else {
                                 table[resource as usize] = resources.len() as u32;
-                                let ref_count = if ty.root() { 1 } else { 0 };
                                 resources.push(ResourceRef {
                                     id: resources.len() as u32,
                                     node: node.id,
-                                    ref_count,
-                                    producer: Some(id),
+                                    ref_count: if ty.root() { 1 } else { 0 },
                                     first_user: None,
                                     last_user: None,
+                                    writers: FixedBitSet::with_capacity(passes.len()),
                                     desc,
                                 });
                             }
@@ -155,25 +154,27 @@ impl RenderGraphCompiler {
             .collect::<VecDeque<_>>();
 
         while let Some(resource) = dead_resources.pop_front() {
-            let Some(producer) = resources[resource as usize].producer else {
-                continue;
-            };
+            let mut dead_passes = Vec::new();
+            for index in resources[resource as usize].writers.ones() {
+                let pass = &mut passes[index as usize];
 
-            let pass = &mut passes[producer as usize];
-            if pass.ref_count == 0 {
-                continue;
+                if pass.ref_count == 0 {
+                    continue;
+                }
+
+                pass.ref_count -= 1;
+                if pass.ref_count == 0 {
+                    dead_passes.push(index);
+                }
             }
 
-            pass.ref_count -= 1;
-            if pass.ref_count > 0 {
-                continue;
-            }
-
-            for index in &pass.reads {
-                let resource = &mut resources[table[*index as usize] as usize];
-                resource.ref_count -= 1;
-                if resource.ref_count == 0 {
-                    dead_resources.push_back(resource.id);
+            for pass in dead_passes {
+                for index in &passes[pass].reads {
+                    let resource = &mut resources[table[*index as usize] as usize];
+                    resource.ref_count -= 1;
+                    if resource.ref_count == 0 {
+                        dead_resources.push_back(resource.id);
+                    }
                 }
             }
         }
@@ -297,9 +298,9 @@ pub struct ResourceRef {
     id: u32,
     node: u32,
     ref_count: u32,
-    producer: Option<u32>,
     first_user: Option<u32>,
     last_user: Option<u32>,
+    writers: FixedBitSet,
     desc: BoxData,
 }
 
@@ -319,11 +320,6 @@ impl ResourceRef {
     }
 
     pub fn write(&mut self, pass: u32) {
-        self.producer = match self.producer {
-            Some(first) => Some(first.min(pass)),
-            None => Some(pass),
-        };
-
         self.first_user = match self.first_user {
             Some(first) => Some(first.min(pass)),
             None => Some(pass),
@@ -333,6 +329,8 @@ impl ResourceRef {
             Some(last) => Some(last.max(pass)),
             None => Some(pass),
         };
+
+        self.writers.grow_and_insert(pass as usize);
     }
 }
 
@@ -1230,9 +1228,9 @@ mod tests {
             id: 0,
             node: 0,
             ref_count: 0,
-            producer: None,
             first_user: None,
             last_user: None,
+            writers: FixedBitSet::new(),
             desc: Box::new(0u32),
         }
     }
@@ -1270,7 +1268,6 @@ mod tests {
     fn resource_ref_write_on_fresh_sets_producer_and_users() {
         let mut r = fresh_resource_ref();
         r.write(7);
-        assert_eq!(r.producer, Some(7));
         assert_eq!(r.first_user, Some(7));
         assert_eq!(r.last_user, Some(7));
         // write does not increment ref_count
@@ -1282,7 +1279,6 @@ mod tests {
         let mut r = fresh_resource_ref();
         r.write(10);
         r.write(4);
-        assert_eq!(r.producer, Some(4));
         assert_eq!(r.first_user, Some(4));
         assert_eq!(r.last_user, Some(10));
     }
@@ -1292,7 +1288,6 @@ mod tests {
         let mut r = fresh_resource_ref();
         r.write(4);
         r.write(10);
-        assert_eq!(r.producer, Some(4));
         assert_eq!(r.first_user, Some(4));
         assert_eq!(r.last_user, Some(10));
     }
@@ -1307,11 +1302,6 @@ mod tests {
         r.read(1);
         r.read(10);
 
-        assert_eq!(
-            r.producer,
-            Some(5),
-            "producer = min of write indices (5, 8)"
-        );
         assert_eq!(r.first_user, Some(1), "first_user = min of all indices");
         assert_eq!(r.last_user, Some(10), "last_user = max of all indices");
         assert_eq!(r.ref_count, 3, "ref_count = number of reads");
@@ -1324,7 +1314,6 @@ mod tests {
         r.read(2);
         r.read(7);
         r.read(4);
-        assert_eq!(r.producer, None);
         assert_eq!(r.first_user, Some(2));
         assert_eq!(r.last_user, Some(7));
         assert_eq!(r.ref_count, 3);
@@ -1336,7 +1325,6 @@ mod tests {
         r.write(6);
         r.write(2);
         r.write(9);
-        assert_eq!(r.producer, Some(2));
         assert_eq!(r.first_user, Some(2));
         assert_eq!(r.last_user, Some(9));
         assert_eq!(r.ref_count, 0);
@@ -1347,7 +1335,6 @@ mod tests {
         let mut r = fresh_resource_ref();
         r.write(5);
         r.read(5);
-        assert_eq!(r.producer, Some(5));
         assert_eq!(r.first_user, Some(5));
         assert_eq!(r.last_user, Some(5));
         assert_eq!(r.ref_count, 1);
@@ -2106,7 +2093,8 @@ mod tests {
     // ── Task 10.1: Bind group construction ──────────────────────────────
 
     /// Pass that creates a bindable resource, reads it via group 0 binding,
-    /// and writes to it (to survive culling with ref_count > 0).
+    /// and writes to it. Also reads the resource so it has ref_count > 0
+    /// and the pass's write keeps it alive through culling.
     struct BindReadPassA;
     impl GraphPass for BindReadPassA {
         const NAME: Name = "bind_read_a";
@@ -2121,6 +2109,7 @@ mod tests {
                 },
             );
 
+            builder.read::<MockResourceBindable>(res);
             builder.write::<MockResourceBindable>(res);
             move |_| {}
         }
@@ -2142,6 +2131,7 @@ mod tests {
                 },
             );
 
+            builder.read::<MockResourceBindable>(res);
             builder.write::<MockResourceBindable>(res);
             move |_| {}
         }
@@ -2153,7 +2143,9 @@ mod tests {
         //
         // BindReadPassA and BindReadPassB each create MockResourceBindable
         // with desc=1024 (deduplicated), read it via group 0 binding 0
-        // FRAGMENT, and write to it (to survive culling).
+        // FRAGMENT, and both read + write the resource so it survives
+        // culling (the read gives the resource ref_count > 0, and the
+        // write gives each pass ref_count > 0).
         //
         // Because the resource is deduplicated (same type, compatible desc),
         // both passes produce identical layout entries and identical
@@ -2175,7 +2167,8 @@ mod tests {
 
         let compiled = RenderGraphCompiler::run(&world, &graph, &settings, &cameras);
 
-        // Both passes survive (each has ref_count=1 from the write)
+        // Both passes survive (each has ref_count > 0 from the write,
+        // and the resource has ref_count > 0 from the reads)
         assert_eq!(compiled.passes.len(), 2);
 
         // Bindings are grouped by group index — each pass has 1 group
@@ -2213,7 +2206,7 @@ mod tests {
     // ── Task 10.2: Binding resolution through ref_table and alloc_table ─
 
     /// Pass that creates a bindable resource, reads it via a binding, and
-    /// writes to it (to survive culling). The binding's resource must be
+    /// reads from it (to survive culling). The binding's resource must be
     /// resolved through ref_table and alloc_table to get the correct
     /// allocation index.
     struct BindResConsumer;
@@ -2230,6 +2223,7 @@ mod tests {
                 },
             );
 
+            builder.read::<MockResourceBindable>(res);
             builder.write::<MockResourceBindable>(res);
             move |_| {}
         }
@@ -2318,8 +2312,11 @@ mod tests {
             );
 
             // Write to each resource so this pass has ref_count = 3
+            builder.read::<MockResourceBindable>(r0);
             builder.write::<MockResourceBindable>(r0);
+            builder.read::<MockResourceBindable>(r1);
             builder.write::<MockResourceBindable>(r1);
+            builder.read::<MockResourceBindable>(r2);
             builder.write::<MockResourceBindable>(r2);
             move |_| {}
         }
@@ -2404,6 +2401,7 @@ mod tests {
                 },
             );
 
+            builder.read::<MockResourceBindable>(res);
             builder.write::<MockResourceBindable>(res);
             move |_| {}
         }
