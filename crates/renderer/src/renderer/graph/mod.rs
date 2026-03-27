@@ -86,7 +86,7 @@ pub enum ResourceUsage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResourceAccess {
-    Create,
+    Create { usage: ResourceUsage },
     Read,
     Write,
 }
@@ -97,6 +97,17 @@ pub struct ResourceBinding {
     group: u32,
     binding: u32,
     visiblitiy: ShaderStages,
+}
+
+impl ResourceBinding {
+    pub fn new(node: u32, group: u32, binding: u32, visiblitiy: ShaderStages) -> Self {
+        Self {
+            node,
+            group,
+            binding,
+            visiblitiy,
+        }
+    }
 }
 
 impl Ord for ResourceBinding {
@@ -169,7 +180,7 @@ impl<'a> PassBuilder<'a> {
         let id = self.resources.create(name, desc);
         self.entries.push(ResourceEntry {
             node: id.0,
-            access: ResourceAccess::Create,
+            access: ResourceAccess::Create { usage },
         });
 
         if let ResourceUsage::Binding {

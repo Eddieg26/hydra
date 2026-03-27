@@ -4,6 +4,7 @@ use crate::{
         camera::CameraQueue,
         graph::{
             BoxData, PassId, PassInstance, RenderGraph, ResourceAccess, ResourceResolver,
+            ResourceUsage,
             allocator::{BindGroupKey, GpuAllocationDesc, PassBindGroup},
         },
     },
@@ -85,18 +86,22 @@ impl RenderGraphCompiler {
             {
                 let pass = &graph.nodes[pass.0 as usize];
                 let id = passes.len() as u32;
-                let mut reads = Vec::default();
+                let mut reads = Vec::new();
                 let mut ref_count = 0;
 
                 for entry in pass.entries() {
                     let resource = cursor + entry.node;
 
                     match entry.access {
-                        ResourceAccess::Create => {
+                        ResourceAccess::Create { usage } => {
                             let node = graph.resources().node(entry.node);
                             let ty = graph.resources().ty(node.ty);
                             let desc =
                                 ty.resolve(world, settings, &mut resolver, ty.clone(&node.desc));
+                            let ref_count = match usage {
+                                ResourceUsage::Attachment => 0,
+                                ResourceUsage::Binding { .. } => 1,
+                            };
 
                             if let Some(index) = resources.iter().position(|r| {
                                 let other_node = graph.resources().node(r.node);
@@ -105,12 +110,13 @@ impl RenderGraphCompiler {
                                 other_node.ty == node.ty && ty.compatible(&desc, &r.desc)
                             }) {
                                 table[resource as usize] = index as u32;
+                                resources[table[resource as usize] as usize].ref_count += ref_count;
                             } else {
                                 table[resource as usize] = resources.len() as u32;
                                 resources.push(ResourceRef {
                                     id: resources.len() as u32,
                                     node: node.id,
-                                    ref_count: if ty.root() { 1 } else { 0 },
+                                    ref_count: if ty.root() { ref_count + 1 } else { ref_count },
                                     first_user: None,
                                     last_user: None,
                                     writers: FixedBitSet::with_capacity(passes.len()),
@@ -2109,7 +2115,6 @@ mod tests {
                 },
             );
 
-            builder.read::<MockResourceBindable>(res);
             builder.write::<MockResourceBindable>(res);
             move |_| {}
         }
@@ -2131,7 +2136,6 @@ mod tests {
                 },
             );
 
-            builder.read::<MockResourceBindable>(res);
             builder.write::<MockResourceBindable>(res);
             move |_| {}
         }
@@ -2223,7 +2227,6 @@ mod tests {
                 },
             );
 
-            builder.read::<MockResourceBindable>(res);
             builder.write::<MockResourceBindable>(res);
             move |_| {}
         }
@@ -2312,11 +2315,8 @@ mod tests {
             );
 
             // Write to each resource so this pass has ref_count = 3
-            builder.read::<MockResourceBindable>(r0);
             builder.write::<MockResourceBindable>(r0);
-            builder.read::<MockResourceBindable>(r1);
             builder.write::<MockResourceBindable>(r1);
-            builder.read::<MockResourceBindable>(r2);
             builder.write::<MockResourceBindable>(r2);
             move |_| {}
         }
@@ -2401,7 +2401,6 @@ mod tests {
                 },
             );
 
-            builder.read::<MockResourceBindable>(res);
             builder.write::<MockResourceBindable>(res);
             move |_| {}
         }
