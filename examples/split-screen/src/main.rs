@@ -151,8 +151,6 @@ impl GraphPass for ClearPass {
             ResourceUsage::Attachment,
         );
 
-        builder.write(surface);
-
         move |ctx: &mut RenderContext<'_>| {
             let camera = ctx.camera().expect("ClearPass requires a camera");
 

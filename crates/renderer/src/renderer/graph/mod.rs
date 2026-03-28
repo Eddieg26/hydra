@@ -81,12 +81,12 @@ pub enum ResourceUsage {
         group: u32,
         binding: u32,
         visiblitiy: ShaderStages,
+        access: ResourceAccess,
     },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResourceAccess {
-    Create { usage: ResourceUsage },
     Read,
     Write,
 }
@@ -150,10 +150,6 @@ pub trait GraphResource: Send + Sync + Sized + 'static {
     fn generation(&self) -> u32;
 
     fn kind() -> ResourceKind;
-
-    /// Root resources are never culled during dead code elimination.
-    /// They start with ref_count = 1 so the cull stage always considers them alive.
-    const ROOT: bool = false;
 }
 
 pub struct PassBuilder<'a> {
@@ -178,44 +174,29 @@ impl<'a> PassBuilder<'a> {
         usage: ResourceUsage,
     ) -> GraphResourceId<R> {
         let id = self.resources.create(name, desc);
-        self.entries.push(ResourceEntry {
-            node: id.0,
-            access: ResourceAccess::Create { usage },
-        });
 
-        if let ResourceUsage::Binding {
-            group,
-            binding,
-            visiblitiy,
-        } = usage
-        {
-            self.bindings.push(ResourceBinding {
-                node: id.0,
+        let access = match usage {
+            ResourceUsage::Attachment => ResourceAccess::Write,
+            ResourceUsage::Binding {
                 group,
                 binding,
                 visiblitiy,
-            });
-        }
+                access,
+            } => {
+                self.bindings.push(ResourceBinding {
+                    node: id.0,
+                    group,
+                    binding,
+                    visiblitiy,
+                });
+
+                access
+            }
+        };
+
+        self.entries.push(ResourceEntry { node: id.0, access });
 
         id
-    }
-
-    pub fn read<R: GraphResource>(&mut self, resource: GraphResourceId<R>) -> GraphResourceId<R> {
-        self.entries.push(ResourceEntry {
-            node: resource.0,
-            access: ResourceAccess::Read,
-        });
-
-        resource
-    }
-
-    pub fn write<R: GraphResource>(&mut self, resource: GraphResourceId<R>) -> GraphResourceId<R> {
-        self.entries.push(ResourceEntry {
-            node: resource.0,
-            access: ResourceAccess::Write,
-        });
-
-        resource
     }
 
     fn build<P: GraphPass>(mut self, id: u32) -> PassNode {
@@ -248,7 +229,6 @@ pub struct ResourceType {
     clone: fn(&BoxData) -> BoxData,
     compatible: fn(&BoxData, &BoxData) -> bool,
     generation: fn(&BoxData) -> u32,
-    root: bool,
 }
 
 impl ResourceType {
@@ -281,7 +261,6 @@ impl ResourceType {
                 R::compatible(desc_a, desc_b)
             },
             generation: |resource| resource.downcast_ref::<R>().unwrap().generation(),
-            root: R::ROOT,
         }
     }
 
@@ -323,10 +302,6 @@ impl ResourceType {
 
     pub fn generation(&self, resource: &BoxData) -> u32 {
         (self.generation)(resource)
-    }
-
-    pub fn root(&self) -> bool {
-        self.root
     }
 }
 

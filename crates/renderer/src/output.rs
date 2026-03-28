@@ -3,7 +3,7 @@ use crate::{
     plugin::RenderApp,
     renderer::graph::{
         GraphPass, Name, PassBuilder, RenderContext, RenderGraph, RenderOutput, RenderOutputDesc,
-        ResourceUsage, SurfaceDesc, SurfaceKind, SurfaceTexture, TextureSize,
+        ResourceAccess, ResourceUsage, SurfaceDesc, SurfaceKind, SurfaceTexture, TextureSize,
     },
     resources::{
         BindGroupLayoutBuilder, BindGroupLayoutRegistry, FragmentState, PipelineCache, PipelineId,
@@ -171,7 +171,7 @@ impl GraphPass for OutputPass {
     const NAME: Name = "OutputPass";
 
     fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + Send + Sync + 'static {
-        let color = builder.create::<SurfaceTexture>(
+        builder.create::<SurfaceTexture>(
             "intermediate_color",
             SurfaceDesc {
                 size: TextureSize::Auto,
@@ -182,13 +182,8 @@ impl GraphPass for OutputPass {
                 group: 0,
                 binding: 0,
                 visiblitiy: ShaderStages::FRAGMENT,
+                access: ResourceAccess::Read,
             },
-        );
-
-        let output = builder.create::<RenderOutput>(
-            "output",
-            RenderOutputDesc::Auto,
-            ResourceUsage::Attachment,
         );
 
         builder.create::<Sampler>(
@@ -198,11 +193,15 @@ impl GraphPass for OutputPass {
                 group: 0,
                 binding: 1,
                 visiblitiy: ShaderStages::FRAGMENT,
+                access: ResourceAccess::Read,
             },
         );
 
-        builder.read(color);
-        builder.write(output);
+        let output = builder.create::<RenderOutput>(
+            "output",
+            RenderOutputDesc::Auto,
+            ResourceUsage::Attachment,
+        );
 
         move |ctx: &mut RenderContext<'_>| {
             let camera = ctx.camera().expect("Missing camera for OutputPass");

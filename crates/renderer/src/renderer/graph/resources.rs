@@ -214,8 +214,6 @@ pub enum RenderOutputDesc {
 impl GraphResource for RenderOutput {
     type Desc = RenderOutputDesc;
 
-    const ROOT: bool = true;
-
     fn resolve(
         world: &ecs::World,
         _: &crate::core::RenderSettings,
