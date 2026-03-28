@@ -1,11 +1,13 @@
 use crate::{
     core::{ColorFormat, DepthFormat, Msaa, RenderSettings},
     renderer::{
-        camera::SettingState,
+        camera::{CameraGeneration, SettingState},
         graph::{GraphResource, Name, ResourceKind, ResourceResolver},
     },
-    resources::{MainRenderTarget, RenderAssets, RenderTarget, TextureSampler},
+    resources::{MainRenderTarget, RenderAssets, RenderTarget, RenderTexture, TextureSampler},
 };
+use asset::AssetId;
+use ecs::Entity;
 use wgpu::{
     Sampler, TextureDescriptor, TextureFormat, TextureUsages, TextureView, TextureViewDimension,
 };
@@ -63,6 +65,26 @@ pub struct SurfaceTexture {
     pub msaa_view: Option<wgpu::TextureView>,
 }
 
+impl SurfaceTexture {
+    pub fn resolve(&self) -> ResolvedTexture {
+        match self.msaa_view.as_ref() {
+            Some(msaa_view) => ResolvedTexture {
+                view: msaa_view.clone(),
+                resolved: Some(self.view.clone()),
+            },
+            None => ResolvedTexture {
+                view: self.view.clone(),
+                resolved: None,
+            },
+        }
+    }
+}
+
+pub struct ResolvedTexture {
+    pub view: wgpu::TextureView,
+    pub resolved: Option<wgpu::TextureView>,
+}
+
 impl GraphResource for SurfaceTexture {
     type Desc = SurfaceDesc;
 
@@ -116,7 +138,12 @@ impl GraphResource for SurfaceTexture {
         }
     }
 
-    fn create(device: &crate::core::RenderDevice, name: Name, desc: &Self::Desc) -> Self {
+    fn create(
+        _: &ecs::World,
+        device: &crate::core::RenderDevice,
+        name: Name,
+        desc: &Self::Desc,
+    ) -> Self {
         let TextureSize::Fixed { width, height, .. } = desc.size else {
             panic!("Suface Input Desc not resolved.")
         };
@@ -139,7 +166,10 @@ impl GraphResource for SurfaceTexture {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format,
-            usage: wgpu::TextureUsages::all(),
+            usage: TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
 
@@ -187,46 +217,55 @@ impl GraphResource for SurfaceTexture {
             && desc_a.kind == desc_b.kind
             && desc_a.msaa == desc_b.msaa
     }
-
-    fn generation(&self) -> u32 {
-        0
-    }
-
-    fn kind() -> ResourceKind {
-        ResourceKind::Transient
-    }
 }
 
 pub struct RenderOutput {
     pub view: wgpu::TextureView,
-    generation: u32,
 }
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum RenderOutputDesc {
     Auto,
     Resolved {
-        view: wgpu::TextureView,
-        generation: u32,
+        entity: Option<Entity>,
+        target: Option<AssetId<RenderTexture>>,
     },
 }
 
 impl GraphResource for RenderOutput {
     type Desc = RenderOutputDesc;
 
+    const OUTPUT: bool = true;
+
     fn resolve(
-        world: &ecs::World,
+        _: &ecs::World,
         _: &crate::core::RenderSettings,
         resolver: &mut ResourceResolver,
-        desc: Self::Desc,
+        _: Self::Desc,
     ) -> Self::Desc {
-        if let RenderOutputDesc::Resolved { .. } = &desc {
-            return desc;
+        let (entity, target) = match resolver.camera {
+            Some(camera) => (Some(camera.entity), camera.target),
+            None => (None, None),
+        };
+
+        RenderOutputDesc::Resolved { entity, target }
+    }
+
+    fn create(
+        world: &ecs::World,
+        _: &crate::core::RenderDevice,
+        _: Name,
+        desc: &Self::Desc,
+    ) -> Self {
+        let RenderOutputDesc::Resolved { target, .. } = desc else {
+            panic!("Render output not resolved.")
         };
 
         let targets = world.resource::<RenderAssets<RenderTarget>>();
-        let target = match resolver.camera() {
-            Some(camera) => camera.target.and_then(|id| targets.get(&id)),
+        let target = match target {
+            Some(target) => targets
+                .get(target)
+                .or_else(|| world.resource::<MainRenderTarget>().get()),
             None => world.resource::<MainRenderTarget>().get(),
         };
 
@@ -234,20 +273,8 @@ impl GraphResource for RenderOutput {
             panic!("Render target not found.")
         };
 
-        let view = target.color.view().clone();
-        let generation = resolver.camera().map(|c| c.generation).unwrap_or(0);
-
-        RenderOutputDesc::Resolved { view, generation }
-    }
-
-    fn create(_: &crate::core::RenderDevice, _: Name, desc: &Self::Desc) -> Self {
-        let RenderOutputDesc::Resolved { view, generation } = desc else {
-            panic!("Render output not resolved.")
-        };
-
         Self {
-            view: view.clone(),
-            generation: *generation,
+            view: target.color.view().clone(),
         }
     }
 
@@ -274,8 +301,15 @@ impl GraphResource for RenderOutput {
         desc_a == desc_b
     }
 
-    fn generation(&self) -> u32 {
-        self.generation
+    fn generation(desc: &Self::Desc, world: &ecs::World) -> u32 {
+        let RenderOutputDesc::Resolved { entity, .. } = desc else {
+            panic!("Render output not resolved.")
+        };
+
+        entity
+            .and_then(|e| world.get_component::<CameraGeneration>(e))
+            .map(|c| c.0)
+            .unwrap_or(0)
     }
 
     fn kind() -> ResourceKind {
@@ -295,7 +329,12 @@ impl GraphResource for Sampler {
         desc
     }
 
-    fn create(device: &crate::core::RenderDevice, name: Name, desc: &Self::Desc) -> Self {
+    fn create(
+        _: &ecs::World,
+        device: &crate::core::RenderDevice,
+        name: Name,
+        desc: &Self::Desc,
+    ) -> Self {
         device.create_sampler(&desc.desc(Some(name)).into())
     }
 
@@ -325,14 +364,6 @@ impl GraphResource for Sampler {
 
     fn compatible(desc_a: &Self::Desc, desc_b: &Self::Desc) -> bool {
         desc_a == desc_b
-    }
-
-    fn generation(&self) -> u32 {
-        0
-    }
-
-    fn kind() -> ResourceKind {
-        ResourceKind::Imported
     }
 }
 
@@ -388,7 +419,12 @@ impl GraphResource for TextureView {
         }
     }
 
-    fn create(device: &crate::core::RenderDevice, name: Name, desc: &Self::Desc) -> Self {
+    fn create(
+        _: &ecs::World,
+        device: &crate::core::RenderDevice,
+        name: Name,
+        desc: &Self::Desc,
+    ) -> Self {
         let TextureSize::Fixed {
             width,
             height,
@@ -442,13 +478,5 @@ impl GraphResource for TextureView {
             && desc_a.format == desc_b.format
             && desc_a.dimension == desc_b.dimension
             && desc_a.usage.contains(desc_b.usage)
-    }
-
-    fn generation(&self) -> u32 {
-        0
-    }
-
-    fn kind() -> ResourceKind {
-        ResourceKind::Imported
     }
 }

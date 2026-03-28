@@ -138,7 +138,7 @@ pub enum TextureSampler {
 impl TextureSampler {
     pub fn desc<'a>(&self, label: Option<&'a str>) -> SamplerDesc<'a> {
         let (filter, wrap, compare, anisotropy) = match *self {
-            TextureSampler::Default => (FilterMode::Linear, WrapMode::ClampToEdge, None, 1),
+            TextureSampler::Default => (FilterMode::Nearest, WrapMode::ClampToEdge, None, 1),
             TextureSampler::Custom {
                 filter,
                 wrap,
@@ -417,7 +417,10 @@ impl RenderTarget {
                 sample_count: 1,
                 dimension,
                 format,
-                usage: TextureUsages::all(),
+                usage: TextureUsages::RENDER_ATTACHMENT
+                    | TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_DST
+                    | TextureUsages::COPY_SRC,
                 view_formats: &[format.add_srgb_suffix()],
             },
             sampler,

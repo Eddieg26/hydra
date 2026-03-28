@@ -31,6 +31,8 @@ pub struct OutputPassPipelines {
     pub tonemap: PipelineId,
     pub tonemap_srgb: PipelineId,
     pub copy: PipelineId,
+    pub copy_srgb: PipelineId,
+    pub copy_hdr: PipelineId,
 }
 
 /// The pipeline action selected based on render settings and camera format.
@@ -44,12 +46,19 @@ pub enum PipelineAction {
 
 /// Selects the pipeline action based on the render settings color format
 /// and the camera target format.
-pub fn select_pipeline(settings_color: ColorFormat, camera_format: ColorFormat) -> PipelineAction {
+pub fn select_pipeline(
+    settings_color: ColorFormat,
+    camera_format: ColorFormat,
+    pipelines: &OutputPassPipelines,
+) -> PipelineId {
     match (settings_color, camera_format) {
-        (ColorFormat::Standard { .. }, ColorFormat::Standard { .. }) => PipelineAction::Copy,
-        (ColorFormat::HDR, ColorFormat::Standard { srgb: false }) => PipelineAction::Tonemap,
-        (ColorFormat::HDR, ColorFormat::Standard { srgb: true }) => PipelineAction::TonemapSrgb,
-        (ColorFormat::HDR, ColorFormat::HDR) => PipelineAction::DirectCopy,
+        (ColorFormat::Standard { .. }, ColorFormat::Standard { srgb: false }) => pipelines.copy,
+        (ColorFormat::Standard { .. }, ColorFormat::Standard { srgb: true }) => {
+            pipelines.copy_srgb
+        }
+        (ColorFormat::HDR, ColorFormat::Standard { srgb: false }) => pipelines.tonemap,
+        (ColorFormat::HDR, ColorFormat::Standard { srgb: true }) => pipelines.tonemap_srgb,
+        (ColorFormat::HDR, ColorFormat::HDR) => pipelines.copy_hdr,
         (ColorFormat::Standard { .. }, ColorFormat::HDR) => unreachable!(),
     }
 }
@@ -102,21 +111,35 @@ impl Plugin for OutputPassPlugin {
 
             let tonemap_id = cache.queue_render_pipeline(make_pipeline_desc(
                 TONEMAP_SHADER,
-                TextureFormat::Bgra8Unorm,
+                ColorFormat::Standard { srgb: false }.into(),
                 "output_tonemap",
                 &source_bgl,
             ));
 
             let tonemap_srgb_id = cache.queue_render_pipeline(make_pipeline_desc(
                 TONEMAP_SHADER,
-                TextureFormat::Bgra8UnormSrgb,
+                ColorFormat::Standard { srgb: true }.into(),
                 "output_tonemap_srgb",
                 &source_bgl,
             ));
 
             let copy_id = cache.queue_render_pipeline(make_pipeline_desc(
                 COPY_SHADER,
-                TextureFormat::Bgra8Unorm,
+                ColorFormat::Standard { srgb: false }.into(),
+                "output_copy",
+                &source_bgl,
+            ));
+
+            let copy_srgb_id = cache.queue_render_pipeline(make_pipeline_desc(
+                COPY_SHADER,
+                ColorFormat::Standard { srgb: true }.into(),
+                "output_copy",
+                &source_bgl,
+            ));
+
+            let copy_hdr_id = cache.queue_render_pipeline(make_pipeline_desc(
+                COPY_SHADER,
+                ColorFormat::HDR.into(),
                 "output_copy",
                 &source_bgl,
             ));
@@ -125,6 +148,8 @@ impl Plugin for OutputPassPlugin {
                 tonemap: tonemap_id,
                 tonemap_srgb: tonemap_srgb_id,
                 copy: copy_id,
+                copy_srgb: copy_srgb_id,
+                copy_hdr: copy_hdr_id,
             }
         };
 
@@ -205,18 +230,11 @@ impl GraphPass for OutputPass {
 
         move |ctx: &mut RenderContext<'_>| {
             let camera = ctx.camera().expect("Missing camera for OutputPass");
-            let action = select_pipeline(ctx.settings().color(), camera.format);
-
             let pipelines = ctx.world().resource::<OutputPassPipelines>();
+            let pipeline_id = select_pipeline(ctx.settings().color(), camera.format, pipelines);
             let pipeline_cache = ctx.world().resource::<PipelineCache>();
 
-            let pipeline_id = match action {
-                PipelineAction::Copy | PipelineAction::DirectCopy => &pipelines.copy,
-                PipelineAction::Tonemap => &pipelines.tonemap,
-                PipelineAction::TonemapSrgb => &pipelines.tonemap_srgb,
-            };
-
-            let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_id) else {
+            let Some(pipeline) = pipeline_cache.get_render_pipeline(&pipeline_id) else {
                 // Pipeline not yet compiled, skip this frame
                 return;
             };

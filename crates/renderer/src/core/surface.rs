@@ -1,5 +1,5 @@
 use crate::core::device::RenderDevice;
-use ecs::{EventReader, Resource};
+use ecs::{EventReader, Resource, system::Main};
 use wgpu::{
     Adapter, CompositeAlphaMode, CreateSurfaceError, Instance, PowerPreference, PresentMode,
     RequestAdapterOptions, Surface, SurfaceConfiguration, SurfaceError, TextureFormat,
@@ -123,13 +123,27 @@ impl RenderSurface {
         self.inner.get_current_texture()
     }
 
-    pub(crate) fn on_resize(
-        events: EventReader<WindowResized>,
+    pub(crate) fn on_resized(
         device: &RenderDevice,
+        event: &mut SurfaceResized,
         surface: &mut RenderSurface,
     ) {
-        if let Some(event) = events.last() {
+        if let Some(event) = event.0.take() {
             surface.resize(device, event.width(), event.height());
+        }
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct SurfaceResized(Option<WindowResized>);
+impl SurfaceResized {
+    pub fn set(&mut self, value: WindowResized) {
+        self.0 = Some(value);
+    }
+
+    pub(crate) fn extract(events: Main<EventReader<WindowResized>>, resized: &mut SurfaceResized) {
+        if let Some(event) = events.into_inner().last() {
+            resized.set(*event);
         }
     }
 }

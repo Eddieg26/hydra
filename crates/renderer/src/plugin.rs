@@ -1,5 +1,5 @@
 use crate::{
-    core::{RenderDevice, RenderSettings, RenderSurface, RenderSurfaceTexture},
+    core::{RenderDevice, RenderSettings, RenderSurface, RenderSurfaceTexture, SurfaceResized},
     output::OutputPassPlugin,
     renderer::{
         camera::{Camera, CameraQueue},
@@ -15,11 +15,11 @@ use crate::{
 use asset::plugin::{AssetAppExt, AssetPlugin};
 use ecs::{
     AppBuilder, AppTag, Extract, IntoSystemConfigs, Phase, Plugin, Run,
-    app::sync::{SyncComponentPlugin, SyncEventsPlugin},
+    app::sync::SyncComponentPlugin,
 };
 use std::marker::PhantomData;
 use transform::GlobalTransform;
-use window::{Window, events::WindowResized, plugin::WindowPlugin};
+use window::{Window, plugin::WindowPlugin};
 
 pub struct RenderPlugin;
 
@@ -37,7 +37,6 @@ impl Plugin for RenderPlugin {
             RenderAssetPlugin::<GpuMesh>::new(),
             RenderAssetPlugin::<RenderTarget>::new(),
             SyncComponentPlugin::<Camera, RenderApp>::new(),
-            SyncEventsPlugin::<WindowResized, RenderApp>::new(),
         ))
         .register::<GlobalTransform>()
         .sub_app_mut(RenderApp)
@@ -56,7 +55,9 @@ impl Plugin for RenderPlugin {
         .add_resource(RenderSurfaceTexture::default())
         .add_resource(MainRenderTarget::default())
         .add_resource(BindGroupLayoutRegistry::default())
-        .add_systems(Process, RenderSurface::on_resize)
+        .add_resource(SurfaceResized::default())
+        .add_systems(Extract, SurfaceResized::extract)
+        .add_systems(Process, RenderSurface::on_resized)
         .add_systems(Process, RenderSurfaceTexture::update)
         .add_systems(Process, MainRenderTarget::update)
         .add_systems(Queue, CameraQueue::queue)

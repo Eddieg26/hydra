@@ -120,7 +120,7 @@ impl Buffer {
             });
 
             let mut encoder = device.create_command_encoder(&Default::default());
-            encoder.copy_buffer_to_buffer(&self.inner, 0, &buffer, 0, buffer.size());
+            encoder.copy_buffer_to_buffer(&self.inner, 0, &buffer, 0, self.inner.size());
             self.inner = buffer;
 
             device.queue().write_buffer(&self.inner, offset, data);
@@ -325,10 +325,8 @@ impl<T: ShaderType + WriteInto> UniformArrayBuffer<T> {
     }
 }
 
-impl<T: ShaderType> std::ops::Deref for UniformArrayBuffer<T> {
-    type Target = Buffer;
-
-    fn deref(&self) -> &Self::Target {
+impl<T: ShaderType> AsRef<Buffer> for UniformArrayBuffer<T> {
+    fn as_ref(&self) -> &Buffer {
         &self.inner
     }
 }
@@ -390,10 +388,8 @@ impl<T: ShaderType + WriteInto> StorageArrayBuffer<T> {
     }
 }
 
-impl<T: ShaderType> std::ops::Deref for StorageArrayBuffer<T> {
-    type Target = Buffer;
-
-    fn deref(&self) -> &Self::Target {
+impl<T: ShaderType> AsRef<Buffer> for StorageArrayBuffer<T> {
+    fn as_ref(&self) -> &Buffer {
         &self.inner
     }
 }
@@ -453,10 +449,8 @@ impl<T: Pod> ArrayBuffer<T> {
     }
 }
 
-impl<T: Pod> std::ops::Deref for ArrayBuffer<T> {
-    type Target = Buffer;
-
-    fn deref(&self) -> &Self::Target {
+impl<T: Pod> AsRef<Buffer> for ArrayBuffer<T> {
+    fn as_ref(&self) -> &Buffer {
         &self.inner
     }
 }

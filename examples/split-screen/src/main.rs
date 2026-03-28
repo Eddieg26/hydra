@@ -1,6 +1,13 @@
 use asset::{AssetId, plugin::AssetAppExt};
-use ecs::{App, AppBuilder, Init, Plugin, Resource, Spawner};
-use renderer::plugin::RenderPlugin;
+use ecs::{
+    AddComponent, App, AppBuilder, Commands, Component, Entity, Init, Plugin, Query,
+    RemoveComponent, Resource, Spawner,
+};
+use renderer::core::RenderDevice;
+use renderer::plugin::{Queue, RenderPlugin};
+use renderer::renderer::camera::CameraSettings;
+use renderer::renderer::graph::{GraphResource, ResourceAccess, ResourceKind};
+use renderer::resources::{BindGroupLayoutRegistry, Buffer, BufferDesc, UniformArrayBuffer};
 use renderer::{
     core::{ColorFormat, Msaa},
     output::OutputPass,
@@ -13,23 +20,26 @@ use renderer::{
         },
     },
     resources::{
-        FragmentState, PipelineCache, PipelineId, RenderPipelineDesc, Shader, VertexState,
+        BindGroupLayoutBuilder, FragmentState, PipelineCache, PipelineId, RenderPipelineDesc,
+        Shader, VertexState,
     },
     types::{Color, Viewport},
 };
 use std::borrow::Cow;
+use wgpu::BufferBindingType;
 use wgpu::{
-    ColorTargetState, MultisampleState, PrimitiveState, PushConstantRange, ShaderStages,
-    TextureFormat,
+    BufferUsages, ColorTargetState, MultisampleState, PrimitiveState, ShaderStages, TextureFormat,
 };
 use wgsl_macro::ShaderConstants;
 
 /// Static asset ID for the clear shader.
 const CLEAR_SHADER: AssetId<Shader> = AssetId::from_u128(0x00112233_4455_6677_8899_aabbccddeeff);
 
-/// Resource holding the ClearPass pipeline ID.
+/// Resource holding the ClearPass pipeline ID and bind group layout.
 #[derive(Resource)]
-pub struct ClearPassPipeline(pub PipelineId);
+pub struct ClearPassPipeline {
+    pub pipeline: PipelineId,
+}
 
 pub struct SplitScreenPlugin;
 
@@ -47,11 +57,21 @@ impl Plugin for SplitScreenPlugin {
     fn finish(&mut self, app: &mut AppBuilder) {
         let render_app = app.sub_app_mut(RenderApp);
 
+        let device = render_app.resource::<RenderDevice>().clone();
+        let bind_group_layout = {
+            let registry = render_app.resource_mut::<BindGroupLayoutRegistry>();
+            let mut builder = BindGroupLayoutBuilder::new();
+            builder.with_label(Cow::Borrowed("clear_pass_bind_group_layout"));
+            builder.with_uniform(ShaderStages::FRAGMENT, false, None, None);
+            let id = registry.register(&device, builder);
+            registry.get(id).clone()
+        };
+
         let pipeline_id = render_app
             .resource_mut::<PipelineCache>()
             .queue_render_pipeline(RenderPipelineDesc {
                 label: Some(Cow::Borrowed("clear_pass")),
-                layout: vec![],
+                layout: vec![bind_group_layout.clone()],
                 vertex: VertexState {
                     shader: CLEAR_SHADER,
                     entry: Cow::Borrowed("vs_main"),
@@ -69,17 +89,20 @@ impl Plugin for SplitScreenPlugin {
                 primitive: PrimitiveState::default(),
                 depth_stencil: None,
                 multisample: MultisampleState::default(),
-                push_constants: vec![PushConstantRange {
-                    stages: ShaderStages::FRAGMENT,
-                    range: 0..16,
-                }],
+                push_constants: vec![],
             });
 
-        render_app.add_resource(ClearPassPipeline(pipeline_id));
+        render_app.add_resource(ClearPassPipeline {
+            pipeline: pipeline_id,
+        });
 
-        let graph = render_app.resource_mut::<RenderGraph>();
-        let output_pass_id = graph.add_pass::<OutputPass>();
-        graph.add_before::<ClearPass>(output_pass_id);
+        // let graph = render_app.resource_mut::<RenderGraph>();
+        // let output_pass_id = graph.add_pass::<OutputPass>();
+        // graph.add_before::<ClearPass>(output_pass_id);
+
+        render_app.register::<ClearOffset>();
+        render_app.add_systems(Queue, ClearColorBuffer::queue);
+        render_app.add_resource(ClearColorBuffer::new(&device));
     }
 }
 
@@ -151,10 +174,21 @@ impl GraphPass for ClearPass {
             ResourceUsage::Attachment,
         );
 
+        builder.create::<ClearBuffer>(
+            "clear_buffer",
+            (),
+            ResourceUsage::Binding {
+                group: 0,
+                binding: 0,
+                visibility: ShaderStages::FRAGMENT,
+                access: ResourceAccess::Read,
+            },
+        );
+
         move |ctx: &mut RenderContext<'_>| {
             let camera = ctx.camera().expect("ClearPass requires a camera");
 
-            let Some(clear_color) = camera.clear else {
+            let Some(clear_offset) = ctx.world().get_component::<ClearOffset>(camera.entity) else {
                 return;
             };
 
@@ -162,10 +196,12 @@ impl GraphPass for ClearPass {
             let height = camera.height as f32;
             let clear_pipeline = ctx.world().resource::<ClearPassPipeline>();
             let pipeline_cache = ctx.world().resource::<PipelineCache>();
-            let Some(pipeline) = pipeline_cache.get_render_pipeline(&clear_pipeline.0) else {
+            let Some(pipeline) = pipeline_cache.get_render_pipeline(&clear_pipeline.pipeline)
+            else {
                 return;
             };
 
+            // Create a uniform buffer with the clear color data
             let surface = ctx.get(surface);
             let mut encoder = ctx.encoder("clear_pass");
 
@@ -194,14 +230,131 @@ impl GraphPass for ClearPass {
                     camera.viewport.depth.end,
                 );
 
-                let color = clear_color.as_slice();
                 pass.set_pipeline(pipeline);
-                pass.set_push_constants(ShaderStages::FRAGMENT, 0, bytemuck::cast_slice(&color));
+                pass.set_bind_group(0, ctx.bind_group(0), &[clear_offset.0]);
                 pass.draw(0..3, 0..1);
             }
 
             ctx.submit(encoder);
         }
+    }
+}
+
+#[derive(Resource)]
+struct ClearColorBuffer {
+    inner: UniformArrayBuffer<Color>,
+    generation: u32,
+}
+
+impl ClearColorBuffer {
+    pub fn new(device: &RenderDevice) -> Self {
+        let inner = UniformArrayBuffer::new(
+            device,
+            BufferDesc {
+                label: None,
+                data: true,
+                usages: BufferUsages::COPY_DST,
+            },
+        );
+
+        Self {
+            inner,
+            generation: 0,
+        }
+    }
+
+    pub fn push(&mut self, color: &Color) -> u32 {
+        self.inner.push(color) as u32
+    }
+
+    pub fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    pub fn update(&mut self, device: &RenderDevice) {
+        if self.inner.update(device).is_some() {
+            self.generation += 1;
+        }
+    }
+
+    fn queue(
+        buffer: &mut Self,
+        device: &RenderDevice,
+        cameras: Query<(Entity, &Camera, Option<&mut ClearOffset>)>,
+        mut commands: Commands,
+    ) {
+        buffer.clear();
+
+        for (entity, camera, offset) in cameras {
+            let color = if let Some(color) = camera.clear {
+                color
+            } else if offset.is_some() {
+                commands.add(RemoveComponent::<ClearOffset>::new(entity));
+                continue;
+            } else {
+                continue;
+            };
+
+            if let Some(offset) = offset {
+                offset.0 = buffer.push(&color);
+            } else {
+                let offset = ClearOffset(buffer.push(&color));
+                commands.add(AddComponent::new(entity, offset));
+            }
+        }
+
+        buffer.update(device);
+    }
+}
+
+#[derive(Clone, Copy, Component)]
+pub struct ClearOffset(u32);
+
+struct ClearBuffer(Buffer);
+
+impl GraphResource for ClearBuffer {
+    type Desc = ();
+
+    const OUTPUT: bool = true;
+
+    fn resolve(
+        _: &ecs::World,
+        _: &renderer::core::RenderSettings,
+        _: &mut renderer::renderer::graph::ResourceResolver,
+        _: Self::Desc,
+    ) -> Self::Desc {
+        ()
+    }
+
+    fn create(world: &ecs::World, _: &RenderDevice, _: Name, _: &Self::Desc) -> Self {
+        let buffer = world.resource::<ClearColorBuffer>();
+        ClearBuffer(Buffer::clone(buffer.inner.as_ref()))
+    }
+
+    fn entry(
+        _: &renderer::core::RenderSettings,
+        _: &Self::Desc,
+        builder: &mut BindGroupLayoutBuilder,
+        visibility: ShaderStages,
+    ) {
+        builder.with_buffer(BufferBindingType::Uniform, visibility, true, None, None);
+    }
+
+    fn bind<'a>(&'a self, builder: &mut renderer::resources::BindGroupBuilder<'a>) {
+        builder.with_buffer(self.0.as_entire_buffer_binding());
+    }
+
+    fn compatible(_: &Self::Desc, _: &Self::Desc) -> bool {
+        true
+    }
+
+    fn generation(_: &Self::Desc, world: &ecs::World) -> u32 {
+        let buffer = world.resource::<ClearColorBuffer>();
+        buffer.generation
+    }
+
+    fn kind() -> renderer::renderer::graph::ResourceKind {
+        ResourceKind::Imported
     }
 }
 

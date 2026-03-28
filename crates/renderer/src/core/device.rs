@@ -19,8 +19,7 @@ impl RenderDevice {
                 required_features: Features::ADDRESS_MODE_CLAMP_TO_BORDER
                     | Features::ADDRESS_MODE_CLAMP_TO_ZERO
                     | Features::INDIRECT_FIRST_INSTANCE
-                    | Features::TEXTURE_BINDING_ARRAY
-                    | Features::PUSH_CONSTANTS,
+                    | Features::TEXTURE_BINDING_ARRAY,
                 required_limits: Limits::default(),
                 memory_hints: MemoryHints::Performance,
                 trace: wgpu::Trace::Off,

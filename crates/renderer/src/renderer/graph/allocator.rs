@@ -1,11 +1,11 @@
 use crate::{
     core::RenderDevice,
     renderer::graph::{
-        BoxData, DynData, GraphResource, GraphResourceId, GraphResources, RenderGraph, ResourceKind,
+        BoxData, GraphResource, GraphResourceId, GraphResources, RenderGraph, ResourceKind,
     },
     resources::{BindGroupBuilder, BindGroupLayoutBuilder, BindGroupLayoutRegistry, GpuResourceId},
 };
-use ecs::{FixedBitSet, IndexSet};
+use ecs::{FixedBitSet, IndexSet, World};
 use std::{collections::HashMap, hash::Hash};
 use wgpu::{BindGroup, BindGroupLayout, BindGroupLayoutEntry};
 
@@ -17,7 +17,11 @@ pub struct GpuAllocation {
 }
 
 impl GpuAllocation {
-    pub fn instance(&self) -> &DynData {
+    pub fn node(&self) -> u32 {
+        self.node
+    }
+
+    pub fn instance(&self) -> &BoxData {
         &self.instance
     }
 }
@@ -44,6 +48,7 @@ pub struct GpuResourceAllocator {
 
 impl GpuResourceAllocator {
     pub fn build(
+        world: &World,
         device: &RenderDevice,
         graph: &RenderGraph,
         resources: Box<[u32]>,
@@ -56,7 +61,7 @@ impl GpuResourceAllocator {
         for alloc in descs {
             let node = &graph.resources.nodes[alloc.node as usize];
             let ty = &graph.resources.types[node.ty as usize];
-            let instance = ty.create(device, node.name, &alloc.desc);
+            let instance = ty.create(world, device, node.name, &alloc.desc);
 
             if node.kind == ResourceKind::Imported {
                 imported.push(ImportedResource {
@@ -67,8 +72,8 @@ impl GpuResourceAllocator {
 
             allocations.push(GpuAllocation {
                 node: node.id,
+                generation: ty.generation(world, &alloc.desc),
                 desc: alloc.desc,
-                generation: ty.generation(&instance),
                 instance,
             });
         }
@@ -91,22 +96,22 @@ impl GpuResourceAllocator {
         &self.bind_groups
     }
 
-    pub fn resource<R: GraphResource>(&self, id: GraphResourceId<R>) -> &R {
+    pub fn resource<R: GraphResource>(&self, id: GraphResourceId<R>) -> Option<&R> {
         let index = self.resources[id.0 as usize];
-        self.allocations[index as usize]
-            .instance
-            .downcast_ref::<R>()
-            .unwrap()
+        let instance = &self.allocations[index as usize].instance;
+        instance.downcast_ref()
     }
 
-    pub fn update(&mut self, device: &RenderDevice, resources: &GraphResources) {
+    pub fn update(&mut self, world: &World, device: &RenderDevice, resources: &GraphResources) {
         for index in 0..self.imported.len() {
             let ImportedResource { alloc, node } = self.imported[index];
             let generation = {
-                let resource = &self.allocations[alloc as usize].instance;
+                let alloc = &self.allocations[alloc as usize];
                 let node = &resources.nodes[node as usize];
                 let ty = &resources.types[node.ty as usize];
-                ty.generation(resource)
+                let generation = ty.generation(world, &alloc.desc);
+
+                generation
             };
             self.allocations[alloc as usize].generation = generation;
         }
@@ -119,11 +124,11 @@ impl GpuResourceAllocator {
                 let node = &resources.nodes[allocation.node as usize];
                 let ty = &resources.types[node.ty as usize];
 
-                allocation.instance = ty.create(device, node.name, &allocation.desc);
-                self.bind_groups.entries[index] = ty.generation(&allocation.instance);
+                allocation.instance = ty.create(world, device, node.name, &allocation.desc);
+                self.bind_groups.entries[index] = self.allocations[index].generation;
             }
 
-            updated.grow(index);
+            updated.grow(index + 1);
             updated.set(index, changed);
         }
 
@@ -228,8 +233,7 @@ impl BindGroupCache {
             let index = self.archetypes.len() as u32;
             let mut allocations = FixedBitSet::new();
             for resource in &resources {
-                allocations.grow(*resource as usize);
-                allocations.set(*resource as usize, true);
+                allocations.grow_and_insert(*resource as usize);
             }
 
             self.archetypes.push(BindGroupArchetype {

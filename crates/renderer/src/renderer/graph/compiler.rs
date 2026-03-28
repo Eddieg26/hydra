@@ -24,7 +24,7 @@ impl RenderGraphCompiler {
     ) -> CompiledRenderGraph {
         let sorted = Self::sort(graph);
 
-        let (passes, mut resources, ref_table) =
+        let (passes, mut resources, mut ref_table) =
             Self::expand(world, graph, settings, cameras, sorted);
 
         let passes = Self::cull(graph, passes, &mut resources, &ref_table);
@@ -35,14 +35,14 @@ impl RenderGraphCompiler {
             graph,
             settings,
             passes,
-            ref_table,
-            &alloc_table,
+            alloc_table,
+            &mut ref_table,
             &allocations,
         );
 
         CompiledRenderGraph {
             passes: passes.into_boxed_slice(),
-            resources: alloc_table.into_boxed_slice(),
+            resources: ref_table.into_boxed_slice(),
             allocations,
             bind_group_layouts: layouts,
             bind_groups,
@@ -74,8 +74,9 @@ impl RenderGraphCompiler {
         sorted: ImmutableIndexDag<PassId>,
     ) -> (Vec<PassRef>, Vec<ResourceRef>, Vec<u32>) {
         let mut passes = Vec::with_capacity(cameras.slice().len() * graph.nodes.len());
-        let mut resources =
-            Vec::<ResourceRef>::with_capacity(passes.capacity() * graph.resources().nodes().len());
+        let mut resources = Vec::<ResourceRef>::with_capacity(
+            cameras.slice().len() * graph.resources().nodes().len(),
+        );
         let mut table = vec![0; resources.capacity()];
 
         for index in 0..cameras.slice().len() {
@@ -204,7 +205,7 @@ impl RenderGraphCompiler {
         mut resources: Vec<ResourceRef>,
     ) -> (Vec<GpuAllocationDesc>, Vec<u32>) {
         let mut allocations = Vec::<GpuAllocationDesc>::with_capacity(resources.len());
-        let mut table = vec![0; resources.len()];
+        let mut table = vec![0; resources.capacity()];
 
         resources.retain(|r| r.ref_count > 0);
         resources.sort_by(|a, b| a.first_user.cmp(&b.first_user));
@@ -244,8 +245,8 @@ impl RenderGraphCompiler {
         graph: &RenderGraph,
         settings: &RenderSettings,
         passes: Vec<PassRef>,
-        ref_table: Vec<u32>, // Node -> Resource Ref Index
-        alloc_table: &[u32], // Ref -> Allocation index
+        alloc_table: Vec<u32>,
+        ref_table: &mut [u32],
         allocations: &[GpuAllocationDesc],
     ) -> (
         Vec<PassInstance>,
@@ -269,6 +270,7 @@ impl RenderGraphCompiler {
                     .or_insert_with(|| ResourceGroup::new(binding.group));
 
                 group.allocations.push(alloc);
+                ref_table[(pass.cursor + binding.node) as usize] = alloc;
                 ty.entry(settings, desc, &mut group.builder, binding.visiblitiy);
             }
 
@@ -413,6 +415,7 @@ mod tests {
         }
 
         fn create(
+            _: &ecs::World,
             _: &crate::core::RenderDevice,
             _: crate::renderer::graph::Name,
             _: &Self::Desc,
@@ -432,10 +435,6 @@ mod tests {
 
         fn compatible(desc_a: &Self::Desc, desc_b: &Self::Desc) -> bool {
             desc_a >= desc_b
-        }
-
-        fn generation(&self) -> u32 {
-            0
         }
 
         fn kind() -> ResourceKind {

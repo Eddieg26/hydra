@@ -9,7 +9,8 @@ struct ClearColor {
     color: vec4<f32>,
 };
 
-var<push_constant> clear: ClearColor;
+@group(0) @binding(0)
+var<uniform> clear: ClearColor;
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {

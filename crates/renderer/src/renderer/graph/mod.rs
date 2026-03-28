@@ -130,13 +130,13 @@ pub trait GraphResource: Send + Sync + Sized + 'static {
     const OUTPUT: bool = false;
 
     fn resolve(
-        world: &ecs::World,
+        world: &World,
         settings: &crate::core::RenderSettings,
         resolver: &mut ResourceResolver,
         desc: Self::Desc,
     ) -> Self::Desc;
 
-    fn create(device: &RenderDevice, name: Name, desc: &Self::Desc) -> Self;
+    fn create(world: &World, device: &RenderDevice, name: Name, desc: &Self::Desc) -> Self;
 
     fn entry(
         settings: &RenderSettings,
@@ -149,9 +149,13 @@ pub trait GraphResource: Send + Sync + Sized + 'static {
 
     fn compatible(current: &Self::Desc, other: &Self::Desc) -> bool;
 
-    fn generation(&self) -> u32;
+    fn generation(desc: &Self::Desc, world: &World) -> u32 {
+        0
+    }
 
-    fn kind() -> ResourceKind;
+    fn kind() -> ResourceKind {
+        ResourceKind::Transient
+    }
 }
 
 pub struct PassBuilder<'a> {
@@ -225,12 +229,12 @@ pub trait GraphPass: Send + Sync + Sized + 'static {
 
 pub struct ResourceType {
     resolve: fn(&World, &RenderSettings, &mut ResourceResolver, BoxData) -> BoxData,
-    create: fn(&RenderDevice, Name, &dyn Any) -> BoxData,
+    create: fn(&World, &RenderDevice, Name, &BoxData) -> BoxData,
     entry: fn(&RenderSettings, &BoxData, &mut BindGroupLayoutBuilder, ShaderStages),
     bind: for<'a> fn(&'a BoxData, &mut BindGroupBuilder<'a>),
     clone: fn(&BoxData) -> BoxData,
     compatible: fn(&BoxData, &BoxData) -> bool,
-    generation: fn(&BoxData) -> u32,
+    generation: fn(&BoxData, &World) -> u32,
     output: bool,
 }
 
@@ -241,9 +245,9 @@ impl ResourceType {
                 let desc = *desc.downcast::<R::Desc>().unwrap();
                 Box::new(R::resolve(world, settings, resolver, desc))
             },
-            create: |device, name, desc| {
+            create: |world, device, name, desc| {
                 let desc = desc.downcast_ref::<R::Desc>().unwrap();
-                Box::new(R::create(device, name, desc))
+                Box::new(R::create(world, device, name, desc))
             },
             entry: |settings, desc, builder, visibility| {
                 let desc = desc.downcast_ref::<R::Desc>().unwrap();
@@ -263,7 +267,7 @@ impl ResourceType {
 
                 R::compatible(desc_a, desc_b)
             },
-            generation: |resource| resource.downcast_ref::<R>().unwrap().generation(),
+            generation: |desc, world| R::generation(desc.downcast_ref().unwrap(), world),
             output: R::OUTPUT,
         }
     }
@@ -278,8 +282,14 @@ impl ResourceType {
         (self.resolve)(world, settings, resolver, desc)
     }
 
-    pub fn create(&self, device: &RenderDevice, name: Name, desc: &DynData) -> BoxData {
-        (self.create)(device, name, desc)
+    pub fn create(
+        &self,
+        world: &World,
+        device: &RenderDevice,
+        name: Name,
+        desc: &BoxData,
+    ) -> BoxData {
+        (self.create)(world, device, name, desc)
     }
 
     pub fn entry(
@@ -304,8 +314,8 @@ impl ResourceType {
         (self.compatible)(current, other)
     }
 
-    pub fn generation(&self, resource: &BoxData) -> u32 {
-        (self.generation)(resource)
+    pub fn generation(&self, world: &World, desc: &BoxData) -> u32 {
+        (self.generation)(desc, world)
     }
 
     pub fn output(&self) -> bool {
@@ -503,7 +513,8 @@ impl<'a> RenderContext<'a> {
 
     pub fn get<R: GraphResource>(&self, id: GraphResourceId<R>) -> &R {
         let id = id.offset(self.resource_offset);
-        self.state.allocator.resource(id)
+        let resource = self.state.allocator.resource(id);
+        resource.unwrap()
     }
 
     pub fn bind_group(&self, index: u32) -> &BindGroup {
@@ -649,6 +660,7 @@ impl RenderGraph {
         let layouts = BindGroupCache::create_layouts(device, layouts, bind_group_layouts);
 
         let allocator = GpuResourceAllocator::build(
+            world,
             device,
             graph,
             resources,
@@ -670,7 +682,7 @@ impl RenderGraph {
         } = graph;
 
         if let Some(state) = state {
-            state.allocator.update(device, resources);
+            state.allocator.update(world, device, resources);
 
             let mut ctx = RenderContext::new(world, device, state);
             for pass in &state.passes {
@@ -692,9 +704,11 @@ impl Condition for RenderGraphDirty {
         let graph = world.resource::<RenderGraph>();
         let settings = world.resource::<RenderSettings>();
         let cameras = world.resource::<CameraQueue>();
-        !graph
-            .state()
-            .is_some_and(|state| &state.settings == settings && &state.cameras == cameras)
+        if let Some(state) = graph.state() {
+            &state.settings != settings || &state.cameras != cameras
+        } else {
+            true
+        }
     }
 }
 
