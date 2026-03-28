@@ -80,7 +80,7 @@ pub enum ResourceUsage {
     Binding {
         group: u32,
         binding: u32,
-        visiblitiy: ShaderStages,
+        visibility: ShaderStages,
         access: ResourceAccess,
     },
 }
@@ -127,6 +127,8 @@ impl PartialOrd for ResourceBinding {
 pub trait GraphResource: Send + Sync + Sized + 'static {
     type Desc: Clone + Send + Sync + Sized + 'static;
 
+    const OUTPUT: bool = false;
+
     fn resolve(
         world: &ecs::World,
         settings: &crate::core::RenderSettings,
@@ -145,7 +147,7 @@ pub trait GraphResource: Send + Sync + Sized + 'static {
 
     fn bind<'a>(&'a self, builder: &mut BindGroupBuilder<'a>);
 
-    fn compatible(desc_a: &Self::Desc, desc_b: &Self::Desc) -> bool;
+    fn compatible(current: &Self::Desc, other: &Self::Desc) -> bool;
 
     fn generation(&self) -> u32;
 
@@ -180,7 +182,7 @@ impl<'a> PassBuilder<'a> {
             ResourceUsage::Binding {
                 group,
                 binding,
-                visiblitiy,
+                visibility: visiblitiy,
                 access,
             } => {
                 self.bindings.push(ResourceBinding {
@@ -229,6 +231,7 @@ pub struct ResourceType {
     clone: fn(&BoxData) -> BoxData,
     compatible: fn(&BoxData, &BoxData) -> bool,
     generation: fn(&BoxData) -> u32,
+    output: bool,
 }
 
 impl ResourceType {
@@ -261,6 +264,7 @@ impl ResourceType {
                 R::compatible(desc_a, desc_b)
             },
             generation: |resource| resource.downcast_ref::<R>().unwrap().generation(),
+            output: R::OUTPUT,
         }
     }
 
@@ -296,12 +300,16 @@ impl ResourceType {
         (self.clone)(desc)
     }
 
-    pub fn compatible(&self, desc_a: &BoxData, desc_b: &BoxData) -> bool {
-        (self.compatible)(desc_a, desc_b)
+    pub fn compatible(&self, current: &BoxData, other: &BoxData) -> bool {
+        (self.compatible)(current, other)
     }
 
     pub fn generation(&self, resource: &BoxData) -> u32 {
         (self.generation)(resource)
+    }
+
+    pub fn output(&self) -> bool {
+        self.output
     }
 }
 
@@ -532,9 +540,9 @@ impl RenderGraphMask {
         self.0.contains(*pass as usize)
     }
 
-    pub fn set(&mut self, pass: PassId, enabled: bool) {
+    pub fn set(&mut self, pass: PassId, disabled: bool) {
         self.0.grow(pass.0 as usize + 1);
-        self.0.set(pass.0 as usize, enabled);
+        self.0.set(pass.0 as usize, disabled);
     }
 }
 

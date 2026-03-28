@@ -181,7 +181,7 @@ impl GraphPass for OutputPass {
             ResourceUsage::Binding {
                 group: 0,
                 binding: 0,
-                visiblitiy: ShaderStages::FRAGMENT,
+                visibility: ShaderStages::FRAGMENT,
                 access: ResourceAccess::Read,
             },
         );
@@ -192,7 +192,7 @@ impl GraphPass for OutputPass {
             ResourceUsage::Binding {
                 group: 0,
                 binding: 1,
-                visiblitiy: ShaderStages::FRAGMENT,
+                visibility: ShaderStages::FRAGMENT,
                 access: ResourceAccess::Read,
             },
         );
