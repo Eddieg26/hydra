@@ -19,8 +19,10 @@ use wgpu::{BindGroup, CommandBuffer, CommandEncoder, Extent3d, ShaderStages};
 
 pub mod allocator;
 pub mod compiler;
+pub mod output;
 pub mod resources;
 
+pub use output::*;
 pub use resources::*;
 
 pub type Name = &'static str;
@@ -149,7 +151,7 @@ pub trait GraphResource: Send + Sync + Sized + 'static {
 
     fn compatible(current: &Self::Desc, other: &Self::Desc) -> bool;
 
-    fn generation(desc: &Self::Desc, world: &World) -> u32 {
+    fn generation(_desc: &Self::Desc, _world: &World) -> u32 {
         0
     }
 
@@ -479,6 +481,7 @@ pub struct RenderContext<'a> {
     world: &'a World,
     device: &'a RenderDevice,
     state: &'a RenderGraphState,
+    bindings: &'a [PassBindGroup],
     camera: Option<&'a CameraSettings>,
     buffers: Vec<CommandBuffer>,
 }
@@ -491,6 +494,7 @@ impl<'a> RenderContext<'a> {
             device,
             state,
             camera: None,
+            bindings: &[],
             buffers: Vec::new(),
         }
     }
@@ -518,6 +522,7 @@ impl<'a> RenderContext<'a> {
     }
 
     pub fn bind_group(&self, index: u32) -> &BindGroup {
+        let index = self.bindings[index as usize].bind_group;
         self.state.allocator.bind_groups().get(index)
     }
 
@@ -688,6 +693,7 @@ impl RenderGraph {
             for pass in &state.passes {
                 ctx.camera = pass.camera.map(|i| &state.cameras.slice()[i as usize]);
                 ctx.resource_offset = pass.cursor;
+                ctx.bindings = &pass.bindings;
 
                 let node = &nodes[pass.node as usize];
                 node.execute(&mut ctx);

@@ -1,9 +1,8 @@
 use crate::{
     core::{RenderDevice, RenderSettings, RenderSurface, RenderSurfaceTexture, SurfaceResized},
-    output::OutputPassPlugin,
     renderer::{
         camera::{Camera, CameraQueue},
-        graph::{RenderGraph, RenderGraphDirty},
+        graph::{OutputPassPlugin, RenderGraph, RenderGraphDirty},
     },
     resources::{
         BindGroupLayoutRegistry, ExtractError, ExtractInfo, GpuMesh, GpuShader, GpuTexture,

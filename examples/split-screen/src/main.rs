@@ -3,20 +3,18 @@ use ecs::{
     AddComponent, App, AppBuilder, Commands, Component, Entity, Init, Plugin, Query,
     RemoveComponent, Resource, Spawner,
 };
-use renderer::core::RenderDevice;
-use renderer::plugin::{Queue, RenderPlugin};
+use renderer::core::{RenderDevice, RenderSettings};
+use renderer::plugin::{Queue, RenderApp, RenderPlugin};
 use renderer::renderer::camera::CameraSettings;
 use renderer::renderer::graph::{GraphResource, ResourceAccess, ResourceKind};
 use renderer::resources::{BindGroupLayoutRegistry, Buffer, BufferDesc, UniformArrayBuffer};
 use renderer::{
     core::{ColorFormat, Msaa},
-    output::OutputPass,
-    plugin::RenderApp,
     renderer::{
         camera::{Camera, Projection, SettingState},
         graph::{
-            GraphPass, Name, PassBuilder, RenderContext, RenderGraph, ResourceUsage, SurfaceDesc,
-            SurfaceKind, SurfaceTexture, TextureSize,
+            GraphPass, Name, OutputPass, PassBuilder, RenderContext, RenderGraph, ResourceUsage,
+            SurfaceDesc, SurfaceKind, SurfaceTexture, TextureSize,
         },
     },
     resources::{
@@ -58,11 +56,12 @@ impl Plugin for SplitScreenPlugin {
         let render_app = app.sub_app_mut(RenderApp);
 
         let device = render_app.resource::<RenderDevice>().clone();
+        let settings = *render_app.resource::<RenderSettings>();
         let bind_group_layout = {
             let registry = render_app.resource_mut::<BindGroupLayoutRegistry>();
             let mut builder = BindGroupLayoutBuilder::new();
-            builder.with_label(Cow::Borrowed("clear_pass_bind_group_layout"));
-            builder.with_uniform(ShaderStages::FRAGMENT, false, None, None);
+            ClearBuffer::entry(&settings, &(), &mut builder, ShaderStages::FRAGMENT);
+
             let id = registry.register(&device, builder);
             registry.get(id).clone()
         };
@@ -81,7 +80,7 @@ impl Plugin for SplitScreenPlugin {
                     shader: CLEAR_SHADER,
                     entry: Cow::Borrowed("fs_main"),
                     targets: vec![Some(ColorTargetState {
-                        format: TextureFormat::Rgba16Float,
+                        format: settings.color().into(),
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -96,9 +95,9 @@ impl Plugin for SplitScreenPlugin {
             pipeline: pipeline_id,
         });
 
-        // let graph = render_app.resource_mut::<RenderGraph>();
-        // let output_pass_id = graph.add_pass::<OutputPass>();
-        // graph.add_before::<ClearPass>(output_pass_id);
+        let graph = render_app.resource_mut::<RenderGraph>();
+        let output_pass_id = graph.add_pass::<OutputPass>();
+        graph.add_before::<ClearPass>(output_pass_id);
 
         render_app.register::<ClearOffset>();
         render_app.add_systems(Queue, ClearColorBuffer::queue);
@@ -321,9 +320,9 @@ impl GraphResource for ClearBuffer {
         _: &ecs::World,
         _: &renderer::core::RenderSettings,
         _: &mut renderer::renderer::graph::ResourceResolver,
-        _: Self::Desc,
+        desc: Self::Desc,
     ) -> Self::Desc {
-        ()
+        desc
     }
 
     fn create(world: &ecs::World, _: &RenderDevice, _: Name, _: &Self::Desc) -> Self {

@@ -44,31 +44,12 @@ pub enum PipelineAction {
     DirectCopy,
 }
 
-/// Selects the pipeline action based on the render settings color format
-/// and the camera target format.
-pub fn select_pipeline(
-    settings_color: ColorFormat,
-    camera_format: ColorFormat,
-    pipelines: &OutputPassPipelines,
-) -> PipelineId {
-    match (settings_color, camera_format) {
-        (ColorFormat::Standard { .. }, ColorFormat::Standard { srgb: false }) => pipelines.copy,
-        (ColorFormat::Standard { .. }, ColorFormat::Standard { srgb: true }) => {
-            pipelines.copy_srgb
-        }
-        (ColorFormat::HDR, ColorFormat::Standard { srgb: false }) => pipelines.tonemap,
-        (ColorFormat::HDR, ColorFormat::Standard { srgb: true }) => pipelines.tonemap_srgb,
-        (ColorFormat::HDR, ColorFormat::HDR) => pipelines.copy_hdr,
-        (ColorFormat::Standard { .. }, ColorFormat::HDR) => unreachable!(),
-    }
-}
-
 pub struct OutputPassPlugin;
 
 impl Plugin for OutputPassPlugin {
     fn setup(&mut self, app: &mut AppBuilder) {
-        let tonemap_source = include_str!("../assets/shaders/tonemap.wgsl");
-        let copy_source = include_str!("../assets/shaders/copy.wgsl");
+        let tonemap_source = include_str!("../../../assets/shaders/tonemap.wgsl");
+        let copy_source = include_str!("../../../assets/shaders/copy.wgsl");
 
         app.add_asset(
             TONEMAP_SHADER,
@@ -109,35 +90,35 @@ impl Plugin for OutputPassPlugin {
         let pipelines = {
             let cache = render_app.resource_mut::<PipelineCache>();
 
-            let tonemap_id = cache.queue_render_pipeline(make_pipeline_desc(
+            let tonemap_id = cache.queue_render_pipeline(OutputPass::create_pipeline_desc(
                 TONEMAP_SHADER,
                 ColorFormat::Standard { srgb: false }.into(),
                 "output_tonemap",
                 &source_bgl,
             ));
 
-            let tonemap_srgb_id = cache.queue_render_pipeline(make_pipeline_desc(
+            let tonemap_srgb_id = cache.queue_render_pipeline(OutputPass::create_pipeline_desc(
                 TONEMAP_SHADER,
                 ColorFormat::Standard { srgb: true }.into(),
                 "output_tonemap_srgb",
                 &source_bgl,
             ));
 
-            let copy_id = cache.queue_render_pipeline(make_pipeline_desc(
+            let copy_id = cache.queue_render_pipeline(OutputPass::create_pipeline_desc(
                 COPY_SHADER,
                 ColorFormat::Standard { srgb: false }.into(),
                 "output_copy",
                 &source_bgl,
             ));
 
-            let copy_srgb_id = cache.queue_render_pipeline(make_pipeline_desc(
+            let copy_srgb_id = cache.queue_render_pipeline(OutputPass::create_pipeline_desc(
                 COPY_SHADER,
                 ColorFormat::Standard { srgb: true }.into(),
                 "output_copy",
                 &source_bgl,
             ));
 
-            let copy_hdr_id = cache.queue_render_pipeline(make_pipeline_desc(
+            let copy_hdr_id = cache.queue_render_pipeline(OutputPass::create_pipeline_desc(
                 COPY_SHADER,
                 ColorFormat::HDR.into(),
                 "output_copy",
@@ -160,37 +141,57 @@ impl Plugin for OutputPassPlugin {
     }
 }
 
-fn make_pipeline_desc(
-    shader: AssetId<Shader>,
-    target_format: TextureFormat,
-    label: &'static str,
-    source_bgl: &BindGroupLayout,
-) -> RenderPipelineDesc {
-    RenderPipelineDesc {
-        label: Some(Cow::Borrowed(label)),
-        layout: vec![source_bgl.clone()],
-        vertex: VertexState {
-            shader,
-            entry: Cow::Borrowed("vs_main"),
-            buffers: vec![],
-        },
-        fragment: Some(FragmentState {
-            shader,
-            entry: Cow::Borrowed("fs_main"),
-            targets: vec![Some(ColorTargetState {
-                format: target_format,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        primitive: PrimitiveState::default(),
-        depth_stencil: None,
-        multisample: MultisampleState::default(),
-        push_constants: vec![],
+pub struct OutputPass;
+impl OutputPass {
+    /// Selects the pipeline action based on the render settings color format
+    /// and the camera target format.
+    pub fn select_pipeline(
+        settings_color: ColorFormat,
+        camera_format: ColorFormat,
+        pipelines: &OutputPassPipelines,
+    ) -> PipelineId {
+        match (settings_color, camera_format) {
+            (ColorFormat::Standard { .. }, ColorFormat::Standard { srgb: false }) => pipelines.copy,
+            (ColorFormat::Standard { .. }, ColorFormat::Standard { srgb: true }) => {
+                pipelines.copy_srgb
+            }
+            (ColorFormat::HDR, ColorFormat::Standard { srgb: false }) => pipelines.tonemap,
+            (ColorFormat::HDR, ColorFormat::Standard { srgb: true }) => pipelines.tonemap_srgb,
+            (ColorFormat::HDR, ColorFormat::HDR) => pipelines.copy_hdr,
+            (ColorFormat::Standard { .. }, ColorFormat::HDR) => unreachable!(),
+        }
+    }
+
+    fn create_pipeline_desc(
+        shader: AssetId<Shader>,
+        target_format: TextureFormat,
+        label: &'static str,
+        source_bgl: &BindGroupLayout,
+    ) -> RenderPipelineDesc {
+        RenderPipelineDesc {
+            label: Some(Cow::Borrowed(label)),
+            layout: vec![source_bgl.clone()],
+            vertex: VertexState {
+                shader,
+                entry: Cow::Borrowed("vs_main"),
+                buffers: vec![],
+            },
+            fragment: Some(FragmentState {
+                shader,
+                entry: Cow::Borrowed("fs_main"),
+                targets: vec![Some(ColorTargetState {
+                    format: target_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: MultisampleState::default(),
+            push_constants: vec![],
+        }
     }
 }
-
-pub struct OutputPass;
 
 impl GraphPass for OutputPass {
     const NAME: Name = "OutputPass";
@@ -231,7 +232,8 @@ impl GraphPass for OutputPass {
         move |ctx: &mut RenderContext<'_>| {
             let camera = ctx.camera().expect("Missing camera for OutputPass");
             let pipelines = ctx.world().resource::<OutputPassPipelines>();
-            let pipeline_id = select_pipeline(ctx.settings().color(), camera.format, pipelines);
+            let pipeline_id =
+                Self::select_pipeline(ctx.settings().color(), camera.format, pipelines);
             let pipeline_cache = ctx.world().resource::<PipelineCache>();
 
             let Some(pipeline) = pipeline_cache.get_render_pipeline(&pipeline_id) else {

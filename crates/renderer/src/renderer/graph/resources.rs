@@ -46,7 +46,7 @@ impl TextureSize {
                     height: h2,
                     ..
                 },
-            ) => w1 * h1 > w2 * h2,
+            ) => w1 * h1 >= w2 * h2,
             (TextureSize::Texture { id: i1 }, TextureSize::Texture { id: i2 }) => i1 == &i2,
             _ => false,
         }
@@ -66,7 +66,7 @@ pub struct SurfaceTexture {
 }
 
 impl SurfaceTexture {
-    pub fn resolve(&self) -> ResolvedTexture {
+    pub fn resolved(&self) -> ResolvedTexture {
         match self.msaa_view.as_ref() {
             Some(msaa_view) => ResolvedTexture {
                 view: msaa_view.clone(),

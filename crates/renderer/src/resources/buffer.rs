@@ -304,6 +304,10 @@ impl<T: ShaderType + WriteInto> UniformArrayBuffer<T> {
         }
     }
 
+    pub fn data(&self) -> &[u8] {
+        self.data.as_ref().as_slice()
+    }
+
     pub fn push(&mut self, value: &T) -> u64 {
         self.dirty = true;
         self.data.write(value).unwrap()

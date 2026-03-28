@@ -31,14 +31,16 @@ impl RenderGraphCompiler {
 
         let (allocations, alloc_table) = Self::allocate(graph, resources);
 
-        let (passes, layouts, bind_groups) = Self::bindings(
+        let (mut passes, layouts, bind_groups) = Self::bindings(
             graph,
             settings,
-            passes,
-            alloc_table,
-            &mut ref_table,
             &allocations,
+            &alloc_table,
+            &ref_table,
+            passes,
         );
+
+        Self::map(graph, &mut passes, &mut ref_table, alloc_table);
 
         CompiledRenderGraph {
             passes: passes.into_boxed_slice(),
@@ -78,11 +80,12 @@ impl RenderGraphCompiler {
             cameras.slice().len() * graph.resources().nodes().len(),
         );
         let mut table = vec![0; resources.capacity()];
+        let mut entries = 0;
 
         for index in 0..cameras.slice().len() {
             let camera = &cameras.slice()[index];
             let mut resolver = ResourceResolver::new(world, Some(camera));
-            let cursor = resources.len() as u32;
+            let cursor = entries;
 
             for pass in sorted
                 .iter()
@@ -131,6 +134,7 @@ impl RenderGraphCompiler {
                     }
                 }
 
+                entries += pass.entries().len() as u32;
                 passes.push(PassRef {
                     node: *pass.id,
                     camera: Some(index as u32),
@@ -224,12 +228,11 @@ impl RenderGraphCompiler {
                 allocations[index].last_user = resource.last_user;
                 table[resource.id as usize] = index as u32;
             } else {
-                let id = allocations.len() as u32;
-
-                table[resource.id as usize] = id;
+                let index = allocations.len() as u32;
+                table[resource.id as usize] = index;
                 allocations.push(GpuAllocationDesc {
-                    id: id as u32,
-                    node: node.id,
+                    id: index,
+                    node: resource.node,
                     kind: node.kind,
                     last_user: resource.last_user,
                     desc: resource.desc,
@@ -244,10 +247,10 @@ impl RenderGraphCompiler {
     fn bindings(
         graph: &RenderGraph,
         settings: &RenderSettings,
-        passes: Vec<PassRef>,
-        alloc_table: Vec<u32>,
-        ref_table: &mut [u32],
         allocations: &[GpuAllocationDesc],
+        alloc_table: &[u32], // Ref -> Alloc
+        ref_table: &[u32],   // Node -> Ref
+        passes: Vec<PassRef>,
     ) -> (
         Vec<PassInstance>,
         IndexSet<Vec<BindGroupLayoutEntry>>,
@@ -270,7 +273,6 @@ impl RenderGraphCompiler {
                     .or_insert_with(|| ResourceGroup::new(binding.group));
 
                 group.allocations.push(alloc);
-                ref_table[(pass.cursor + binding.node) as usize] = alloc;
                 ty.entry(settings, desc, &mut group.builder, binding.visiblitiy);
             }
 
@@ -300,6 +302,22 @@ impl RenderGraphCompiler {
         }
 
         (instances, layouts, bind_groups)
+    }
+
+    fn map(
+        graph: &RenderGraph,
+        passes: &mut [PassInstance],
+        ref_table: &mut [u32],
+        alloc_table: Vec<u32>,
+    ) {
+        for pass in passes {
+            let node = &graph.nodes[pass.node as usize];
+            for entry in node.entries() {
+                let resource = (pass.cursor + entry.node) as usize;
+                let ref_index = ref_table[resource] as usize;
+                ref_table[resource] = alloc_table[ref_index];
+            }
+        }
     }
 }
 
