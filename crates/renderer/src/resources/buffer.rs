@@ -268,7 +268,7 @@ impl<T: ShaderType> std::ops::Deref for StorageBuffer<T> {
 }
 
 pub struct UniformArrayBuffer<T: ShaderType> {
-    data: encase::DynamicUniformBuffer<Vec<u8>>,
+    scratch: DynamicBuffer<T>,
     inner: Buffer,
     dirty: bool,
     _phantom: PhantomData<T>,
@@ -281,23 +281,23 @@ impl<T: ShaderType + WriteInto> UniformArrayBuffer<T> {
     /// - if `data` is false alignment is set to the minimum size of T.
     pub fn new(device: &RenderDevice, desc: BufferDesc<bool>) -> Self {
         let alignment = if desc.data {
-            device.limits().min_uniform_buffer_offset_alignment as u64
+            device.limits().min_uniform_buffer_offset_alignment
         } else {
-            T::min_size().get().max(32)
+            T::min_size().get().max(32) as u32
         };
 
-        let data = encase::DynamicUniformBuffer::new_with_alignment(Vec::new(), alignment);
+        let data = DynamicBuffer::new(alignment);
         let buffer = Buffer::new(
             device,
             BufferDesc {
                 label: desc.label,
-                data: alignment,
+                data: alignment as u64,
                 usages: BufferUsages::UNIFORM | desc.usages,
             },
         );
 
         Self {
-            data,
+            scratch: data,
             inner: buffer,
             dirty: false,
             _phantom: PhantomData,
@@ -305,18 +305,17 @@ impl<T: ShaderType + WriteInto> UniformArrayBuffer<T> {
     }
 
     pub fn data(&self) -> &[u8] {
-        self.data.as_ref().as_slice()
+        self.scratch.data()
     }
 
-    pub fn push(&mut self, value: &T) -> u64 {
+    pub fn push(&mut self, value: &T) -> u32 {
         self.dirty = true;
-        self.data.write(value).unwrap()
+        self.scratch.push(value)
     }
 
     pub fn clear(&mut self) {
         self.dirty = true;
-        self.data.set_offset(0);
-        self.data.as_mut().clear();
+        self.scratch.clear();
     }
 
     pub fn update(&mut self, device: &RenderDevice) -> Option<BufferSize> {
@@ -325,7 +324,7 @@ impl<T: ShaderType + WriteInto> UniformArrayBuffer<T> {
         }
 
         self.dirty = false;
-        self.inner.update(device, 0, self.data.as_ref())
+        self.inner.update(device, 0, self.scratch.data())
     }
 }
 
@@ -336,7 +335,7 @@ impl<T: ShaderType> AsRef<Buffer> for UniformArrayBuffer<T> {
 }
 
 pub struct StorageArrayBuffer<T: ShaderType> {
-    data: encase::DynamicStorageBuffer<Vec<u8>>,
+    scratch: DynamicBuffer<T>,
     inner: Buffer,
     dirty: bool,
     _phantom: PhantomData<T>,
@@ -349,37 +348,37 @@ impl<T: ShaderType + WriteInto> StorageArrayBuffer<T> {
     /// - if `data` is false alignment is set to the minimum size of T.
     pub fn new(device: &RenderDevice, desc: BufferDesc<bool>) -> Self {
         let alignment = if desc.data {
-            device.limits().min_storage_buffer_offset_alignment as u64
+            device.limits().min_storage_buffer_offset_alignment
         } else {
-            T::min_size().get().max(32)
+            T::min_size().get().max(32) as u32
         };
 
-        let data = encase::DynamicStorageBuffer::new_with_alignment(Vec::new(), alignment);
+        let data = DynamicBuffer::new(alignment);
         let buffer = Buffer::new(
             device,
             BufferDesc {
                 label: desc.label,
-                data: alignment,
+                data: alignment as u64,
                 usages: BufferUsages::STORAGE | desc.usages,
             },
         );
 
         Self {
-            data,
+            scratch: data,
             inner: buffer,
             dirty: false,
             _phantom: PhantomData,
         }
     }
 
-    pub fn push(&mut self, value: &T) -> u64 {
+    pub fn push(&mut self, value: &T) -> u32 {
         self.dirty = true;
-        self.data.write(value).unwrap()
+        self.scratch.push(value)
     }
 
     pub fn clear(&mut self) {
-        self.data.set_offset(0);
-        self.data.as_mut().clear();
+        self.dirty = true;
+        self.scratch.clear();
     }
 
     pub fn update(&mut self, device: &RenderDevice) -> Option<BufferSize> {
@@ -388,7 +387,7 @@ impl<T: ShaderType + WriteInto> StorageArrayBuffer<T> {
         }
 
         self.dirty = false;
-        self.inner.update(device, 0, self.data.as_ref())
+        self.inner.update(device, 0, self.scratch.data())
     }
 }
 
@@ -456,5 +455,54 @@ impl<T: Pod> ArrayBuffer<T> {
 impl<T: Pod> AsRef<Buffer> for ArrayBuffer<T> {
     fn as_ref(&self) -> &Buffer {
         &self.inner
+    }
+}
+
+pub struct DynamicBuffer<T: ShaderType> {
+    data: Vec<u8>,
+    alignment: u32,
+    offset: u32,
+    _phantom: PhantomData<T>,
+}
+
+impl<T: ShaderType + WriteInto> DynamicBuffer<T> {
+    pub fn new(alignment: u32) -> Self {
+        Self {
+            data: Vec::new(),
+            alignment,
+            offset: 0,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn offset(&self) -> u32 {
+        self.offset
+    }
+
+    pub fn alignment(&self) -> u32 {
+        self.alignment
+    }
+
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    pub fn push(&mut self, value: &T) -> u32 {
+        let offset = self.offset;
+
+        let mut writer =
+            encase::internal::Writer::new(value, &mut self.data, offset as usize).unwrap();
+        value.write_into(&mut writer);
+
+        self.data.resize((self.offset + self.alignment) as usize, 0);
+
+        self.offset += self.alignment;
+
+        offset
+    }
+
+    pub fn clear(&mut self) {
+        self.data.clear();
+        self.offset = 0;
     }
 }

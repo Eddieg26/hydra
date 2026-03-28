@@ -309,7 +309,10 @@ impl ClearColorBuffer {
 #[derive(Clone, Copy, Component)]
 pub struct ClearOffset(u32);
 
-struct ClearBuffer(Buffer);
+struct ClearBuffer {
+    buffer: Buffer,
+    element_size: u64,
+}
 
 impl GraphResource for ClearBuffer {
     type Desc = ();
@@ -325,9 +328,12 @@ impl GraphResource for ClearBuffer {
         desc
     }
 
-    fn create(world: &ecs::World, _: &RenderDevice, _: Name, _: &Self::Desc) -> Self {
+    fn create(world: &ecs::World, device: &RenderDevice, _: Name, _: &Self::Desc) -> Self {
         let buffer = world.resource::<ClearColorBuffer>();
-        ClearBuffer(Buffer::clone(buffer.inner.as_ref()))
+        ClearBuffer {
+            buffer: Buffer::clone(buffer.inner.as_ref()),
+            element_size: device.limits().min_uniform_buffer_offset_alignment as u64,
+        }
     }
 
     fn entry(
@@ -340,7 +346,11 @@ impl GraphResource for ClearBuffer {
     }
 
     fn bind<'a>(&'a self, builder: &mut renderer::resources::BindGroupBuilder<'a>) {
-        builder.with_buffer(self.0.as_entire_buffer_binding());
+        builder.with_buffer(wgpu::BufferBinding {
+            buffer: &self.buffer,
+            offset: 0,
+            size: std::num::NonZero::new(self.element_size),
+        });
     }
 
     fn compatible(_: &Self::Desc, _: &Self::Desc) -> bool {
