@@ -1,5 +1,5 @@
 use crate::{
-    core::{RenderDevice, RenderSettings, RenderSurface, RenderSurfaceTexture, SurfaceResized},
+    core::{RenderDevice, RenderSettings, RenderSurface, SurfaceResized},
     renderer::{
         camera::{Camera, CameraQueue},
         graph::{OutputPassPlugin, RenderGraph, RenderGraphDirty},
@@ -51,18 +51,16 @@ impl Plugin for RenderPlugin {
         .add_resource(PipelineCache::default())
         .add_resource(ShaderVariants::default())
         .add_resource(MeshAllocatorConfig::default())
-        .add_resource(RenderSurfaceTexture::default())
         .add_resource(MainRenderTarget::default())
         .add_resource(BindGroupLayoutRegistry::default())
         .add_resource(SurfaceResized::default())
         .add_systems(Extract, SurfaceResized::extract)
         .add_systems(Process, RenderSurface::on_resized)
-        .add_systems(Process, RenderSurfaceTexture::update)
         .add_systems(Process, MainRenderTarget::update)
         .add_systems(Queue, CameraQueue::queue)
         .add_systems(PreRender, RenderGraph::update.when::<RenderGraphDirty>())
         .add_systems(Render, RenderGraph::run)
-        .add_systems(Present, RenderSurfaceTexture::present);
+        .add_systems(Present, MainRenderTarget::present);
     }
 
     fn build(&mut self, app: &mut AppBuilder) {

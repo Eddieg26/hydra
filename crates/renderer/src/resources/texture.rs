@@ -1,5 +1,5 @@
 use crate::{
-    core::{ColorFormat, RenderDevice, RenderSurfaceTexture},
+    core::{ColorFormat, RenderDevice, RenderSurface},
     resources::{RenderAssets, extract::RenderAsset},
     types::Color,
 };
@@ -10,8 +10,9 @@ use ecs::{
 };
 use std::collections::HashMap;
 use wgpu::{
-    CompareFunction, FilterMode, Label, Sampler, SamplerBorderColor, TextureDescriptor,
-    TextureFormat, TextureUsages, TextureView, util::DeviceExt, wgt::TextureDataOrder,
+    CompareFunction, FilterMode, Label, Sampler, SamplerBorderColor, SurfaceError,
+    TextureDescriptor, TextureFormat, TextureUsages, TextureView, util::DeviceExt,
+    wgt::TextureDataOrder,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -476,17 +477,31 @@ impl RenderAsset for RenderTarget {
 }
 
 #[derive(Default, Resource)]
-pub struct MainRenderTarget(Option<RenderTarget>);
+pub struct MainRenderTarget {
+    target: Option<RenderTarget>,
+    surface: Option<wgpu::SurfaceTexture>,
+}
 
 impl MainRenderTarget {
     pub fn get(&self) -> Option<&RenderTarget> {
-        self.0.as_ref()
+        self.target.as_ref()
     }
 
-    pub(crate) fn update(target: &mut MainRenderTarget, surface: &RenderSurfaceTexture) {
-        let Some(surface) = surface.get() else {
-            target.0 = None;
-            return;
+    pub(crate) fn update(
+        device: &RenderDevice,
+        main: &mut MainRenderTarget,
+        surface: &mut RenderSurface,
+    ) {
+        let surface = match surface.texture() {
+            Ok(texture) => texture,
+            Err(SurfaceError::Timeout) | Err(SurfaceError::Outdated) | Err(SurfaceError::Lost) => {
+                surface.configure(device);
+                main.target = None;
+                main.surface = None;
+                return;
+            }
+            Err(SurfaceError::OutOfMemory) => panic!("Surface error: Out of memory"),
+            Err(SurfaceError::Other) => panic!("Surface error"),
         };
 
         let color = GpuTexture {
@@ -495,7 +510,7 @@ impl MainRenderTarget {
             sampler: SamplerCache::DEFAULT,
         };
 
-        target.0 = Some(RenderTarget {
+        main.target = Some(RenderTarget {
             width: surface.texture.width(),
             height: surface.texture.height(),
             format: ColorFormat::Standard {
@@ -503,5 +518,15 @@ impl MainRenderTarget {
             },
             color,
         });
+
+        main.surface = Some(surface);
+    }
+
+    pub(crate) fn present(main: &mut MainRenderTarget) {
+        let Some(texture) = main.surface.take() else {
+            return;
+        };
+
+        texture.present();
     }
 }

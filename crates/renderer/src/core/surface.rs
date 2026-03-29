@@ -2,8 +2,8 @@ use crate::core::device::RenderDevice;
 use ecs::{EventReader, Resource, system::Main};
 use wgpu::{
     Adapter, CompositeAlphaMode, CreateSurfaceError, Instance, PowerPreference, PresentMode,
-    RequestAdapterOptions, Surface, SurfaceConfiguration, SurfaceError, TextureFormat,
-    TextureUsages, rwh::HandleError,
+    RequestAdapterOptions, Surface, SurfaceConfiguration, TextureFormat, TextureUsages,
+    rwh::HandleError,
 };
 use window::{Window, events::WindowResized};
 
@@ -145,44 +145,5 @@ impl SurfaceResized {
         if let Some(event) = events.into_inner().last() {
             resized.set(*event);
         }
-    }
-}
-
-#[derive(Default, Resource)]
-pub struct RenderSurfaceTexture(Option<wgpu::SurfaceTexture>);
-
-impl RenderSurfaceTexture {
-    pub fn set(&mut self, texture: wgpu::SurfaceTexture) {
-        self.0 = Some(texture);
-    }
-
-    pub fn get(&self) -> Option<&wgpu::SurfaceTexture> {
-        self.0.as_ref()
-    }
-
-    pub(crate) fn update(
-        device: &RenderDevice,
-        surface: &mut RenderSurface,
-        texture: &mut RenderSurfaceTexture,
-    ) {
-        let surface = match surface.texture() {
-            Ok(texture) => texture,
-            Err(SurfaceError::Timeout) | Err(SurfaceError::Outdated) | Err(SurfaceError::Lost) => {
-                surface.configure(device);
-                return;
-            }
-            Err(SurfaceError::OutOfMemory) => panic!("Surface error: Out of memory"),
-            Err(SurfaceError::Other) => panic!("Surface error"),
-        };
-
-        texture.set(surface);
-    }
-
-    pub(crate) fn present(surface: &mut RenderSurfaceTexture) {
-        let Some(texture) = surface.0.take() else {
-            return;
-        };
-
-        texture.present();
     }
 }

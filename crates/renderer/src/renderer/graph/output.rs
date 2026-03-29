@@ -25,7 +25,7 @@ const TONEMAP_SHADER: AssetId<Shader> = AssetId::from_u128(0xa1b2c3d4_e5f6_7890_
 /// Static asset ID for the copy shader.
 const COPY_SHADER: AssetId<Shader> = AssetId::from_u128(0xfedcba98_7654_3210_abcd_ef0123456789);
 
-/// Resource holding the three pipeline IDs for the output pass.
+/// Resource holding the pipeline IDs for the output pass.
 #[derive(Resource)]
 pub struct OutputPassPipelines {
     pub tonemap: PipelineId,
@@ -33,15 +33,6 @@ pub struct OutputPassPipelines {
     pub copy: PipelineId,
     pub copy_srgb: PipelineId,
     pub copy_hdr: PipelineId,
-}
-
-/// The pipeline action selected based on render settings and camera format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PipelineAction {
-    Copy,
-    Tonemap,
-    TonemapSrgb,
-    DirectCopy,
 }
 
 pub struct OutputPassPlugin;
@@ -64,7 +55,6 @@ impl Plugin for OutputPassPlugin {
     fn finish(&mut self, app: &mut AppBuilder) {
         let render_app = app.sub_app_mut(RenderApp);
 
-        // Create the bind group layout for the source texture (group 0, binding 0).
         let source_bgl = {
             let device = render_app.resource::<crate::core::RenderDevice>().clone();
             let registry = render_app.resource_mut::<BindGroupLayoutRegistry>();
@@ -143,8 +133,6 @@ impl Plugin for OutputPassPlugin {
 
 pub struct OutputPass;
 impl OutputPass {
-    /// Selects the pipeline action based on the render settings color format
-    /// and the camera target format.
     pub fn select_pipeline(
         settings_color: ColorFormat,
         camera_format: ColorFormat,
@@ -237,7 +225,6 @@ impl GraphPass for OutputPass {
             let pipeline_cache = ctx.world().resource::<PipelineCache>();
 
             let Some(pipeline) = pipeline_cache.get_render_pipeline(&pipeline_id) else {
-                // Pipeline not yet compiled, skip this frame
                 return;
             };
 
