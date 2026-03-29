@@ -20,7 +20,7 @@ members = [
     "crates/reflection",
     "examples/window",
     "examples/split-screen",
-    "crates/renderer",
+    "crates/renderer", "crates/editor",
 ]
 
 
