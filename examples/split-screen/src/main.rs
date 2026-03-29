@@ -5,7 +5,6 @@ use ecs::{
 };
 use renderer::core::{RenderDevice, RenderSettings};
 use renderer::plugin::{Queue, RenderApp, RenderPlugin};
-use renderer::renderer::camera::CameraSettings;
 use renderer::renderer::graph::{GraphResource, ResourceAccess, ResourceKind};
 use renderer::resources::{BindGroupLayoutRegistry, Buffer, BufferDesc, UniformArrayBuffer};
 use renderer::{
@@ -25,9 +24,7 @@ use renderer::{
 };
 use std::borrow::Cow;
 use wgpu::BufferBindingType;
-use wgpu::{
-    BufferUsages, ColorTargetState, MultisampleState, PrimitiveState, ShaderStages, TextureFormat,
-};
+use wgpu::{BufferUsages, ColorTargetState, MultisampleState, PrimitiveState, ShaderStages};
 use wgsl_macro::ShaderConstants;
 
 /// Static asset ID for the clear shader.
