@@ -1,3 +1,4 @@
+use math::Vec2;
 use renderer::types::Color;
 use smallvec::SmallVec;
 use std::collections::HashMap;
@@ -10,11 +11,59 @@ pub struct Edges<T> {
     pub bottom: T,
 }
 
+impl Edges<f32> {
+    pub fn horizontal(&self) -> f32 {
+        self.left + self.right
+    }
+
+    pub fn vertical(&self) -> f32 {
+        self.top + self.bottom
+    }
+
+    pub fn scale(&self, size: Vec2) -> Edges<f32> {
+        Self {
+            left: self.left * size.x,
+            right: self.right * size.x,
+            top: self.top * size.y,
+            bottom: self.bottom * size.y,
+        }
+    }
+}
+
+impl Edges<Length> {
+    pub fn resolve(&self, size: Vec2) -> Edges<f32> {
+        Edges {
+            left: self.left.resolve(size.x),
+            right: self.right.resolve(size.x),
+            top: self.top.resolve(size.y),
+            bottom: self.bottom.resolve(size.y),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Length {
     Auto,
     Fixed(f32),
     Fill(f32),
+}
+
+impl Length {
+    pub fn resolve(&self, length: f32) -> f32 {
+        match self {
+            Length::Auto => 0.0,
+            Length::Fixed(v) => *v,
+            Length::Fill(v) => length * v,
+        }
+    }
+
+    pub fn calculate(&self, min: f32, max: f32) -> f32 {
+        match self {
+            Length::Auto => min,
+            Length::Fixed(v) => *v,
+            Length::Fill(v) => max * v,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -49,10 +98,44 @@ pub enum Visibility {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Size {
-    pub value: Length,
-    pub min: Length,
-    pub max: Length,
+pub struct Constrained<T = Length> {
+    pub value: T,
+    pub min: T,
+    pub max: T,
+}
+
+impl<T> Constrained<T> {
+    pub fn with(self, value: T) -> Self {
+        Self {
+            value,
+            min: self.min,
+            max: self.max,
+        }
+    }
+}
+
+impl Constrained<f32> {
+    pub fn clamp(&self) -> f32 {
+        self.value.clamp(self.min, self.max)
+    }
+}
+
+impl Constrained<Length> {
+    pub fn resolve(&self, value: f32) -> Constrained<f32> {
+        Constrained {
+            value: self.value.resolve(value),
+            min: self.min.resolve(value),
+            max: self.max.resolve(value),
+        }
+    }
+
+    pub fn calculate(&self, min: f32, max: f32) -> Constrained<f32> {
+        Constrained {
+            value: self.value.calculate(min, max),
+            min: self.min.calculate(min, max),
+            max: self.max.calculate(min, max),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -96,6 +179,8 @@ pub struct Style {
     pub flex_direction: Option<FlexDirection>,
     pub flex_grow: Option<f32>,
     pub flex_shrink: Option<f32>,
+    pub gap_x: Option<Length>,
+    pub gap_y: Option<Length>,
 
     pub margin: Option<Edges<f32>>,
     pub padding: Option<Edges<f32>>,
@@ -111,11 +196,11 @@ pub struct ComputedStyle {
     pub display: Display,
     pub position: Position,
     pub visibility: Visibility,
-    pub width: Size,
-    pub height: Size,
+    pub width: Constrained,
+    pub height: Constrained,
 
     pub background: Color,
-    pub border: Border,
+    pub border: Option<Border>,
     pub font: FontStyle,
     pub flex: Flex,
 
@@ -124,6 +209,8 @@ pub struct ComputedStyle {
 
     pub overflow_x: Overflow,
     pub overlfow_y: Overflow,
+    pub gap_x: Length,
+    pub gap_y: Length,
 
     pub opacity: f32,
 }
@@ -206,9 +293,19 @@ impl ComputedStyle {
             self.opacity = v
         };
 
-        if let Some(v) = style.border {
-            self.border = v
+        if let Some(v) = style.gap_x {
+            self.gap_x = v
         };
+
+        if let Some(v) = style.gap_y {
+            self.gap_y = v
+        };
+
+        if let Some(v) = style.opacity {
+            self.opacity = v
+        };
+
+        self.border = style.border;
     }
 }
 

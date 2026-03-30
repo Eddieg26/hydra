@@ -1,9 +1,18 @@
+use math::Vec2;
+
 use crate::ui::{
     core::{id::ElementId, style::ComputedStyle},
-    runtime::{layout::Layout, paint::DrawCommand},
+    runtime::{
+        layout::{ContentResolver, Layout},
+        paint::DrawCommand,
+    },
 };
 
 pub trait Element: Send + Sync + 'static {
+    fn measure(&self, available: Vec2, _resolver: &ContentResolver) -> Vec2 {
+        available
+    }
+
     fn draw(&self, style: &ComputedStyle, layout: &Layout) -> DrawCommand;
 }
 
@@ -20,9 +29,7 @@ bitflags::bitflags! {
 pub struct ElementNode {
     pub id: ElementId,
     pub parent: Option<ElementId>,
-    pub first_child: Option<ElementId>,
-    pub next_sibling: Option<ElementId>,
-    pub prev_sibling: Option<ElementId>,
+    pub children: Vec<ElementId>,
     pub element: Box<dyn Element>,
     pub flags: ElementFlags,
 }
