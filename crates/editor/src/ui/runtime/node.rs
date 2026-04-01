@@ -9,8 +9,8 @@ use crate::ui::{
 };
 
 pub trait Element: Send + Sync + 'static {
-    fn measure(&self, available: Vec2, _resolver: &ContentResolver) -> Vec2 {
-        available
+    fn measure(&self, _resolver: &ContentResolver) -> Option<Vec2> {
+        None
     }
 
     fn draw(&self, style: &ComputedStyle, layout: &Layout) -> DrawCommand;

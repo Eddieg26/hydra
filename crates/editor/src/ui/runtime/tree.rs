@@ -8,10 +8,10 @@ use crate::ui::{
 use slotmap::{SecondaryMap, SlotMap};
 
 pub struct ElementTree {
-    nodes: SlotMap<ElementId, ElementNode>,
-    element_styles: SecondaryMap<ElementId, ElementStyle>,
-    computed_styles: SecondaryMap<ElementId, ComputedStyle>,
-    layouts: SecondaryMap<ElementId, Layout>,
+    pub(crate) nodes: SlotMap<ElementId, ElementNode>,
+    pub(crate) element_styles: SecondaryMap<ElementId, ElementStyle>,
+    pub(crate) computed_styles: SecondaryMap<ElementId, ComputedStyle>,
+    pub(crate) layouts: SecondaryMap<ElementId, Layout>,
 }
 
 impl ElementTree {

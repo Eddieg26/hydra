@@ -31,12 +31,12 @@ impl Edges<f32> {
 }
 
 impl Edges<Length> {
-    pub fn resolve(&self, size: Vec2) -> Edges<f32> {
+    pub fn resolve(&self, size: Vec2, max: Option<Vec2>) -> Edges<f32> {
         Edges {
-            left: self.left.resolve(size.x),
-            right: self.right.resolve(size.x),
-            top: self.top.resolve(size.y),
-            bottom: self.bottom.resolve(size.y),
+            left: self.left.resolve(size.x, max.map(|m| m.x)),
+            right: self.right.resolve(size.x, max.map(|m| m.x)),
+            top: self.top.resolve(size.y, max.map(|m| m.y)),
+            bottom: self.bottom.resolve(size.y, max.map(|m| m.y)),
         }
     }
 }
@@ -49,19 +49,11 @@ pub enum Length {
 }
 
 impl Length {
-    pub fn resolve(&self, length: f32) -> f32 {
+    pub fn resolve(&self, auto: f32, max: Option<f32>) -> f32 {
         match self {
-            Length::Auto => 0.0,
+            Length::Auto => auto.min(max.unwrap_or(auto)),
             Length::Fixed(v) => *v,
-            Length::Fill(v) => length * v,
-        }
-    }
-
-    pub fn calculate(&self, min: f32, max: f32) -> f32 {
-        match self {
-            Length::Auto => min,
-            Length::Fixed(v) => *v,
-            Length::Fill(v) => max * v,
+            Length::Fill(v) => max.unwrap_or(auto) * *v,
         }
     }
 }
@@ -121,19 +113,11 @@ impl Constrained<f32> {
 }
 
 impl Constrained<Length> {
-    pub fn resolve(&self, value: f32) -> Constrained<f32> {
+    pub fn resolve(&self, auto: f32, max: Option<f32>) -> Constrained<f32> {
         Constrained {
-            value: self.value.resolve(value),
-            min: self.min.resolve(value),
-            max: self.max.resolve(value),
-        }
-    }
-
-    pub fn calculate(&self, min: f32, max: f32) -> Constrained<f32> {
-        Constrained {
-            value: self.value.calculate(min, max),
-            min: self.min.calculate(min, max),
-            max: self.max.calculate(min, max),
+            value: self.value.resolve(auto, max),
+            min: self.min.resolve(auto, max),
+            max: self.max.resolve(auto, max),
         }
     }
 }
@@ -161,6 +145,26 @@ pub struct Flex {
     pub shrink: f32,
 }
 
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Justify {
+    #[default]
+    Start,
+    Center,
+    End,
+    Between,
+    Around,
+    Evenly,
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Align {
+    #[default]
+    Start,
+    Center,
+    End,
+    Stretch,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Style {
     pub display: Option<Display>,
@@ -179,6 +183,8 @@ pub struct Style {
     pub flex_direction: Option<FlexDirection>,
     pub flex_grow: Option<f32>,
     pub flex_shrink: Option<f32>,
+    pub justify: Option<Justify>,
+    pub align: Option<Align>,
     pub gap_x: Option<Length>,
     pub gap_y: Option<Length>,
 
@@ -203,6 +209,8 @@ pub struct ComputedStyle {
     pub border: Option<Border>,
     pub font: FontStyle,
     pub flex: Flex,
+    pub justify: Justify,
+    pub align: Align,
 
     pub margin: Edges<f32>,
     pub padding: Edges<f32>,
@@ -300,6 +308,14 @@ impl ComputedStyle {
         if let Some(v) = style.gap_y {
             self.gap_y = v
         };
+
+        if let Some(v) = style.justify {
+            self.justify = v
+        }
+
+        if let Some(v) = style.align {
+            self.align = v;
+        }
 
         if let Some(v) = style.opacity {
             self.opacity = v
