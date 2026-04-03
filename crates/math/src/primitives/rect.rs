@@ -35,6 +35,14 @@ impl Rect {
             && point.y >= self.y
             && point.y <= self.y + self.height
     }
+
+    pub fn intersect(&self, other: &Rect) -> Self {
+        let x = self.x.max(other.x);
+        let y = self.y.max(other.y);
+        let width = (self.x + self.width).min(other.x + other.width) - x;
+        let height = (self.y + self.height).min(other.y + other.height) - y;
+        Rect { x, y, width, height }
+    }
 }
 
 impl std::ops::Add for Rect {

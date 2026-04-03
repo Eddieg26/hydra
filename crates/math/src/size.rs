@@ -16,6 +16,20 @@ impl Size {
         width: 0.0,
         height: 0.0,
     };
+
+    pub fn min(&self, width: f32, height: f32) -> Self {
+        Self {
+            width: self.width.min(width),
+            height: self.height.min(height),
+        }
+    }
+
+    pub fn max(&self, width: f32, height: f32) -> Self {
+        Self {
+            width: self.width.max(width),
+            height: self.height.max(height),
+        }
+    }
 }
 
 impl<T: Copy> Copy for Size<T> {}

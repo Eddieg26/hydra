@@ -4,13 +4,13 @@ use crate::ui::{
         image::ImageResolver,
         style::{
             Align, ComputedStyle, Constrained, Edges, Flex, FlexDirection, FlexWrap, Justify,
-            Length,
+            Length, Overflow,
         },
         text::TextMeasurer,
     },
     runtime::tree::ElementTree,
 };
-use math::{Size, Vec2, rect::Rect};
+use math::{Size, rect::Rect};
 use std::ops::Range;
 
 pub struct ContentResolver<'a> {
@@ -27,16 +27,15 @@ impl<'a> LayoutEngine<'a> {
     pub fn run(&mut self, id: ElementId, rect: Rect) {
         let node = &self.tree.nodes[id];
         let style = &self.tree.computed_styles[id];
-        let content_rect = Rect {
-            x: rect.x + style.padding.left,
-            y: rect.y + style.padding.top,
-            width: (rect.width - style.padding.horizontal()).max(0.0)
-                - style.border.map(|b| b.width.horizontal()).unwrap_or(0.0),
-            height: (rect.height - style.padding.vertical()).max(0.0)
-                - style.border.map(|b| b.width.vertical()).unwrap_or(0.0),
+        let border_width = style.border.map(|b| b.width).unwrap_or(0.0);
+        let content = Rect {
+            x: rect.x + border_width + style.padding.left,
+            y: rect.y + border_width + style.padding.top,
+            width: (rect.width - style.padding.horizontal()).max(0.0) - border_width,
+            height: (rect.height - style.padding.vertical()).max(0.0) - border_width,
         };
         let direction = style.flex.direction;
-        let axis = FlexAxis::pair(style, content_rect);
+        let axis = FlexAxis::pair(style, content);
 
         let mut items = Vec::with_capacity(node.children.len());
         for child in &node.children {
@@ -49,11 +48,11 @@ impl<'a> LayoutEngine<'a> {
 
             let width = child_style
                 .width
-                .resolve(intrinisic.width, Some(content_rect.width));
+                .resolve(intrinisic.width, Some(content.width));
 
             let height = child_style
                 .height
-                .resolve(intrinisic.height, Some(content_rect.height));
+                .resolve(intrinisic.height, Some(content.height));
 
             items.push(FlexItem::new(
                 *child,
@@ -102,7 +101,7 @@ impl<'a> LayoutEngine<'a> {
             lines.push(current);
         }
 
-        let mut cursor = FlexCursor::new(style, &lines, &axis.cross, content_rect);
+        let mut cursor = FlexCursor::new(style, &lines, &axis.cross, content);
         for line in lines {
             let mut cursor = cursor.start(style.justify, &line, &axis.main);
 
@@ -154,19 +153,71 @@ impl<'a> LayoutEngine<'a> {
             cursor.finish(line.size.cross);
         }
 
+        let clip = {
+            let parent = node
+                .parent
+                .map(|p| &self.tree.layouts[p])
+                .map(|l| l.outer)
+                .unwrap_or(content);
+
+            let (x, width) = match style.overflow_x {
+                Overflow::Visible => (parent.x, parent.width),
+                Overflow::Hidden | Overflow::Scroll => {
+                    let area = content.intersect(&parent);
+                    (area.x, area.width)
+                }
+            };
+
+            let (y, height) = match style.overlfow_y {
+                Overflow::Visible => (parent.y, parent.height),
+                Overflow::Hidden | Overflow::Scroll => {
+                    let area = content.intersect(&parent);
+                    (area.y, area.height)
+                }
+            };
+
+            Rect {
+                x,
+                y,
+                width,
+                height,
+            }
+        };
+
+        let border = Rect {
+            x: rect.x,
+            y: rect.y,
+            width: border_width,
+            height: border_width,
+        };
+
         self.tree.layouts.insert(
             id,
             Layout {
                 outer: rect,
-                content: content_rect,
-                border: rect,
-                clip: rect,
-                scroll: Vec2::ZERO,
+                content,
+                border,
+                clip,
+                scroll: Rect::ZERO,
             },
         );
 
+        let mut content_size = Size::ZERO;
         for item in items {
-            self.run(item.element, item.rect(direction));
+            let id = item.element;
+            let rect = item.rect(direction);
+            let width = (rect.x + rect.width) - content.x;
+            let height = (rect.y + rect.height) - content.y;
+            content_size = content_size.max(width, height);
+
+            self.run(id, rect);
+        }
+
+        self.tree.layouts[id].scroll = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: (content_size.width - clip.width).max(0.0),
+            height: (content_size.height - clip.height).max(0.0),
         }
     }
 }
@@ -424,5 +475,5 @@ pub struct Layout {
     pub content: Rect,
     pub border: Rect,
     pub clip: Rect,
-    pub scroll: Vec2,
+    pub scroll: Rect,
 }

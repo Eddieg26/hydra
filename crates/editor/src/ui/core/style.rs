@@ -124,7 +124,7 @@ impl Constrained<Length> {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Border {
-    pub width: Edges<f32>,
+    pub width: f32,
     pub color: Edges<Color>,
 }
 
