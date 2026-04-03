@@ -110,6 +110,12 @@ impl Constrained<f32> {
     pub fn clamp(&self) -> f32 {
         self.value.clamp(self.min, self.max)
     }
+
+    pub fn clamped(&self) -> (f32, bool) {
+        let clamped = self.value < self.min || self.value > self.max;
+        let value = self.value.clamp(self.min, self.max);
+        (value, clamped)
+    }
 }
 
 impl Constrained<Length> {

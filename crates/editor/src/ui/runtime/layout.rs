@@ -8,10 +8,10 @@ use crate::ui::{
         },
         text::TextMeasurer,
     },
-    runtime::tree::ElementTree,
+    runtime::{node::ElementNode, tree::ElementTree},
 };
 use math::{Size, rect::Rect};
-use std::ops::Range;
+use std::{collections::VecDeque, ops::Range};
 
 pub struct ContentResolver<'a> {
     pub text: &'a dyn TextMeasurer,
@@ -28,19 +28,46 @@ impl<'a> LayoutEngine<'a> {
         let node = &self.tree.nodes[id];
         let style = &self.tree.computed_styles[id];
         let border_width = style.border.map(|b| b.width).unwrap_or(0.0);
-        let content = Rect {
-            x: rect.x + border_width + style.padding.left,
-            y: rect.y + border_width + style.padding.top,
-            width: (rect.width - style.padding.horizontal()).max(0.0) - border_width,
-            height: (rect.height - style.padding.vertical()).max(0.0) - border_width,
-        };
-        let direction = style.flex.direction;
+        let content = Rect::new(
+            rect.x + border_width,
+            rect.y + border_width,
+            rect.width - border_width - style.padding.horizontal(),
+            rect.height - border_width - style.padding.vertical(),
+        );
+        let clip = Layout::clip(
+            style,
+            &content,
+            node.parent.map(|p| &self.tree.layouts[p].outer),
+        );
+
+        self.tree
+            .layouts
+            .insert(id, Layout::new(rect, content, clip, border_width));
+
         let axis = FlexAxis::pair(style, content);
 
+        let mut items = self.create_items(node, style, &content);
+        let mut lines = self.create_lines(style.wrap, &axis.main, &mut items);
+
+        self.pack_main_axis(&axis.main, &mut items, &mut lines);
+        self.pack_cross_axis(style.align, &mut items, &mut lines);
+
+        let rects = self.position_items(style, &rect, &axis, lines, items);
+        self.tree.layouts[id].scroll = self.layout_children(&content, &clip, rects);
+    }
+
+    fn create_items(
+        &self,
+        node: &ElementNode,
+        style: &ComputedStyle,
+        content: &Rect,
+    ) -> Vec<FlexItem> {
         let mut items = Vec::with_capacity(node.children.len());
+
         for child in &node.children {
             let child_node = &self.tree.nodes[*child];
             let child_style = &self.tree.computed_styles[*child];
+
             let intrinisic = child_node
                 .element
                 .measure(&self.resolver)
@@ -61,29 +88,37 @@ impl<'a> LayoutEngine<'a> {
                 height,
                 child_style.margin,
                 Flex {
-                    direction,
+                    direction: style.flex.direction,
                     grow: child_style.flex.grow,
                     shrink: child_style.flex.shrink,
                 },
             ));
         }
 
+        items
+    }
+
+    fn create_lines(
+        &self,
+        wrap: FlexWrap,
+        axis: &FlexAxis,
+        items: &mut [FlexItem],
+    ) -> Vec<FlexLine> {
         let mut lines = Vec::new();
         let mut current = FlexLine::default();
+
         for index in 0..items.len() {
             let item = &mut items[index];
             let gap = if index == current.items.start {
                 0.0
             } else {
-                axis.main.gap
+                axis.gap
             };
-            let item_main_size =
-                item.base_size.main.clamp() + item.margin.main.0 + item.margin.main.1;
-            let item_cross_size =
-                item.base_size.cross.clamp() + item.margin.cross.0 + item.margin.cross.1;
+            let item_main_size = item.base_size.main.clamp() + item.margin.main.size();
+            let item_cross_size = item.base_size.cross.clamp() + item.margin.cross.size();
             let mut offset = current.size.main + gap + item_main_size;
 
-            if offset > axis.main.space && style.wrap == FlexWrap::Wrap {
+            if offset > axis.space && wrap == FlexWrap::Wrap {
                 lines.push(current);
                 current = FlexLine::new(index);
                 offset = item_main_size;
@@ -101,111 +136,129 @@ impl<'a> LayoutEngine<'a> {
             lines.push(current);
         }
 
-        let mut cursor = FlexCursor::new(style, &lines, &axis.cross, content);
-        for line in lines {
-            let mut cursor = cursor.start(style.justify, &line, &axis.main);
+        lines
+    }
 
-            for index in line.items {
+    fn pack_main_axis(&self, axis: &FlexAxis, items: &mut [FlexItem], lines: &mut [FlexLine]) {
+        fn inner(axis: &FlexAxis, items: &mut [FlexItem], line: &mut FlexLine) {
+            let mut unfrozen = line.items.clone().collect::<Vec<_>>();
+
+            loop {
+                let free_space = axis.space - line.size.main;
+                let partition = free_space.abs();
+                let mut used_space = 0.0;
+
+                for index in std::mem::take(&mut unfrozen) {
+                    let item = &mut items[index];
+                    let (item_size, frozen) = if free_space > 0.0 {
+                        let extra = partition * (item.grow / line.grow.max(1.0));
+                        item.base_size
+                            .main
+                            .with(item.base_size.main.value + extra)
+                            .clamped()
+                    } else if free_space < 0.0 && line.weight > 0.0 {
+                        let loss = partition * (item.weight / line.weight);
+                        item.base_size
+                            .main
+                            .with(item.base_size.main.value - loss)
+                            .clamped()
+                    } else {
+                        item.base_size.main.clamped()
+                    };
+
+                    if frozen {
+                        item.final_size.main = item_size;
+                        used_space += item_size + item.margin.main.size();
+                        line.grow = line.grow - item.grow;
+                        line.shrink = line.shrink - item.shrink;
+                        line.weight = line.weight - item.weight;
+                    } else {
+                        used_space += item.base_size.main.clamp() + item.margin.main.size();
+                        unfrozen.push(index);
+                    }
+                }
+
+                line.size.main = used_space + line.items.len().saturating_sub(1) as f32 * axis.gap;
+
+                if unfrozen.is_empty() || partition <= f32::EPSILON {
+                    break;
+                }
+            }
+        }
+
+        for line in lines {
+            inner(axis, items, line)
+        }
+    }
+
+    fn pack_cross_axis(&self, align: Align, items: &mut [FlexItem], lines: &mut [FlexLine]) {
+        for line in lines {
+            for index in line.items.clone() {
                 let item = &mut items[index];
 
-                item.final_size.main = if cursor.free_space > 0.0 {
-                    let extra = cursor.free_space * (item.grow / line.grow.max(1.0));
-                    item.base_size
-                        .main
-                        .with(item.base_size.main.clamp() + extra)
-                        .clamp()
-                } else if cursor.free_space < 0.0 && line.weight > 0.0 {
-                    let loss = -cursor.free_space * (item.weight / line.weight);
-                    item.base_size
-                        .main
-                        .with(item.base_size.main.clamp() - loss)
-                        .clamp()
-                } else {
-                    item.base_size.main.clamp()
-                };
-
-                item.final_size.cross = match (style.align, item.length.cross) {
+                item.final_size.cross = match (align, item.length.cross) {
                     (Align::Stretch, Length::Auto) => item
                         .base_size
                         .cross
-                        .with(line.size.cross - item.margin.cross.0 - item.margin.cross.1)
+                        .with(line.size.cross - item.margin.cross.start - item.margin.cross.end)
                         .clamp(),
                     _ => item.base_size.cross.clamp(),
                 };
+            }
+        }
+    }
 
-                let free_cross_space = line.size.cross
-                    - item.final_size.cross
-                    - item.margin.cross.0
-                    - item.margin.cross.1;
+    fn position_items(
+        &self,
+        style: &ComputedStyle,
+        parent: &Rect,
+        axis: &FlexValue<FlexAxis>,
+        lines: Vec<FlexLine>,
+        items: Vec<FlexItem>,
+    ) -> Vec<(ElementId, Rect)> {
+        let mut cursor = FlexCursor::new(style, parent, axis, &lines);
+        let mut rects = Vec::with_capacity(items.len());
 
-                let cursor_offset = match style.align {
-                    Align::Center => free_cross_space * 0.5,
-                    Align::End => free_cross_space,
-                    _ => 0.0,
+        for line in lines {
+            cursor.start(style.justify, parent, axis, &line);
+
+            for index in line.items {
+                let item = &items[index];
+                let rect = match style.flex.direction {
+                    FlexDirection::Row => Rect {
+                        x: cursor.offset.main + item.margin.main.start,
+                        y: cursor.offset.cross + item.margin.cross.start,
+                        width: item.final_size.main,
+                        height: item.final_size.cross,
+                    },
+                    FlexDirection::Column => Rect {
+                        x: cursor.offset.cross + item.margin.cross.start,
+                        y: cursor.offset.main + item.margin.main.start,
+                        width: item.final_size.cross,
+                        height: item.final_size.main,
+                    },
                 };
 
-                item.final_pos.main = cursor.offset.main + item.margin.main.0;
-                item.final_pos.cross = cursor.offset.cross + item.margin.cross.0 + cursor_offset;
+                rects.push((item.element, rect));
 
                 cursor.next(item);
             }
 
-            cursor.finish(line.size.cross);
+            cursor.end(line.size.cross);
         }
 
-        let clip = {
-            let parent = node
-                .parent
-                .map(|p| &self.tree.layouts[p])
-                .map(|l| l.outer)
-                .unwrap_or(content);
+        rects
+    }
 
-            let (x, width) = match style.overflow_x {
-                Overflow::Visible => (parent.x, parent.width),
-                Overflow::Hidden | Overflow::Scroll => {
-                    let area = content.intersect(&parent);
-                    (area.x, area.width)
-                }
-            };
-
-            let (y, height) = match style.overlfow_y {
-                Overflow::Visible => (parent.y, parent.height),
-                Overflow::Hidden | Overflow::Scroll => {
-                    let area = content.intersect(&parent);
-                    (area.y, area.height)
-                }
-            };
-
-            Rect {
-                x,
-                y,
-                width,
-                height,
-            }
-        };
-
-        let border = Rect {
-            x: rect.x,
-            y: rect.y,
-            width: border_width,
-            height: border_width,
-        };
-
-        self.tree.layouts.insert(
-            id,
-            Layout {
-                outer: rect,
-                content,
-                border,
-                clip,
-                scroll: Rect::ZERO,
-            },
-        );
-
+    fn layout_children(
+        &mut self,
+        content: &Rect,
+        clip: &Rect,
+        rects: Vec<(ElementId, Rect)>,
+    ) -> Rect {
         let mut content_size = Size::ZERO;
-        for item in items {
-            let id = item.element;
-            let rect = item.rect(direction);
+
+        for (id, rect) in rects {
             let width = (rect.x + rect.width) - content.x;
             let height = (rect.y + rect.height) - content.y;
             content_size = content_size.max(width, height);
@@ -213,7 +266,7 @@ impl<'a> LayoutEngine<'a> {
             self.run(id, rect);
         }
 
-        self.tree.layouts[id].scroll = Rect {
+        Rect {
             x: 0.0,
             y: 0.0,
             width: (content_size.width - clip.width).max(0.0),
@@ -222,120 +275,61 @@ impl<'a> LayoutEngine<'a> {
     }
 }
 
-pub struct FlexCursor {
-    pub offset: FlexValue<f32>,
-    pub spacing: FlexValue<f32>,
+pub struct Layout {
+    pub outer: Rect,
+    pub content: Rect,
+    pub border: Rect,
+    pub clip: Rect,
+    pub scroll: Rect,
 }
 
-impl FlexCursor {
-    pub fn new(style: &ComputedStyle, lines: &[FlexLine], axis: &FlexAxis, parent: Rect) -> Self {
-        let gap_space = (lines.len().saturating_sub(1)) as f32 * axis.gap;
-        let used_space = lines.iter().map(|l| l.size.cross).sum::<f32>() + gap_space;
-        let free_space = axis.space - used_space;
-
-        let (main_start, cross_start) = match style.flex.direction {
-            FlexDirection::Row => (parent.x, parent.y),
-            FlexDirection::Column => (parent.y, parent.x),
-        };
-
-        let (cross_offset, cross_spacing) = match style.align {
-            Align::Start => (0.0, axis.gap),
-            Align::Center => ((free_space * 0.5).max(0.0), axis.gap),
-            Align::End => (free_space.max(0.0), axis.gap),
-            Align::Stretch => (0.0, axis.gap),
-        };
-
+impl Layout {
+    pub fn new(outer: Rect, content: Rect, clip: Rect, border: f32) -> Self {
         Self {
-            offset: FlexValue::new(main_start, cross_start + cross_offset),
-            spacing: FlexValue::new(0.0, cross_spacing),
+            outer,
+            content,
+            border: Rect {
+                x: outer.x,
+                y: outer.y,
+                width: border,
+                height: border,
+            },
+            clip,
+            scroll: Rect::ZERO,
         }
     }
 
-    pub fn start<'a>(
-        &'a mut self,
-        justify: Justify,
-        line: &FlexLine,
-        axis: &FlexAxis,
-    ) -> LineCursor<'a> {
-        LineCursor::new(self, justify, line, axis)
-    }
-}
+    fn clip(style: &ComputedStyle, content: &Rect, parent: Option<&Rect>) -> Rect {
+        let parent = parent.unwrap_or(content);
 
-pub struct LineCursor<'a> {
-    cursor: &'a mut FlexCursor,
-    free_space: f32,
-}
-
-impl<'a> LineCursor<'a> {
-    pub fn new(
-        cursor: &'a mut FlexCursor,
-        justify: Justify,
-        line: &FlexLine,
-        axis: &FlexAxis,
-    ) -> Self {
-        let free_space = axis.space - line.size.main;
-
-        let (offset, spacing) = match justify {
-            Justify::Start => (0.0, axis.gap),
-            Justify::Center => ((free_space * 0.5).max(0.0), axis.gap),
-            Justify::End => (free_space.max(0.0), axis.gap),
-            Justify::Between => {
-                let gap = if line.items.len() > 1 {
-                    axis.gap + free_space.max(0.0) / (line.items.len() - 1) as f32
-                } else {
-                    0.0
-                };
-
-                (0.0, gap)
-            }
-            Justify::Around => {
-                let slot = if line.items.len() > 0 {
-                    free_space.max(0.0) / line.items.len() as f32
-                } else {
-                    0.0
-                };
-
-                (slot * 0.5, axis.gap + slot)
-            }
-            Justify::Evenly => {
-                let slot = free_space.max(0.0) / (line.items.len() + 1) as f32;
-                (slot, axis.gap + slot)
+        let (x, width) = match style.overflow_x {
+            Overflow::Visible => (parent.x, parent.width),
+            Overflow::Hidden | Overflow::Scroll => {
+                let area = content.intersect(&parent);
+                (area.x, area.width)
             }
         };
 
-        cursor.offset.main += offset;
-        cursor.spacing.main = spacing;
+        let (y, height) = match style.overlfow_y {
+            Overflow::Visible => (parent.y, parent.height),
+            Overflow::Hidden | Overflow::Scroll => {
+                let area = content.intersect(&parent);
+                (area.y, area.height)
+            }
+        };
 
-        Self { cursor, free_space }
-    }
-
-    pub fn next(&mut self, item: &FlexItem) {
-        self.offset.main +=
-            item.final_size.main + item.margin.main.0 + item.margin.main.1 + self.spacing.main;
-    }
-
-    pub fn finish(self, size: f32) {
-        self.cursor.offset.cross += self.cursor.spacing.cross + size
-    }
-}
-
-impl std::ops::Deref for LineCursor<'_> {
-    type Target = FlexCursor;
-
-    fn deref(&self) -> &Self::Target {
-        &self.cursor
-    }
-}
-
-impl std::ops::DerefMut for LineCursor<'_> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.cursor
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 }
 
 pub struct FlexValue<T> {
-    pub main: T,
-    pub cross: T,
+    main: T,
+    cross: T,
 }
 
 impl<T> FlexValue<T> {
@@ -354,28 +348,30 @@ impl<T: Copy> Clone for FlexValue<T> {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct FlexAxis {
-    pub space: f32,
-    pub gap: f32,
+pub struct FlexBlock<T> {
+    start: T,
+    end: T,
 }
 
-impl FlexAxis {
-    pub fn pair(style: &ComputedStyle, rect: Rect) -> FlexValue<FlexAxis> {
-        let x = FlexAxis {
-            space: rect.width,
-            gap: style.gap_x.resolve(0.0, Some(rect.width)),
-        };
+impl<T> FlexBlock<T> {
+    pub fn new(start: T, end: T) -> Self {
+        Self { start, end }
+    }
+}
 
-        let y = FlexAxis {
-            space: rect.height,
-            gap: style.gap_y.resolve(0.0, Some(rect.height)),
-        };
-
-        match style.flex.direction {
-            FlexDirection::Row => FlexValue::new(x, y),
-            FlexDirection::Column => FlexValue::new(y, x),
+impl<T: Copy> Copy for FlexBlock<T> {}
+impl<T: Copy> Clone for FlexBlock<T> {
+    fn clone(&self) -> Self {
+        Self {
+            start: self.start.clone(),
+            end: self.end.clone(),
         }
+    }
+}
+
+impl FlexBlock<f32> {
+    pub fn size(&self) -> f32 {
+        self.start + self.end
     }
 }
 
@@ -383,12 +379,11 @@ pub struct FlexItem {
     pub element: ElementId,
     pub base_size: FlexValue<Constrained<f32>>,
     pub final_size: FlexValue<f32>,
-    pub final_pos: FlexValue<f32>,
-    pub margin: FlexValue<(f32, f32)>,
+    pub margin: FlexValue<FlexBlock<f32>>,
+    pub length: FlexValue<Length>,
     pub grow: f32,
     pub shrink: f32,
     pub weight: f32,
-    pub length: FlexValue<Length>,
 }
 
 impl FlexItem {
@@ -405,40 +400,27 @@ impl FlexItem {
                 element,
                 base_size: FlexValue::new(width, height),
                 final_size: FlexValue::new(0.0, 0.0),
-                final_pos: FlexValue::new(0.0, 0.0),
-                margin: FlexValue::new((margin.left, margin.right), (margin.top, margin.bottom)),
+                margin: FlexValue::new(
+                    FlexBlock::new(margin.left, margin.right),
+                    FlexBlock::new(margin.top, margin.bottom),
+                ),
+                length: FlexValue::new(style.width.value, style.height.value),
                 grow: flex.grow,
                 shrink: flex.shrink,
                 weight: flex.shrink * width.clamp(),
-                length: FlexValue::new(style.width.value, style.height.value),
             },
             FlexDirection::Column => Self {
                 element,
                 base_size: FlexValue::new(height, width),
                 final_size: FlexValue::new(0.0, 0.0),
-                final_pos: FlexValue::new(0.0, 0.0),
-                margin: FlexValue::new((margin.top, margin.bottom), (margin.left, margin.right)),
+                margin: FlexValue::new(
+                    FlexBlock::new(margin.top, margin.bottom),
+                    FlexBlock::new(margin.left, margin.right),
+                ),
+                length: FlexValue::new(style.height.value, style.width.value),
                 grow: flex.grow,
                 shrink: flex.shrink,
                 weight: flex.shrink * height.clamp(),
-                length: FlexValue::new(style.height.value, style.width.value),
-            },
-        }
-    }
-
-    pub fn rect(self, direction: FlexDirection) -> Rect {
-        match direction {
-            FlexDirection::Row => Rect {
-                x: self.final_pos.main,
-                y: self.final_pos.cross,
-                width: self.final_size.main,
-                height: self.final_size.cross,
-            },
-            FlexDirection::Column => Rect {
-                x: self.final_pos.cross,
-                y: self.final_pos.main,
-                width: self.final_size.cross,
-                height: self.final_size.main,
             },
         }
     }
@@ -470,10 +452,112 @@ impl Default for FlexLine {
     }
 }
 
-pub struct Layout {
-    pub outer: Rect,
-    pub content: Rect,
-    pub border: Rect,
-    pub clip: Rect,
-    pub scroll: Rect,
+pub struct FlexAxis {
+    pub space: f32,
+    pub gap: f32,
+}
+
+impl FlexAxis {
+    pub fn pair(style: &ComputedStyle, rect: Rect) -> FlexValue<FlexAxis> {
+        let x = FlexAxis {
+            space: rect.width,
+            gap: style.gap_x.resolve(0.0, Some(rect.width)),
+        };
+
+        let y = FlexAxis {
+            space: rect.height,
+            gap: style.gap_y.resolve(0.0, Some(rect.height)),
+        };
+
+        match style.flex.direction {
+            FlexDirection::Row => FlexValue::new(x, y),
+            FlexDirection::Column => FlexValue::new(y, x),
+        }
+    }
+}
+
+pub struct FlexCursor {
+    start: FlexValue<f32>,
+    offset: FlexValue<f32>,
+    spacing: FlexValue<f32>,
+}
+
+impl FlexCursor {
+    pub fn new(
+        style: &ComputedStyle,
+        parent: &Rect,
+        axis: &FlexValue<FlexAxis>,
+        lines: &[FlexLine],
+    ) -> Self {
+        let gap_space = (lines.len().saturating_sub(1)) as f32 * axis.cross.gap;
+        let used_space = lines.iter().map(|l| l.size.cross).sum::<f32>() + gap_space;
+        let free_space = axis.cross.space - used_space;
+
+        let (main_start, cross_start) = match style.flex.direction {
+            FlexDirection::Row => (parent.x, parent.y),
+            FlexDirection::Column => (parent.y, parent.x),
+        };
+
+        let (cross_offset, cross_spacing) = match style.align {
+            Align::Start => (0.0, axis.cross.gap),
+            Align::Center => ((free_space * 0.5).max(0.0), axis.cross.gap),
+            Align::End => (free_space.max(0.0), axis.cross.gap),
+            Align::Stretch => (0.0, axis.cross.gap),
+        };
+
+        Self {
+            start: FlexValue::new(main_start, cross_start),
+            offset: FlexValue::new(0.0, cross_offset),
+            spacing: FlexValue::new(0.0, cross_spacing),
+        }
+    }
+
+    pub fn start(
+        &mut self,
+        justify: Justify,
+        parent: &Rect,
+        axis: &FlexValue<FlexAxis>,
+        line: &FlexLine,
+    ) {
+        let free_space = axis.main.space - line.size.main;
+
+        let (offset, spacing) = match justify {
+            Justify::Start => (0.0, axis.main.gap),
+            Justify::Center => ((free_space * 0.5).max(0.0), axis.main.gap),
+            Justify::End => (free_space.max(0.0), axis.main.gap),
+            Justify::Between => {
+                let gap = if line.items.len() > 1 {
+                    axis.main.gap + free_space.max(0.0) / (line.items.len() - 1) as f32
+                } else {
+                    0.0
+                };
+
+                (0.0, gap)
+            }
+            Justify::Around => {
+                let slot = if line.items.len() > 0 {
+                    free_space.max(0.0) / line.items.len() as f32
+                } else {
+                    0.0
+                };
+
+                (slot * 0.5, axis.main.gap + slot)
+            }
+            Justify::Evenly => {
+                let slot = free_space.max(0.0) / (line.items.len() + 1) as f32;
+                (slot, axis.main.gap + slot)
+            }
+        };
+
+        self.offset.main = self.start.main + offset;
+        self.spacing.main = spacing;
+    }
+
+    pub fn next(&mut self, item: &FlexItem) {
+        self.offset.main += self.spacing.main + item.margin.main.size() + item.final_size.main;
+    }
+
+    pub fn end(&mut self, size: f32) {
+        self.offset.cross += self.spacing.cross + size;
+    }
 }
