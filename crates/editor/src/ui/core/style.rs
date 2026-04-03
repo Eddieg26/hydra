@@ -145,6 +145,23 @@ pub struct Flex {
     pub shrink: f32,
 }
 
+impl From<FlexDirection> for Flex {
+    fn from(direction: FlexDirection) -> Self {
+        Self {
+            direction,
+            grow: 0.0,
+            shrink: 0.0,
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlexWrap {
+    #[default]
+    None,
+    Wrap,
+}
+
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Justify {
     #[default]
@@ -184,6 +201,7 @@ pub struct Style {
     pub flex_grow: Option<f32>,
     pub flex_shrink: Option<f32>,
     pub justify: Option<Justify>,
+    pub wrap: Option<FlexWrap>,
     pub align: Option<Align>,
     pub gap_x: Option<Length>,
     pub gap_y: Option<Length>,
@@ -209,6 +227,7 @@ pub struct ComputedStyle {
     pub border: Option<Border>,
     pub font: FontStyle,
     pub flex: Flex,
+    pub wrap: FlexWrap,
     pub justify: Justify,
     pub align: Align,
 
@@ -315,6 +334,10 @@ impl ComputedStyle {
 
         if let Some(v) = style.align {
             self.align = v;
+        }
+
+        if let Some(v) = style.wrap {
+            self.wrap = v;
         }
 
         if let Some(v) = style.opacity {

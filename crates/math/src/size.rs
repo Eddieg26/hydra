@@ -11,6 +11,13 @@ impl<T> Size<T> {
     }
 }
 
+impl Size {
+    pub const ZERO: Size = Size {
+        width: 0.0,
+        height: 0.0,
+    };
+}
+
 impl<T: Copy> Copy for Size<T> {}
 
 impl<T: Clone> Clone for Size<T> {

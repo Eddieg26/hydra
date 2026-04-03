@@ -1,5 +1,3 @@
-use math::Vec2;
-
 use crate::ui::{
     core::{id::ElementId, style::ComputedStyle},
     runtime::{
@@ -7,9 +5,10 @@ use crate::ui::{
         paint::DrawCommand,
     },
 };
+use math::Size;
 
 pub trait Element: Send + Sync + 'static {
-    fn measure(&self, _resolver: &ContentResolver) -> Option<Vec2> {
+    fn measure(&self, _resolver: &ContentResolver) -> Option<Size> {
         None
     }
 
