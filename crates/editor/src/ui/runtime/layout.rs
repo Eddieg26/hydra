@@ -11,7 +11,7 @@ use crate::ui::{
     runtime::{node::ElementNode, tree::ElementTree},
 };
 use math::{Size, rect::Rect};
-use std::{collections::VecDeque, ops::Range};
+use std::ops::Range;
 
 pub struct ContentResolver<'a> {
     pub text: &'a dyn TextMeasurer,
@@ -40,10 +40,6 @@ impl<'a> LayoutEngine<'a> {
             node.parent.map(|p| &self.tree.layouts[p].outer),
         );
 
-        self.tree
-            .layouts
-            .insert(id, Layout::new(rect, content, clip, border_width));
-
         let axis = FlexAxis::pair(style, content);
 
         let mut items = self.create_items(node, style, &content);
@@ -52,7 +48,12 @@ impl<'a> LayoutEngine<'a> {
         self.pack_main_axis(&axis.main, &mut items, &mut lines);
         self.pack_cross_axis(style.align, &mut items, &mut lines);
 
+        self.tree
+            .layouts
+            .insert(id, Layout::new(rect, content, clip, border_width));
+
         let rects = self.position_items(style, &rect, &axis, lines, items);
+
         self.tree.layouts[id].scroll = self.layout_children(&content, &clip, rects);
     }
 
@@ -220,7 +221,7 @@ impl<'a> LayoutEngine<'a> {
         let mut rects = Vec::with_capacity(items.len());
 
         for line in lines {
-            cursor.start(style.justify, parent, axis, &line);
+            cursor.start(style.justify, axis, &line);
 
             for index in line.items {
                 let item = &items[index];
@@ -512,13 +513,7 @@ impl FlexCursor {
         }
     }
 
-    pub fn start(
-        &mut self,
-        justify: Justify,
-        parent: &Rect,
-        axis: &FlexValue<FlexAxis>,
-        line: &FlexLine,
-    ) {
+    pub fn start(&mut self, justify: Justify, axis: &FlexValue<FlexAxis>, line: &FlexLine) {
         let free_space = axis.main.space - line.size.main;
 
         let (offset, spacing) = match justify {
