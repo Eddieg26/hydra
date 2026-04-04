@@ -227,14 +227,14 @@ impl<'a> LayoutEngine<'a> {
                 let item = &items[index];
                 let rect = match style.flex.direction {
                     FlexDirection::Row => Rect {
-                        x: cursor.offset.main + item.margin.main.start,
-                        y: cursor.offset.cross + item.margin.cross.start,
+                        x: (cursor.offset.main + item.margin.main.start).round(),
+                        y: (cursor.offset.cross + item.margin.cross.start).round(),
                         width: item.final_size.main,
                         height: item.final_size.cross,
                     },
                     FlexDirection::Column => Rect {
-                        x: cursor.offset.cross + item.margin.cross.start,
-                        y: cursor.offset.main + item.margin.main.start,
+                        x: (cursor.offset.cross + item.margin.cross.start).round(),
+                        y: (cursor.offset.main + item.margin.main.start).round(),
                         width: item.final_size.cross,
                         height: item.final_size.main,
                     },
@@ -554,5 +554,992 @@ impl FlexCursor {
 
     pub fn end(&mut self, size: f32) {
         self.offset.cross += self.spacing.cross + size;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::{
+        core::{
+            id::ElementId,
+            image::{ImageHandle, ImageResolver},
+            style::*,
+            text::{TextMeasureResult, TextMeasurer},
+        },
+        runtime::{
+            node::{Element, ElementFlags, ElementNode},
+            tree::ElementTree,
+        },
+    };
+    use math::{Size, Vec2, rect::Rect};
+    use renderer::types::Color;
+    use slotmap::{SecondaryMap, SlotMap};
+
+    // ── Helpers ──────────────────────────────────────────────────────
+
+    const TRANSPARENT: Color = Color {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+        a: 0.0,
+    };
+
+    fn default_computed_style() -> ComputedStyle {
+        ComputedStyle {
+            display: Display::Flex,
+            position: Position::Relative,
+            visibility: Visibility::Visible,
+            width: Constrained {
+                value: Length::Auto,
+                min: Length::Fixed(0.0),
+                max: Length::Fixed(f32::INFINITY),
+            },
+            height: Constrained {
+                value: Length::Auto,
+                min: Length::Fixed(0.0),
+                max: Length::Fixed(f32::INFINITY),
+            },
+            background: TRANSPARENT,
+            border: None,
+            font: FontStyle {
+                id: FontId(0),
+                color: TRANSPARENT,
+                size: 16.0,
+            },
+            flex: Flex {
+                direction: FlexDirection::Row,
+                grow: 0.0,
+                shrink: 0.0,
+            },
+            wrap: FlexWrap::None,
+            justify: Justify::Start,
+            align: Align::Start,
+            margin: Edges {
+                left: 0.0,
+                right: 0.0,
+                top: 0.0,
+                bottom: 0.0,
+            },
+            padding: Edges {
+                left: 0.0,
+                right: 0.0,
+                top: 0.0,
+                bottom: 0.0,
+            },
+            overflow_x: Overflow::Visible,
+            overlfow_y: Overflow::Visible,
+            gap_x: Length::Fixed(0.0),
+            gap_y: Length::Fixed(0.0),
+            opacity: 1.0,
+        }
+    }
+
+    /// A simple box element with a fixed intrinsic size.
+    struct BoxElement {
+        size: Size,
+    }
+
+    impl BoxElement {
+        fn new(w: f32, h: f32) -> Self {
+            Self {
+                size: Size::new(w, h),
+            }
+        }
+    }
+
+    impl Element for BoxElement {
+        fn measure(&self, _resolver: &ContentResolver) -> Option<Size> {
+            Some(self.size)
+        }
+
+        fn draw(
+            &self,
+            _style: &ComputedStyle,
+            _layout: &Layout,
+        ) -> crate::ui::runtime::paint::DrawCommand {
+            crate::ui::runtime::paint::DrawCommand::Quad {
+                rect: Rect::ZERO,
+                color: TRANSPARENT,
+            }
+        }
+    }
+
+    struct DummyText;
+    impl TextMeasurer for DummyText {
+        fn measure(
+            &self,
+            _text: &str,
+            _style: &ComputedStyle,
+            _max_width: Option<f32>,
+        ) -> TextMeasureResult {
+            TextMeasureResult {
+                size: Vec2::ZERO,
+            }
+        }
+    }
+
+    struct DummyImage;
+    impl ImageResolver for DummyImage {
+        fn size(&self, _image: ImageHandle) -> Vec2 {
+            Vec2::ZERO
+        }
+    }
+
+    fn make_resolver() -> (DummyText, DummyImage) {
+        (DummyText, DummyImage)
+    }
+
+    /// Build a tree with a root and N children. Returns (tree, root_id, child_ids).
+    fn build_tree(
+        root_style: ComputedStyle,
+        children: Vec<(ComputedStyle, Box<dyn Element>)>,
+    ) -> (ElementTree, ElementId, Vec<ElementId>) {
+        let mut nodes: SlotMap<ElementId, ElementNode> = SlotMap::with_key();
+        let mut element_styles: SecondaryMap<ElementId, ElementStyle> = SecondaryMap::new();
+        let mut computed_styles: SecondaryMap<ElementId, ComputedStyle> = SecondaryMap::new();
+        let layouts: SecondaryMap<ElementId, Layout> = SecondaryMap::new();
+
+        let root_id = nodes.insert(ElementNode {
+            id: ElementId::default(),
+            parent: None,
+            children: Vec::new(),
+            element: Box::new(BoxElement::new(0.0, 0.0)),
+            flags: ElementFlags::empty(),
+        });
+        nodes[root_id].id = root_id;
+        computed_styles.insert(root_id, root_style);
+        element_styles.insert(
+            root_id,
+            ElementStyle {
+                inline: Style {
+                    display: None,
+                    position: None,
+                    visibility: None,
+                    width: None,
+                    height: None,
+                    min_width: None,
+                    min_height: None,
+                    max_width: None,
+                    max_height: None,
+                    background: None,
+                    border: None,
+                    font: None,
+                    flex_direction: None,
+                    flex_grow: None,
+                    flex_shrink: None,
+                    justify: None,
+                    wrap: None,
+                    align: None,
+                    gap_x: None,
+                    gap_y: None,
+                    margin: None,
+                    padding: None,
+                    overflow_x: None,
+                    overlfow_y: None,
+                    opacity: None,
+                },
+                classes: smallvec::smallvec![],
+            },
+        );
+
+        let mut child_ids = Vec::new();
+        for (child_style, element) in children {
+            let child_id = nodes.insert(ElementNode {
+                id: ElementId::default(),
+                parent: Some(root_id),
+                children: Vec::new(),
+                element,
+                flags: ElementFlags::empty(),
+            });
+            nodes[child_id].id = child_id;
+            computed_styles.insert(child_id, child_style);
+            element_styles.insert(
+                child_id,
+                ElementStyle {
+                    inline: Style {
+                        display: None,
+                        position: None,
+                        visibility: None,
+                        width: None,
+                        height: None,
+                        min_width: None,
+                        min_height: None,
+                        max_width: None,
+                        max_height: None,
+                        background: None,
+                        border: None,
+                        font: None,
+                        flex_direction: None,
+                        flex_grow: None,
+                        flex_shrink: None,
+                        justify: None,
+                        wrap: None,
+                        align: None,
+                        gap_x: None,
+                        gap_y: None,
+                        margin: None,
+                        padding: None,
+                        overflow_x: None,
+                        overlfow_y: None,
+                        opacity: None,
+                    },
+                    classes: smallvec::smallvec![],
+                },
+            );
+            nodes[root_id].children.push(child_id);
+            child_ids.push(child_id);
+        }
+
+        let tree = ElementTree {
+            nodes,
+            element_styles,
+            computed_styles,
+            layouts,
+        };
+
+        (tree, root_id, child_ids)
+    }
+
+    // ── FlexBlock tests ─────────────────────────────────────────────
+
+    #[test]
+    fn flex_block_size() {
+        let block = FlexBlock::new(10.0, 20.0);
+        assert_eq!(block.size(), 30.0);
+    }
+
+    #[test]
+    fn flex_block_clone() {
+        let block = FlexBlock::new(5.0, 7.0);
+        let cloned = block.clone();
+        assert_eq!(cloned.start, 5.0);
+        assert_eq!(cloned.end, 7.0);
+    }
+
+    // ── FlexValue tests ─────────────────────────────────────────────
+
+    #[test]
+    fn flex_value_new_and_clone() {
+        let val = FlexValue::new(1.0_f32, 2.0_f32);
+        assert_eq!(val.main, 1.0);
+        assert_eq!(val.cross, 2.0);
+        let cloned = val.clone();
+        assert_eq!(cloned.main, 1.0);
+        assert_eq!(cloned.cross, 2.0);
+    }
+
+    // ── FlexLine tests ──────────────────────────────────────────────
+
+    #[test]
+    fn flex_line_new() {
+        let line = FlexLine::new(3);
+        assert_eq!(line.items, 3..3);
+        assert_eq!(line.grow, 0.0);
+        assert_eq!(line.shrink, 0.0);
+    }
+
+    #[test]
+    fn flex_line_default_starts_at_zero() {
+        let line = FlexLine::default();
+        assert_eq!(line.items, 0..0);
+    }
+
+    // ── FlexAxis::pair tests ────────────────────────────────────────
+
+    #[test]
+    fn flex_axis_pair_row() {
+        let mut style = default_computed_style();
+        style.flex.direction = FlexDirection::Row;
+        style.gap_x = Length::Fixed(5.0);
+        style.gap_y = Length::Fixed(10.0);
+
+        let rect = Rect::new(0.0, 0.0, 200.0, 100.0);
+        let pair = FlexAxis::pair(&style, rect);
+
+        assert_eq!(pair.main.space, 200.0);
+        assert_eq!(pair.main.gap, 5.0);
+        assert_eq!(pair.cross.space, 100.0);
+        assert_eq!(pair.cross.gap, 10.0);
+    }
+
+    #[test]
+    fn flex_axis_pair_column() {
+        let mut style = default_computed_style();
+        style.flex.direction = FlexDirection::Column;
+        style.gap_x = Length::Fixed(5.0);
+        style.gap_y = Length::Fixed(10.0);
+
+        let rect = Rect::new(0.0, 0.0, 200.0, 100.0);
+        let pair = FlexAxis::pair(&style, rect);
+
+        // Column: main = y-axis, cross = x-axis
+        assert_eq!(pair.main.space, 100.0);
+        assert_eq!(pair.main.gap, 10.0);
+        assert_eq!(pair.cross.space, 200.0);
+        assert_eq!(pair.cross.gap, 5.0);
+    }
+
+    // ── FlexItem::new tests ─────────────────────────────────────────
+
+    #[test]
+    fn flex_item_row_maps_width_to_main() {
+        let style = default_computed_style();
+        let width = Constrained {
+            value: 50.0,
+            min: 0.0,
+            max: f32::INFINITY,
+        };
+        let height = Constrained {
+            value: 30.0,
+            min: 0.0,
+            max: f32::INFINITY,
+        };
+        let margin = Edges {
+            left: 1.0,
+            right: 2.0,
+            top: 3.0,
+            bottom: 4.0,
+        };
+        let flex = Flex {
+            direction: FlexDirection::Row,
+            grow: 1.0,
+            shrink: 0.5,
+        };
+
+        let item = FlexItem::new(ElementId::default(), &style, width, height, margin, flex);
+
+        assert_eq!(item.base_size.main.value, 50.0);
+        assert_eq!(item.base_size.cross.value, 30.0);
+        assert_eq!(item.margin.main.start, 1.0); // left
+        assert_eq!(item.margin.main.end, 2.0); // right
+        assert_eq!(item.margin.cross.start, 3.0); // top
+        assert_eq!(item.margin.cross.end, 4.0); // bottom
+        assert_eq!(item.grow, 1.0);
+        assert_eq!(item.shrink, 0.5);
+    }
+
+    #[test]
+    fn flex_item_column_maps_height_to_main() {
+        let style = default_computed_style();
+        let width = Constrained {
+            value: 50.0,
+            min: 0.0,
+            max: f32::INFINITY,
+        };
+        let height = Constrained {
+            value: 30.0,
+            min: 0.0,
+            max: f32::INFINITY,
+        };
+        let margin = Edges {
+            left: 1.0,
+            right: 2.0,
+            top: 3.0,
+            bottom: 4.0,
+        };
+        let flex = Flex {
+            direction: FlexDirection::Column,
+            grow: 2.0,
+            shrink: 1.0,
+        };
+
+        let item = FlexItem::new(ElementId::default(), &style, width, height, margin, flex);
+
+        assert_eq!(item.base_size.main.value, 30.0); // height is main
+        assert_eq!(item.base_size.cross.value, 50.0); // width is cross
+        assert_eq!(item.margin.main.start, 3.0); // top
+        assert_eq!(item.margin.main.end, 4.0); // bottom
+        assert_eq!(item.margin.cross.start, 1.0); // left
+        assert_eq!(item.margin.cross.end, 2.0); // right
+    }
+
+    // ── Layout::new tests ───────────────────────────────────────────
+
+    #[test]
+    fn layout_new_stores_fields() {
+        let outer = Rect::new(10.0, 20.0, 100.0, 50.0);
+        let content = Rect::new(12.0, 22.0, 96.0, 46.0);
+        let clip = Rect::new(12.0, 22.0, 96.0, 46.0);
+        let layout = Layout::new(outer, content, clip, 2.0);
+
+        assert_eq!(layout.outer, outer);
+        assert_eq!(layout.content, content);
+        assert_eq!(layout.clip, clip);
+        assert_eq!(layout.border.width, 2.0);
+        assert_eq!(layout.scroll, Rect::ZERO);
+    }
+
+    // ── Layout::clip tests ──────────────────────────────────────────
+
+    #[test]
+    fn clip_visible_uses_parent_bounds() {
+        let mut style = default_computed_style();
+        style.overflow_x = Overflow::Visible;
+        style.overlfow_y = Overflow::Visible;
+
+        let content = Rect::new(10.0, 10.0, 80.0, 60.0);
+        let parent = Rect::new(0.0, 0.0, 200.0, 200.0);
+
+        let clip = Layout::clip(&style, &content, Some(&parent));
+        assert_eq!(clip.x, 0.0);
+        assert_eq!(clip.y, 0.0);
+        assert_eq!(clip.width, 200.0);
+        assert_eq!(clip.height, 200.0);
+    }
+
+    #[test]
+    fn clip_hidden_intersects_with_parent() {
+        let mut style = default_computed_style();
+        style.overflow_x = Overflow::Hidden;
+        style.overlfow_y = Overflow::Hidden;
+
+        let content = Rect::new(10.0, 10.0, 80.0, 60.0);
+        let parent = Rect::new(0.0, 0.0, 50.0, 50.0);
+
+        let clip = Layout::clip(&style, &content, Some(&parent));
+        // intersect of content(10,10,80,60) and parent(0,0,50,50)
+        assert_eq!(clip.x, 10.0);
+        assert_eq!(clip.y, 10.0);
+        assert_eq!(clip.width, 40.0); // min(90,50) - 10
+        assert_eq!(clip.height, 40.0); // min(70,50) - 10
+    }
+
+    #[test]
+    fn clip_no_parent_uses_content_as_parent() {
+        let mut style = default_computed_style();
+        style.overflow_x = Overflow::Visible;
+        style.overlfow_y = Overflow::Visible;
+
+        let content = Rect::new(5.0, 5.0, 100.0, 80.0);
+        let clip = Layout::clip(&style, &content, None);
+
+        assert_eq!(clip.x, 5.0);
+        assert_eq!(clip.width, 100.0);
+    }
+
+    // ── FlexCursor tests ────────────────────────────────────────────
+
+    fn make_line(items: Range<usize>, main: f32, cross: f32) -> FlexLine {
+        FlexLine {
+            items,
+            size: FlexValue::new(main, cross),
+            grow: 0.0,
+            shrink: 0.0,
+            weight: 0.0,
+        }
+    }
+
+    #[test]
+    fn cursor_justify_start() {
+        let style = default_computed_style();
+        let parent = Rect::new(0.0, 0.0, 300.0, 100.0);
+        let axis = FlexAxis::pair(&style, parent);
+
+        let lines = [make_line(0..2, 100.0, 30.0)];
+        let mut cursor = FlexCursor::new(&style, &parent, &axis, &lines);
+        let line = make_line(0..2, 100.0, 30.0);
+        cursor.start(Justify::Start, &axis, &line);
+
+        assert_eq!(cursor.offset.main, 0.0);
+        assert_eq!(cursor.spacing.main, 0.0);
+    }
+
+    #[test]
+    fn cursor_justify_center() {
+        let style = default_computed_style();
+        let parent = Rect::new(0.0, 0.0, 300.0, 100.0);
+        let axis = FlexAxis::pair(&style, parent);
+
+        let lines = [make_line(0..2, 100.0, 30.0)];
+        let mut cursor = FlexCursor::new(&style, &parent, &axis, &lines);
+        let line = make_line(0..2, 100.0, 30.0);
+        cursor.start(Justify::Center, &axis, &line);
+
+        // free_space = 300 - 100 = 200, offset = 100
+        assert_eq!(cursor.offset.main, 100.0);
+    }
+
+    #[test]
+    fn cursor_justify_end() {
+        let style = default_computed_style();
+        let parent = Rect::new(0.0, 0.0, 300.0, 100.0);
+        let axis = FlexAxis::pair(&style, parent);
+
+        let lines = [make_line(0..2, 100.0, 30.0)];
+        let mut cursor = FlexCursor::new(&style, &parent, &axis, &lines);
+        let line = make_line(0..2, 100.0, 30.0);
+        cursor.start(Justify::End, &axis, &line);
+
+        assert_eq!(cursor.offset.main, 200.0);
+    }
+
+    #[test]
+    fn cursor_justify_between() {
+        let mut style = default_computed_style();
+        style.gap_x = Length::Fixed(0.0);
+        let parent = Rect::new(0.0, 0.0, 300.0, 100.0);
+        let axis = FlexAxis::pair(&style, parent);
+
+        let lines = [make_line(0..3, 90.0, 30.0)];
+        let mut cursor = FlexCursor::new(&style, &parent, &axis, &lines);
+        let line = make_line(0..3, 90.0, 30.0);
+        cursor.start(Justify::Between, &axis, &line);
+
+        // free_space = 210, gap = 210 / 2 = 105
+        assert_eq!(cursor.offset.main, 0.0);
+        assert_eq!(cursor.spacing.main, 105.0);
+    }
+
+    #[test]
+    fn cursor_justify_around() {
+        let mut style = default_computed_style();
+        style.gap_x = Length::Fixed(0.0);
+        let parent = Rect::new(0.0, 0.0, 300.0, 100.0);
+        let axis = FlexAxis::pair(&style, parent);
+
+        let lines = [make_line(0..3, 90.0, 30.0)];
+        let mut cursor = FlexCursor::new(&style, &parent, &axis, &lines);
+        let line = make_line(0..3, 90.0, 30.0);
+        cursor.start(Justify::Around, &axis, &line);
+
+        // free_space = 210, slot = 70, offset = 35, spacing = 70
+        assert_eq!(cursor.offset.main, 35.0);
+        assert_eq!(cursor.spacing.main, 70.0);
+    }
+
+    #[test]
+    fn cursor_justify_evenly() {
+        let mut style = default_computed_style();
+        style.gap_x = Length::Fixed(0.0);
+        let parent = Rect::new(0.0, 0.0, 300.0, 100.0);
+        let axis = FlexAxis::pair(&style, parent);
+
+        let lines = [make_line(0..3, 90.0, 30.0)];
+        let mut cursor = FlexCursor::new(&style, &parent, &axis, &lines);
+        let line = make_line(0..3, 90.0, 30.0);
+        cursor.start(Justify::Evenly, &axis, &line);
+
+        // free_space = 210, slot = 52.5
+        assert_eq!(cursor.offset.main, 52.5);
+        assert_eq!(cursor.spacing.main, 52.5);
+    }
+
+    #[test]
+    fn cursor_next_advances_offset() {
+        let style = default_computed_style();
+        let parent = Rect::new(0.0, 0.0, 300.0, 100.0);
+        let axis = FlexAxis::pair(&style, parent);
+
+        let lines = [make_line(0..1, 50.0, 30.0)];
+        let mut cursor = FlexCursor::new(&style, &parent, &axis, &lines);
+        let line = make_line(0..1, 50.0, 30.0);
+        cursor.start(Justify::Start, &axis, &line);
+
+        let item = FlexItem {
+            element: ElementId::default(),
+            base_size: FlexValue::new(
+                Constrained { value: 40.0, min: 0.0, max: f32::INFINITY },
+                Constrained { value: 30.0, min: 0.0, max: f32::INFINITY },
+            ),
+            final_size: FlexValue::new(40.0, 30.0),
+            margin: FlexValue::new(FlexBlock::new(5.0, 5.0), FlexBlock::new(0.0, 0.0)),
+            length: FlexValue::new(Length::Fixed(40.0), Length::Auto),
+            grow: 0.0,
+            shrink: 0.0,
+            weight: 0.0,
+        };
+
+        cursor.next(&item);
+        // offset += spacing(0) + margin.main.size(10) + final_size.main(40) = 50
+        assert_eq!(cursor.offset.main, 50.0);
+    }
+
+    #[test]
+    fn cursor_end_advances_cross() {
+        let style = default_computed_style();
+        let parent = Rect::new(0.0, 0.0, 300.0, 100.0);
+        let axis = FlexAxis::pair(&style, parent);
+
+        let lines = [make_line(0..1, 50.0, 30.0)];
+        let mut cursor = FlexCursor::new(&style, &parent, &axis, &lines);
+        let initial_cross = cursor.offset.cross;
+        cursor.end(30.0);
+        assert_eq!(cursor.offset.cross, initial_cross + 30.0);
+    }
+
+    // ── LayoutEngine integration tests ──────────────────────────────
+
+    fn run_layout(
+        root_style: ComputedStyle,
+        children: Vec<(ComputedStyle, Box<dyn Element>)>,
+        viewport: Rect,
+    ) -> (ElementTree, ElementId, Vec<ElementId>) {
+        let (mut tree, root_id, child_ids) = build_tree(root_style, children);
+        let (text, image) = make_resolver();
+        let resolver = ContentResolver {
+            text: &text,
+            image: &image,
+        };
+        let mut engine = LayoutEngine {
+            tree: &mut tree,
+            resolver,
+        };
+        engine.run(root_id, viewport);
+        (tree, root_id, child_ids)
+    }
+
+    #[test]
+    fn layout_single_child_row() {
+        let root_style = default_computed_style();
+        let child_style = default_computed_style();
+
+        let (tree, root_id, child_ids) = run_layout(
+            root_style,
+            vec![(child_style, Box::new(BoxElement::new(50.0, 30.0)))],
+            Rect::new(0.0, 0.0, 200.0, 100.0),
+        );
+
+        let root_layout = tree.layout(root_id).unwrap();
+        assert_eq!(root_layout.outer, Rect::new(0.0, 0.0, 200.0, 100.0));
+
+        let child_layout = tree.layout(child_ids[0]).unwrap();
+        assert_eq!(child_layout.outer.x, 0.0);
+        assert_eq!(child_layout.outer.y, 0.0);
+        assert_eq!(child_layout.outer.width, 50.0);
+        assert_eq!(child_layout.outer.height, 30.0);
+    }
+
+    #[test]
+    fn layout_two_children_row() {
+        let root_style = default_computed_style();
+        let child_style = default_computed_style();
+
+        let (tree, _root_id, child_ids) = run_layout(
+            root_style,
+            vec![
+                (child_style, Box::new(BoxElement::new(60.0, 40.0))),
+                (child_style, Box::new(BoxElement::new(80.0, 50.0))),
+            ],
+            Rect::new(0.0, 0.0, 300.0, 100.0),
+        );
+
+        let first = tree.layout(child_ids[0]).unwrap();
+        let second = tree.layout(child_ids[1]).unwrap();
+
+        // Row layout: second child starts after first
+        assert_eq!(first.outer.x, 0.0);
+        assert_eq!(second.outer.x, 60.0);
+        assert_eq!(first.outer.width, 60.0);
+        assert_eq!(second.outer.width, 80.0);
+    }
+
+    #[test]
+    fn layout_column_direction() {
+        let mut root_style = default_computed_style();
+        root_style.flex.direction = FlexDirection::Column;
+        let child_style = default_computed_style();
+
+        let (tree, _root_id, child_ids) = run_layout(
+            root_style,
+            vec![
+                (child_style, Box::new(BoxElement::new(60.0, 40.0))),
+                (child_style, Box::new(BoxElement::new(80.0, 50.0))),
+            ],
+            Rect::new(0.0, 0.0, 300.0, 200.0),
+        );
+
+        let first = tree.layout(child_ids[0]).unwrap();
+        let second = tree.layout(child_ids[1]).unwrap();
+
+        // Column: items stack vertically
+        assert_eq!(first.outer.y, 0.0);
+        assert_eq!(second.outer.y, 40.0);
+        assert_eq!(first.outer.height, 40.0);
+        assert_eq!(second.outer.height, 50.0);
+    }
+
+    #[test]
+    fn layout_with_padding() {
+        let mut root_style = default_computed_style();
+        root_style.padding = Edges {
+            left: 10.0,
+            right: 10.0,
+            top: 5.0,
+            bottom: 5.0,
+        };
+        let child_style = default_computed_style();
+
+        let (tree, root_id, child_ids) = run_layout(
+            root_style,
+            vec![(child_style, Box::new(BoxElement::new(50.0, 30.0)))],
+            Rect::new(0.0, 0.0, 200.0, 100.0),
+        );
+
+        let root_layout = tree.layout(root_id).unwrap();
+        // Content rect accounts for padding
+        assert_eq!(root_layout.content.x, 0.0);
+        assert_eq!(root_layout.content.y, 0.0);
+        assert_eq!(root_layout.content.width, 180.0); // 200 - 10 - 10
+        assert_eq!(root_layout.content.height, 90.0); // 100 - 5 - 5
+    }
+
+    #[test]
+    fn layout_with_border() {
+        let mut root_style = default_computed_style();
+        root_style.border = Some(Border {
+            width: 2.0,
+            color: Edges {
+                left: TRANSPARENT,
+                right: TRANSPARENT,
+                top: TRANSPARENT,
+                bottom: TRANSPARENT,
+            },
+        });
+        let child_style = default_computed_style();
+
+        let (tree, root_id, child_ids) = run_layout(
+            root_style,
+            vec![(child_style, Box::new(BoxElement::new(50.0, 30.0)))],
+            Rect::new(0.0, 0.0, 200.0, 100.0),
+        );
+
+        let root_layout = tree.layout(root_id).unwrap();
+        assert_eq!(root_layout.border.width, 2.0);
+        // Content starts offset by border
+        assert_eq!(root_layout.content.x, 2.0);
+        assert_eq!(root_layout.content.y, 2.0);
+    }
+
+    #[test]
+    fn layout_flex_grow() {
+        let root_style = default_computed_style();
+        let mut child1 = default_computed_style();
+        child1.flex.grow = 1.0;
+        let mut child2 = default_computed_style();
+        child2.flex.grow = 1.0;
+
+        let (tree, _root_id, child_ids) = run_layout(
+            root_style,
+            vec![
+                (child1, Box::new(BoxElement::new(0.0, 30.0))),
+                (child2, Box::new(BoxElement::new(0.0, 30.0))),
+            ],
+            Rect::new(0.0, 0.0, 200.0, 100.0),
+        );
+
+        let first = tree.layout(child_ids[0]).unwrap();
+        let second = tree.layout(child_ids[1]).unwrap();
+
+        // Both grow equally to fill 200px
+        assert_eq!(first.outer.width, 100.0);
+        assert_eq!(second.outer.width, 100.0);
+        assert_eq!(second.outer.x, 100.0);
+    }
+
+    #[test]
+    fn layout_flex_grow_unequal() {
+        let root_style = default_computed_style();
+        let mut child1 = default_computed_style();
+        child1.flex.grow = 1.0;
+        let mut child2 = default_computed_style();
+        child2.flex.grow = 3.0;
+
+        let (tree, _root_id, child_ids) = run_layout(
+            root_style,
+            vec![
+                (child1, Box::new(BoxElement::new(0.0, 30.0))),
+                (child2, Box::new(BoxElement::new(0.0, 30.0))),
+            ],
+            Rect::new(0.0, 0.0, 200.0, 100.0),
+        );
+
+        let first = tree.layout(child_ids[0]).unwrap();
+        let second = tree.layout(child_ids[1]).unwrap();
+
+        assert_eq!(first.outer.width, 50.0);
+        assert_eq!(second.outer.width, 150.0);
+    }
+
+    #[test]
+    fn layout_with_gap() {
+        let mut root_style = default_computed_style();
+        root_style.gap_x = Length::Fixed(10.0);
+        let child_style = default_computed_style();
+
+        let (tree, _root_id, child_ids) = run_layout(
+            root_style,
+            vec![
+                (child_style, Box::new(BoxElement::new(40.0, 30.0))),
+                (child_style, Box::new(BoxElement::new(40.0, 30.0))),
+                (child_style, Box::new(BoxElement::new(40.0, 30.0))),
+            ],
+            Rect::new(0.0, 0.0, 300.0, 100.0),
+        );
+
+        let c0 = tree.layout(child_ids[0]).unwrap();
+        let c1 = tree.layout(child_ids[1]).unwrap();
+        let c2 = tree.layout(child_ids[2]).unwrap();
+
+        assert_eq!(c0.outer.x, 0.0);
+        assert_eq!(c1.outer.x, 50.0); // 40 + 10 gap
+        assert_eq!(c2.outer.x, 100.0); // 50 + 40 + 10 gap
+    }
+
+    #[test]
+    fn layout_with_child_margin() {
+        let root_style = default_computed_style();
+        let mut child_style = default_computed_style();
+        child_style.margin = Edges {
+            left: 10.0,
+            right: 10.0,
+            top: 5.0,
+            bottom: 5.0,
+        };
+
+        let (tree, _root_id, child_ids) = run_layout(
+            root_style,
+            vec![(child_style, Box::new(BoxElement::new(50.0, 30.0)))],
+            Rect::new(0.0, 0.0, 200.0, 100.0),
+        );
+
+        let child = tree.layout(child_ids[0]).unwrap();
+        // Child rect offset by margin
+        assert_eq!(child.outer.x, 10.0);
+        assert_eq!(child.outer.y, 5.0);
+        assert_eq!(child.outer.width, 50.0);
+        assert_eq!(child.outer.height, 30.0);
+    }
+
+    #[test]
+    fn layout_no_children() {
+        let root_style = default_computed_style();
+
+        let (tree, root_id, _) = run_layout(
+            root_style,
+            vec![],
+            Rect::new(0.0, 0.0, 200.0, 100.0),
+        );
+
+        let root_layout = tree.layout(root_id).unwrap();
+        assert_eq!(root_layout.outer, Rect::new(0.0, 0.0, 200.0, 100.0));
+        assert_eq!(root_layout.scroll, Rect::ZERO);
+    }
+
+    #[test]
+    fn layout_justify_center_integration() {
+        let mut root_style = default_computed_style();
+        root_style.justify = Justify::Center;
+        let child_style = default_computed_style();
+
+        let (tree, _root_id, child_ids) = run_layout(
+            root_style,
+            vec![(child_style, Box::new(BoxElement::new(100.0, 30.0)))],
+            Rect::new(0.0, 0.0, 300.0, 100.0),
+        );
+
+        let child = tree.layout(child_ids[0]).unwrap();
+        // Centered: (300 - 100) / 2 = 100
+        assert_eq!(child.outer.x, 100.0);
+    }
+
+    #[test]
+    fn layout_justify_end_integration() {
+        let mut root_style = default_computed_style();
+        root_style.justify = Justify::End;
+        let child_style = default_computed_style();
+
+        let (tree, _root_id, child_ids) = run_layout(
+            root_style,
+            vec![(child_style, Box::new(BoxElement::new(100.0, 30.0)))],
+            Rect::new(0.0, 0.0, 300.0, 100.0),
+        );
+
+        let child = tree.layout(child_ids[0]).unwrap();
+        assert_eq!(child.outer.x, 200.0);
+    }
+
+    #[test]
+    fn layout_align_stretch_with_taller_sibling() {
+        let mut root_style = default_computed_style();
+        root_style.align = Align::Stretch;
+        let child_style = default_computed_style();
+
+        let (tree, _root_id, child_ids) = run_layout(
+            root_style,
+            vec![
+                (child_style, Box::new(BoxElement::new(50.0, 0.0))),
+                (child_style, Box::new(BoxElement::new(50.0, 80.0))),
+            ],
+            Rect::new(0.0, 0.0, 200.0, 100.0),
+        );
+
+        let first = tree.layout(child_ids[0]).unwrap();
+        let second = tree.layout(child_ids[1]).unwrap();
+
+        // Line cross size = max(0, 80) = 80
+        // First child (Auto height) stretches to 80
+        assert_eq!(first.outer.height, 80.0);
+        assert_eq!(second.outer.height, 80.0);
+    }
+
+    #[test]
+    fn layout_wrap_creates_multiple_lines() {
+        let mut root_style = default_computed_style();
+        root_style.wrap = FlexWrap::Wrap;
+        let child_style = default_computed_style();
+
+        let (tree, _root_id, child_ids) = run_layout(
+            root_style,
+            vec![
+                (child_style, Box::new(BoxElement::new(60.0, 30.0))),
+                (child_style, Box::new(BoxElement::new(60.0, 30.0))),
+                (child_style, Box::new(BoxElement::new(60.0, 30.0))),
+            ],
+            Rect::new(0.0, 0.0, 100.0, 200.0),
+        );
+
+        let c0 = tree.layout(child_ids[0]).unwrap();
+        let c1 = tree.layout(child_ids[1]).unwrap();
+        let c2 = tree.layout(child_ids[2]).unwrap();
+
+        // First line: item 0 (60px), can't fit item 1 (60+60=120 > 100)
+        assert_eq!(c0.outer.x, 0.0);
+        assert_eq!(c0.outer.y, 0.0);
+
+        // Second line: item 1
+        assert_eq!(c1.outer.x, 0.0);
+        assert_eq!(c1.outer.y, 30.0);
+
+        // Third line: item 2
+        assert_eq!(c2.outer.x, 0.0);
+        assert_eq!(c2.outer.y, 60.0);
+    }
+
+    #[test]
+    fn layout_fixed_size_child() {
+        let root_style = default_computed_style();
+        let mut child_style = default_computed_style();
+        child_style.width = Constrained {
+            value: Length::Fixed(80.0),
+            min: Length::Fixed(0.0),
+            max: Length::Fixed(f32::INFINITY),
+        };
+        child_style.height = Constrained {
+            value: Length::Fixed(40.0),
+            min: Length::Fixed(0.0),
+            max: Length::Fixed(f32::INFINITY),
+        };
+
+        let (tree, _root_id, child_ids) = run_layout(
+            root_style,
+            vec![(child_style, Box::new(BoxElement::new(10.0, 10.0)))],
+            Rect::new(0.0, 0.0, 200.0, 100.0),
+        );
+
+        let child = tree.layout(child_ids[0]).unwrap();
+        // Fixed size overrides intrinsic
+        assert_eq!(child.outer.width, 80.0);
+        assert_eq!(child.outer.height, 40.0);
     }
 }
