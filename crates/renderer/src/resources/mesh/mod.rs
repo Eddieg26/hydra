@@ -130,6 +130,7 @@ pub enum MeshAttributeType {
     UV1,
     Tangents,
     Color,
+    Index,
 }
 
 impl MeshAttributeType {
@@ -142,6 +143,7 @@ impl MeshAttributeType {
             MeshAttributeType::UV1 => VertexFormat::Float32x2,
             MeshAttributeType::Tangents => VertexFormat::Float32x4,
             MeshAttributeType::Color => VertexFormat::Float32x4,
+            MeshAttributeType::Index => VertexFormat::Uint32,
         }
     }
 }

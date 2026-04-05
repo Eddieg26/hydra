@@ -50,7 +50,7 @@ impl UiPipelines {
                 ty: PositionType::D2,
             },
             MeshAttributeType::UV0,
-            MeshAttributeType::Color,
+            MeshAttributeType::Index,
         ]);
 
         let primitive = PrimitiveState {
