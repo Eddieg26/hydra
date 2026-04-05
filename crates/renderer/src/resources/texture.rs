@@ -1,14 +1,17 @@
 use crate::{
     core::{ColorFormat, RenderDevice, RenderSurface},
-    resources::{RenderAssets, extract::RenderAsset},
+    resources::{Bindless, RenderAssets, extract::RenderAsset},
     types::Color,
 };
-use asset::Asset;
+use asset::{Asset, AssetId};
 use ecs::{
     Resource,
     unlifetime::{Read, Write},
 };
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    ops::{Deref, DerefMut},
+};
 use wgpu::{
     CompareFunction, FilterMode, Label, Sampler, SamplerBorderColor, SurfaceError,
     TextureDescriptor, TextureFormat, TextureUsages, TextureView, util::DeviceExt,
@@ -446,7 +449,7 @@ impl RenderAsset for RenderTarget {
     );
 
     fn extract(
-        id: asset::AssetId<Self::Asset>,
+        id: AssetId<Self::Asset>,
         asset: Self::Asset,
         (device, textures, samplers): &mut ecs::ArgItem<Self::Arg>,
     ) -> Result<Self, super::ExtractError<Self::Asset>> {
@@ -460,7 +463,7 @@ impl RenderAsset for RenderTarget {
     }
 
     fn removed(
-        id: &asset::AssetId<Self::Asset>,
+        id: &AssetId<Self::Asset>,
         _: &Self,
         (_, textures, _): &mut ecs::ArgItem<Self::Arg>,
     ) {
@@ -528,5 +531,37 @@ impl MainRenderTarget {
         };
 
         texture.present();
+    }
+}
+
+#[derive(Resource)]
+pub struct BindlessTexture2d(Bindless<AssetId<Texture>, Texture>);
+impl Deref for BindlessTexture2d {
+    type Target = Bindless<AssetId<Texture>, Texture>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for BindlessTexture2d {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[derive(Resource)]
+pub struct BindlessSamplers(Bindless<SamplerId, Sampler>);
+impl Deref for BindlessSamplers {
+    type Target = Bindless<SamplerId, Sampler>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for BindlessSamplers {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
