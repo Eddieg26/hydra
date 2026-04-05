@@ -74,7 +74,7 @@ pub struct UIBatchInfo {
 impl UIBatchInfo {
     pub fn new(
         ty: UIBatchType,
-        clip: Rect,
+        clip: Rect<u32>,
         start_vertex: u32,
         start_index: u32,
         image: Option<AssetId<Texture>>,
@@ -84,41 +84,59 @@ impl UIBatchInfo {
             image,
             vertices: start_vertex..start_vertex,
             indices: start_index..start_index,
-            clip: clip.round(),
+            clip: clip,
         }
     }
 
-    pub fn solid(clip: Rect, start_vertex: u32, start_index: u32) -> Self {
+    pub fn solid(clip: Rect<u32>, start_vertex: u32, start_index: u32) -> Self {
         Self {
             ty: UIBatchType::Solid,
             image: None,
             vertices: start_vertex..start_vertex,
             indices: start_index..start_index,
-            clip: clip.round(),
+            clip: clip,
         }
     }
 
-    pub fn image(image: AssetId<Texture>, clip: Rect, start_vertex: u32, start_index: u32) -> Self {
+    pub fn image(
+        image: AssetId<Texture>,
+        clip: Rect<u32>,
+        start_vertex: u32,
+        start_index: u32,
+    ) -> Self {
         Self {
             ty: UIBatchType::Image,
             image: Some(image),
             vertices: start_vertex..start_vertex,
             indices: start_index..start_index,
-            clip: clip.round(),
+            clip,
         }
     }
 
-    pub fn text(image: AssetId<Texture>, clip: Rect, start_vertex: u32, start_index: u32) -> Self {
+    pub fn text(
+        image: AssetId<Texture>,
+        clip: Rect<u32>,
+        start_vertex: u32,
+        start_index: u32,
+    ) -> Self {
         Self {
             ty: UIBatchType::Text,
             image: Some(image),
             vertices: start_vertex..start_vertex,
             indices: start_index..start_index,
-            clip: clip.round(),
+            clip: clip,
         }
     }
-}
 
+    pub fn equal(
+        &self,
+        ty: UIBatchType,
+        clip: &Rect<u32>,
+        image: Option<&AssetId<Texture>>,
+    ) -> bool {
+        self.ty == ty && self.image.as_ref() == image && &self.clip == clip
+    }
+}
 pub struct UIBatchOutput {
     pub vertices: Vec<UIVertex>,
     pub indices: Vec<u32>,
@@ -149,42 +167,44 @@ impl Batcher<'_> {
                     clips.remove(0);
                 }
                 DrawCommand::Quad { rect, color } => {
-                    let info = if let Some(current) = current
+                    let clip = Self::clip(&mut clips, rect).round();
+                    let info = match current
                         .as_mut()
-                        .and_then(|current| (current.ty == UIBatchType::Solid).then_some(current))
+                        .and_then(|c| c.equal(UIBatchType::Solid, &clip, None).then_some(c))
                     {
-                        current
-                    } else {
-                        let clip = Self::clip(&mut clips, rect);
-                        let info = UIBatchInfo::solid(
-                            clip,
-                            self.vertices.len() as u32,
-                            self.vertices.len() as u32,
-                        );
+                        Some(current) => current,
+                        None => {
+                            let info = UIBatchInfo::solid(
+                                clip,
+                                self.vertices.len() as u32,
+                                self.vertices.len() as u32,
+                            );
 
-                        current = self.submit(current).or(Some(info));
-                        current.as_mut().unwrap()
+                            current = self.submit(current).or(Some(info));
+                            current.as_mut().unwrap()
+                        }
                     };
 
                     self.add_quad(UIVertex::quad(*rect, Rect::ONE, color.pack()), info);
                 }
                 DrawCommand::Image { id, rect } => {
-                    let info = if let Some(current) = current.as_mut().and_then(|current| {
-                        (current.ty == UIBatchType::Image && current.image.as_ref() == Some(id))
-                            .then_some(current)
-                    }) {
-                        current
-                    } else {
-                        let clip = Self::clip(&mut clips, rect);
-                        let info = UIBatchInfo::image(
-                            *id,
-                            clip,
-                            self.vertices.len() as u32,
-                            self.vertices.len() as u32,
-                        );
+                    let clip = Self::clip(&mut clips, rect).round();
+                    let info = match current
+                        .as_mut()
+                        .and_then(|c| c.equal(UIBatchType::Image, &clip, Some(id)).then_some(c))
+                    {
+                        Some(current) => current,
+                        None => {
+                            let info = UIBatchInfo::image(
+                                *id,
+                                clip,
+                                self.vertices.len() as u32,
+                                self.vertices.len() as u32,
+                            );
 
-                        current = self.submit(current).or(Some(info));
-                        current.as_mut().unwrap()
+                            current = self.submit(current).or(Some(info));
+                            current.as_mut().unwrap()
+                        }
                     };
 
                     self.add_quad(UIVertex::quad(*rect, Rect::ONE, Color::WHITE.pack()), info);
@@ -194,42 +214,44 @@ impl Batcher<'_> {
                     atlas,
                     glyphs,
                 } => {
-                    let info = if let Some(current) = current.as_mut().and_then(|current| {
-                        (current.ty == UIBatchType::Text && current.image.as_ref() == Some(atlas))
-                            .then_some(current)
-                    }) {
-                        current
-                    } else {
-                        let clip = Self::clip(&mut clips, rect);
-                        let info = UIBatchInfo::image(
-                            *atlas,
-                            clip,
-                            self.vertices.len() as u32,
-                            self.vertices.len() as u32,
-                        );
+                    let clip = Self::clip(&mut clips, rect).round();
+                    let info = match current
+                        .as_mut()
+                        .and_then(|c| c.equal(UIBatchType::Text, &clip, Some(atlas)).then_some(c))
+                    {
+                        Some(current) => current,
+                        None => {
+                            let info = UIBatchInfo::image(
+                                *atlas,
+                                clip,
+                                self.vertices.len() as u32,
+                                self.vertices.len() as u32,
+                            );
 
-                        current = self.submit(current).or(Some(info));
-                        current.as_mut().unwrap()
+                            current = self.submit(current).or(Some(info));
+                            current.as_mut().unwrap()
+                        }
                     };
 
                     self.add_text(rect, glyphs, info);
                 }
                 DrawCommand::Border { rect, border } => {
-                    let info = if let Some(current) = current
+                    let clip = Self::clip(&mut clips, rect).round();
+                    let info = match current
                         .as_mut()
-                        .and_then(|current| (current.ty == UIBatchType::Solid).then_some(current))
+                        .and_then(|c| c.equal(UIBatchType::Solid, &clip, None).then_some(c))
                     {
-                        current
-                    } else {
-                        let clip = Self::clip(&mut clips, rect);
-                        let info = UIBatchInfo::solid(
-                            clip,
-                            self.vertices.len() as u32,
-                            self.vertices.len() as u32,
-                        );
+                        Some(current) => current,
+                        None => {
+                            let info = UIBatchInfo::solid(
+                                clip,
+                                self.vertices.len() as u32,
+                                self.vertices.len() as u32,
+                            );
 
-                        current = self.submit(current).or(Some(info));
-                        current.as_mut().unwrap()
+                            current = self.submit(current).or(Some(info));
+                            current.as_mut().unwrap()
+                        }
                     };
 
                     self.add_border(rect, border, info);
