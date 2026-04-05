@@ -1,11 +1,22 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
+pub struct Rect<T: 'static = f32> {
+    pub x: T,
+    pub y: T,
+    pub width: T,
+    pub height: T,
+}
+
+impl<T: 'static> Rect<T> {
+    pub fn new(x: T, y: T, width: T, height: T) -> Self {
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
 }
 
 impl Rect {
@@ -16,7 +27,12 @@ impl Rect {
         height: 0.0,
     };
 
-    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+    //TODO: Make generic
+    pub fn intersect(&self, other: &Self) -> Self {
+        let x = self.x.max(other.x);
+        let y = self.y.max(other.y);
+        let width = (self.x + self.width).min(other.x + other.width) - x;
+        let height = (self.y + self.height).min(other.y + other.height) - y;
         Rect {
             x,
             y,
@@ -24,28 +40,27 @@ impl Rect {
             height,
         }
     }
+}
 
-    pub fn area(&self) -> f32 {
+impl<
+    T: 'static
+        + std::ops::Add<Output = T>
+        + std::ops::Sub<Output = T>
+        + std::ops::Mul<Output = T>
+        + Ord
+        + Copy,
+> Rect<T>
+{
+    pub fn area(&self) -> T {
         self.width * self.height
     }
 
-    pub fn contains_point(&self, point: glam::Vec2) -> bool {
-        point.x >= self.x
-            && point.x <= self.x + self.width
-            && point.y >= self.y
-            && point.y <= self.y + self.height
-    }
-
-    pub fn intersect(&self, other: &Rect) -> Self {
-        let x = self.x.max(other.x);
-        let y = self.y.max(other.y);
-        let width = (self.x + self.width).min(other.x + other.width) - x;
-        let height = (self.y + self.height).min(other.y + other.height) - y;
-        Rect { x, y, width, height }
+    pub fn contains_point(&self, x: T, y: T) -> bool {
+        x >= self.x && x <= self.x + self.width && y >= self.y && y <= self.y + self.height
     }
 }
 
-impl std::ops::Add for Rect {
+impl<T: 'static + std::ops::Add<Output = T>> std::ops::Add for Rect<T> {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
@@ -58,10 +73,10 @@ impl std::ops::Add for Rect {
     }
 }
 
-impl std::ops::Sub for Rect {
+impl<T: 'static + std::ops::Sub<Output = T>> std::ops::Sub for Rect<T> {
     type Output = Self;
 
-    fn sub(self, other: Self) -> Self {
+    fn sub(self, other: Self) -> Self::Output {
         Rect {
             x: self.x - other.x,
             y: self.y - other.y,
@@ -71,10 +86,10 @@ impl std::ops::Sub for Rect {
     }
 }
 
-impl std::ops::Mul<f32> for Rect {
+impl<T: 'static + std::ops::Mul<Output = T> + Copy> std::ops::Mul<T> for Rect<T> {
     type Output = Self;
 
-    fn mul(self, scalar: f32) -> Self {
+    fn mul(self, scalar: T) -> Self {
         Rect {
             x: self.x * scalar,
             y: self.y * scalar,
@@ -84,15 +99,51 @@ impl std::ops::Mul<f32> for Rect {
     }
 }
 
-impl std::ops::Div<f32> for Rect {
+impl<T: 'static + std::ops::Div<Output = T> + Copy> std::ops::Div<T> for Rect<T> {
     type Output = Self;
 
-    fn div(self, scalar: f32) -> Self {
+    fn div(self, scalar: T) -> Self {
         Rect {
             x: self.x / scalar,
             y: self.y / scalar,
             width: self.width / scalar,
             height: self.height / scalar,
         }
+    }
+}
+
+impl<T: 'static + std::ops::AddAssign> std::ops::AddAssign for Rect<T> {
+    fn add_assign(&mut self, other: Self) {
+        self.x += other.x;
+        self.y += other.y;
+        self.width += other.width;
+        self.height += other.height;
+    }
+}
+
+impl<T: 'static + std::ops::SubAssign> std::ops::SubAssign for Rect<T> {
+    fn sub_assign(&mut self, other: Self) {
+        self.x -= other.x;
+        self.y -= other.y;
+        self.width -= other.width;
+        self.height -= other.height;
+    }
+}
+
+impl<T: 'static + std::ops::MulAssign + Copy> std::ops::MulAssign<T> for Rect<T> {
+    fn mul_assign(&mut self, scalar: T) {
+        self.x *= scalar;
+        self.y *= scalar;
+        self.width *= scalar;
+        self.height *= scalar;
+    }
+}
+
+impl<T: 'static + std::ops::DivAssign + Copy> std::ops::DivAssign<T> for Rect<T> {
+    fn div_assign(&mut self, scalar: T) {
+        self.x /= scalar;
+        self.y /= scalar;
+        self.width /= scalar;
+        self.height /= scalar;
     }
 }
