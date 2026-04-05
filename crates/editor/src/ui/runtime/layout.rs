@@ -306,7 +306,7 @@ impl Layout {
         let (x, width) = match style.overflow_x {
             Overflow::Visible => (parent.x, parent.width),
             Overflow::Hidden | Overflow::Scroll => {
-                let area = content.intersect(&parent);
+                let area = content.intersection(&parent);
                 (area.x, area.width)
             }
         };
@@ -314,7 +314,7 @@ impl Layout {
         let (y, height) = match style.overlfow_y {
             Overflow::Visible => (parent.y, parent.height),
             Overflow::Hidden | Overflow::Scroll => {
-                let area = content.intersect(&parent);
+                let area = content.intersection(&parent);
                 (area.y, area.height)
             }
         };

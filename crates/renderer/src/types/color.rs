@@ -11,6 +11,20 @@ pub struct Color {
 }
 
 impl Color {
+    pub const WHITE: Color = Color {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+        a: 1.0,
+    };
+
+    pub const BLACK: Color = Color {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+        a: 0.0,
+    };
+
     pub fn as_slice(&self) -> [f32; 4] {
         [self.r, self.b, self.g, self.a]
     }
@@ -21,6 +35,15 @@ impl Color {
         let b = (self.b * 255.0) as u8;
         let a = (self.a * 255.0) as u8;
         (r, g, b, a)
+    }
+
+    pub fn pack(&self) -> u32 {
+        let r = (self.r * 255.0) as u8;
+        let g = (self.g * 255.0) as u8;
+        let b = (self.b * 255.0) as u8;
+        let a = (self.a * 255.0) as u8;
+
+        u32::from_be_bytes([r, g, b, a])
     }
 }
 

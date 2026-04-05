@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Rect<T: 'static = f32> {
     pub x: T,
     pub y: T,
@@ -27,8 +27,15 @@ impl Rect {
         height: 0.0,
     };
 
+    pub const ONE: Rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        width: 1.0,
+        height: 1.0,
+    };
+
     //TODO: Make generic
-    pub fn intersect(&self, other: &Self) -> Self {
+    pub fn intersection(&self, other: &Self) -> Self {
         let x = self.x.max(other.x);
         let y = self.y.max(other.y);
         let width = (self.x + self.width).min(other.x + other.width) - x;
@@ -38,6 +45,33 @@ impl Rect {
             y,
             width,
             height,
+        }
+    }
+
+    pub fn round(&self) -> Rect<u32> {
+        Rect {
+            x: self.x.round() as u32,
+            y: self.y.round() as u32,
+            width: self.width.round() as u32,
+            height: self.height.round() as u32,
+        }
+    }
+
+    pub fn ceil(&self) -> Rect<u32> {
+        Rect {
+            x: self.x.ceil() as u32,
+            y: self.y.ceil() as u32,
+            width: self.width.ceil() as u32,
+            height: self.height.ceil() as u32,
+        }
+    }
+
+    pub fn floor(&self) -> Rect<u32> {
+        Rect {
+            x: self.x.floor() as u32,
+            y: self.y.floor() as u32,
+            width: self.width.floor() as u32,
+            height: self.height.floor() as u32,
         }
     }
 }
@@ -145,5 +179,15 @@ impl<T: 'static + std::ops::DivAssign + Copy> std::ops::DivAssign<T> for Rect<T>
         self.y /= scalar;
         self.width /= scalar;
         self.height /= scalar;
+    }
+}
+
+impl<T: 'static + Eq> Eq for Rect<T> {}
+impl<T: 'static + PartialEq> PartialEq for Rect<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.x == other.x
+            && self.y == other.y
+            && self.width == other.width
+            && self.height == other.height
     }
 }

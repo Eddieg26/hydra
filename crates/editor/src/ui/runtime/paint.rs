@@ -2,8 +2,9 @@ use crate::ui::{
     core::{id::ElementId, style::Border, text::Glyph},
     runtime::tree::ElementTree,
 };
-use math::{Vec2, rect::Rect};
-use renderer::types::Color;
+use asset::AssetId;
+use math::rect::Rect;
+use renderer::{resources::Texture, types::Color};
 
 pub enum DrawCommand {
     PushClip(Rect),
@@ -13,11 +14,18 @@ pub enum DrawCommand {
         color: Color,
     },
     Text {
+        rect: Rect,
+        atlas: AssetId<Texture>,
         glyphs: Vec<Glyph>,
-        positions: Vec<Vec2>,
     },
-    Border(Border),
-    Image,
+    Border {
+        rect: Rect,
+        border: Border,
+    },
+    Image {
+        rect: Rect,
+        id: AssetId<Texture>,
+    },
 }
 
 pub struct Painter<'a> {
@@ -48,7 +56,10 @@ impl<'a> Painter<'a> {
 
         // push clip
         if let Some(border) = style.border.as_ref().copied() {
-            self.commands.push(DrawCommand::Border(border));
+            self.commands.push(DrawCommand::Border {
+                rect: layout.border,
+                border,
+            });
         }
 
         self.commands.push(node.element.draw(style, layout));

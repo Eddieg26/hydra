@@ -1,9 +1,4 @@
-use renderer::resources::PipelineId;
-
 pub mod pipelines;
-
-pub struct DrawBatch {
-    pipeline: PipelineId,
-}
+pub mod batcher;
 
 pub struct UIRenderer {}
