@@ -15,7 +15,7 @@ pub trait TextMeasurer {
 }
 
 pub struct Glyph {
-    pub position: Vec2,
-    pub advance: Vec2,
+    pub rect: Rect,
     pub uv: Rect,
+    pub advance: f32,
 }

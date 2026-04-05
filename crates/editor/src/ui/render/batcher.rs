@@ -53,6 +53,7 @@ pub struct UIDrawBatch {
     pub vertices: Range<u32>,
     pub indices: Range<u32>,
     pub clip: Rect<u32>,
+    pub image: Option<AssetId<Texture>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -164,7 +165,7 @@ impl Batcher<'_> {
                 }
                 DrawCommand::PopClip => {
                     current = self.submit(current);
-                    clips.remove(0);
+                    clips.pop();
                 }
                 DrawCommand::Quad { rect, color } => {
                     let clip = Self::clip(&mut clips, rect).round();
@@ -199,7 +200,7 @@ impl Batcher<'_> {
                                 *id,
                                 clip,
                                 self.vertices.len() as u32,
-                                self.vertices.len() as u32,
+                                self.indices.len() as u32,
                             );
 
                             current = self.submit(current).or(Some(info));
@@ -221,11 +222,11 @@ impl Batcher<'_> {
                     {
                         Some(current) => current,
                         None => {
-                            let info = UIBatchInfo::image(
+                            let info = UIBatchInfo::text(
                                 *atlas,
                                 clip,
                                 self.vertices.len() as u32,
-                                self.vertices.len() as u32,
+                                self.indices.len() as u32,
                             );
 
                             current = self.submit(current).or(Some(info));
@@ -246,7 +247,7 @@ impl Batcher<'_> {
                             let info = UIBatchInfo::solid(
                                 clip,
                                 self.vertices.len() as u32,
-                                self.vertices.len() as u32,
+                                self.indices.len() as u32,
                             );
 
                             current = self.submit(current).or(Some(info));
@@ -259,6 +260,8 @@ impl Batcher<'_> {
             }
         }
 
+        self.submit(current);
+
         UIBatchOutput {
             vertices: self.vertices,
             indices: self.indices,
@@ -266,7 +269,7 @@ impl Batcher<'_> {
         }
     }
 
-    pub fn submit(&mut self, info: Option<UIBatchInfo>) -> Option<UIBatchInfo> {
+    fn submit(&mut self, info: Option<UIBatchInfo>) -> Option<UIBatchInfo> {
         if let Some(info) = info {
             let pipeline = match info.ty {
                 UIBatchType::Solid => self.pipelines.solid(),
@@ -279,6 +282,7 @@ impl Batcher<'_> {
                 vertices: info.vertices,
                 indices: info.indices,
                 clip: info.clip,
+                image: info.image,
             });
         }
 
@@ -286,15 +290,11 @@ impl Batcher<'_> {
     }
 
     fn clip(clips: &mut Vec<Rect>, rect: &Rect) -> Rect {
-        let effective = if let Some(parent) = clips.last().copied() {
+        if let Some(parent) = clips.last().copied() {
             parent.intersection(&rect)
         } else {
             *rect
-        };
-
-        clips.push(effective);
-
-        effective
+        }
     }
 
     fn add_quad(&mut self, quad: [UIVertex; 4], info: &mut UIBatchInfo) {
@@ -368,10 +368,10 @@ impl Batcher<'_> {
     fn add_text(&mut self, rect: &Rect, glyphs: &[Glyph], info: &mut UIBatchInfo) {
         for glyph in glyphs {
             let rect = Rect::new(
-                rect.x + glyph.position.x,
-                rect.y + glyph.position.y,
-                glyph.advance.x,
-                glyph.advance.y,
+                rect.x + glyph.rect.x,
+                rect.y + glyph.rect.y,
+                glyph.rect.x,
+                glyph.rect.y,
             );
 
             self.add_quad(UIVertex::quad(rect, glyph.uv, Color::WHITE.pack()), info);
