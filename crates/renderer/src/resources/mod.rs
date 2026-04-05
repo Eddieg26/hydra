@@ -12,7 +12,6 @@ pub mod texture;
 pub use binding::*;
 pub use buffer::*;
 pub use extract::*;
-pub use id::*;
 pub use mesh::*;
 pub use pipeline::*;
 pub use shader::*;

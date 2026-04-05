@@ -1,13 +1,15 @@
 use crate::{
     core::RenderDevice,
-    resources::{ExtractError, ReadWrite, RenderAsset, allocator::MeshAllocator},
+    resources::{
+        ExtractError, ReadWrite, RenderAsset, VertexBufferLayout, allocator::MeshAllocator,
+    },
     types::Color,
 };
 use asset::Asset;
 use bitflags::bitflags;
 use ecs::unlifetime::{Read, Write};
 use math::{Vec2, Vec3, Vec4, bounds::Bounds};
-use wgpu::IndexFormat;
+use wgpu::{IndexFormat, VertexAttribute, VertexFormat};
 
 pub mod allocator;
 
@@ -47,44 +49,68 @@ impl From<wgpu::PrimitiveTopology> for MeshTopology {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum PositionType {
+    D2,
+    D3,
+}
+
+impl PositionType {
+    pub fn format(&self) -> VertexFormat {
+        match self {
+            PositionType::D2 => VertexFormat::Float32x2,
+            PositionType::D3 => VertexFormat::Float32x3,
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum PositionValue {
     D2(Vec<Vec2>),
     D3(Vec<Vec3>),
 }
 
-impl PositionType {
+impl PositionValue {
+    pub fn ty(&self) -> PositionType {
+        match self {
+            PositionValue::D2(_) => PositionType::D2,
+            PositionValue::D3(_) => PositionType::D3,
+        }
+    }
+
     pub fn len(&self) -> usize {
         match self {
-            PositionType::D2(v) => v.len(),
-            PositionType::D3(v) => v.len(),
+            PositionValue::D2(v) => v.len(),
+            PositionValue::D3(v) => v.len(),
         }
     }
 
     pub fn flag(&self) -> MeshFlags {
         match self {
-            PositionType::D2(_) => MeshFlags::POSITION_2D,
-            PositionType::D3(_) => MeshFlags::POSITION_3D,
+            PositionValue::D2(_) => MeshFlags::POSITION_2D,
+            PositionValue::D3(_) => MeshFlags::POSITION_3D,
         }
     }
 
     pub fn size(&self) -> usize {
         match self {
-            PositionType::D2(_) => size_of::<Vec2>(),
-            PositionType::D3(_) => size_of::<Vec3>(),
+            PositionValue::D2(_) => size_of::<Vec2>(),
+            PositionValue::D3(_) => size_of::<Vec3>(),
         }
     }
 
     pub fn data(&self) -> &[u8] {
         match self {
-            PositionType::D2(v) => bytemuck::cast_slice(v),
-            PositionType::D3(v) => bytemuck::cast_slice(v),
+            PositionValue::D2(v) => bytemuck::cast_slice(v),
+            PositionValue::D3(v) => bytemuck::cast_slice(v),
         }
     }
 }
 
-impl Eq for PositionType {}
-impl PartialEq for PositionType {
+impl Eq for PositionValue {}
+impl PartialEq for PositionValue {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::D2(_), Self::D2(_)) => true,
@@ -98,7 +124,7 @@ impl PartialEq for PositionType {
     Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub enum MeshAttributeType {
-    Position,
+    Position { ty: PositionType },
     Normals,
     UV0,
     UV1,
@@ -106,9 +132,23 @@ pub enum MeshAttributeType {
     Color,
 }
 
+impl MeshAttributeType {
+    #[inline]
+    pub fn format(&self) -> VertexFormat {
+        match self {
+            MeshAttributeType::Position { ty } => ty.format(),
+            MeshAttributeType::Normals => VertexFormat::Float32x3,
+            MeshAttributeType::UV0 => VertexFormat::Float32x2,
+            MeshAttributeType::UV1 => VertexFormat::Float32x2,
+            MeshAttributeType::Tangents => VertexFormat::Float32x4,
+            MeshAttributeType::Color => VertexFormat::Float32x4,
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum MeshAttribute {
-    Position(PositionType),
+    Position(PositionValue),
     Normals(Vec<Vec3>),
     UV0(Vec<Vec2>),
     UV1(Vec<Vec2>),
@@ -119,7 +159,7 @@ pub enum MeshAttribute {
 impl MeshAttribute {
     pub fn ty(&self) -> MeshAttributeType {
         match self {
-            MeshAttribute::Position(_) => MeshAttributeType::Position,
+            MeshAttribute::Position(v) => MeshAttributeType::Position { ty: v.ty() },
             MeshAttribute::Normals(_) => MeshAttributeType::Normals,
             MeshAttribute::UV0(_) => MeshAttributeType::UV0,
             MeshAttribute::UV1(_) => MeshAttributeType::UV1,
@@ -177,8 +217,8 @@ impl Eq for MeshAttribute {}
 impl PartialEq for MeshAttribute {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Position(PositionType::D2(_)), Self::Position(PositionType::D2(_))) => true,
-            (Self::Position(PositionType::D3(_)), Self::Position(PositionType::D3(_))) => true,
+            (Self::Position(PositionValue::D2(_)), Self::Position(PositionValue::D2(_))) => true,
+            (Self::Position(PositionValue::D3(_)), Self::Position(PositionValue::D3(_))) => true,
             (Self::Normals(_), Self::Normals(_)) => true,
             (Self::UV0(_), Self::UV0(_)) => true,
             (Self::UV1(_), Self::UV1(_)) => true,
@@ -274,7 +314,7 @@ impl Mesh {
     }
 
     pub fn attribute_mut(&mut self, ty: MeshAttributeType) -> Option<&mut MeshAttribute> {
-        if ty == MeshAttributeType::Position {
+        if matches!(ty, MeshAttributeType::Position { .. }) {
             self.dirty |= MeshDirtyFlags::POSITION;
         }
 
@@ -404,6 +444,29 @@ impl RenderAsset for GpuMesh {
         match asset.read_write() {
             ReadWrite::Enabled => super::AssetUsage::Keep,
             ReadWrite::Disabled => super::AssetUsage::Discard,
+        }
+    }
+}
+
+impl<T: IntoIterator<Item = MeshAttributeType>> From<T> for VertexBufferLayout {
+    fn from(value: T) -> Self {
+        let mut attributes = Vec::new();
+        let mut stride = 0;
+
+        for ty in value {
+            let format = ty.format();
+            attributes.push(VertexAttribute {
+                format,
+                offset: stride,
+                shader_location: attributes.len() as u32,
+            });
+            stride += format.size();
+        }
+
+        VertexBufferLayout {
+            array_stride: stride,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes,
         }
     }
 }

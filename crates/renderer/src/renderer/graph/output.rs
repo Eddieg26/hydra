@@ -60,14 +60,14 @@ impl Plugin for OutputPassPlugin {
             let registry = render_app.resource_mut::<BindGroupLayoutRegistry>();
             let mut builder = BindGroupLayoutBuilder::new();
             builder
-                .with_texture(
+                .add_texture(
                     ShaderStages::FRAGMENT,
                     wgpu::TextureSampleType::Float { filterable: true },
                     wgpu::TextureViewDimension::D2,
                     false,
                     None,
                 )
-                .with_sampler(
+                .add_sampler(
                     ShaderStages::FRAGMENT,
                     wgpu::SamplerBindingType::NonFiltering,
                     None,

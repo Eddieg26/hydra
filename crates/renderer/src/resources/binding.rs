@@ -1,14 +1,15 @@
-use crate::{
-    core::RenderDevice,
-    resources::{GpuResourceId, Label},
-};
+use crate::{core::RenderDevice, gpu_resource_id, resources::Label};
 use ecs::Resource;
-use std::{collections::HashMap, num::NonZero};
+use std::{collections::HashMap, num::NonZero, ops::Index};
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BufferBinding, BufferBindingType, Sampler,
     SamplerBindingType, ShaderStages, TextureSampleType, TextureView, TextureViewDimension,
 };
+
+gpu_resource_id!(BindGroupLayoutId);
+
+gpu_resource_id!(BindGroupId);
 
 #[derive(Default, Clone)]
 pub struct BindGroupLayoutBuilder {
@@ -24,12 +25,12 @@ impl BindGroupLayoutBuilder {
         }
     }
 
-    pub fn with_label(&mut self, label: Label) -> &mut Self {
+    pub fn set_label(&mut self, label: Label) -> &mut Self {
         self.label = Some(label);
         self
     }
 
-    pub fn with_buffer(
+    pub fn add_buffer(
         &mut self,
         ty: BufferBindingType,
         visibility: ShaderStages,
@@ -52,14 +53,14 @@ impl BindGroupLayoutBuilder {
         self
     }
 
-    pub fn with_uniform(
+    pub fn add_uniform(
         &mut self,
         visibility: ShaderStages,
         has_dynamic_offset: bool,
         min_binding_size: Option<NonZero<u64>>,
         count: Option<NonZero<u32>>,
     ) -> &mut Self {
-        self.with_buffer(
+        self.add_buffer(
             BufferBindingType::Uniform,
             visibility,
             has_dynamic_offset,
@@ -68,7 +69,7 @@ impl BindGroupLayoutBuilder {
         )
     }
 
-    pub fn with_storage(
+    pub fn add_storage(
         &mut self,
         read_only: bool,
         visibility: ShaderStages,
@@ -76,7 +77,7 @@ impl BindGroupLayoutBuilder {
         min_binding_size: Option<NonZero<u64>>,
         count: Option<NonZero<u32>>,
     ) -> &mut Self {
-        self.with_buffer(
+        self.add_buffer(
             BufferBindingType::Storage { read_only },
             visibility,
             has_dynamic_offset,
@@ -85,7 +86,7 @@ impl BindGroupLayoutBuilder {
         )
     }
 
-    pub fn with_texture(
+    pub fn add_texture(
         &mut self,
         visibility: ShaderStages,
         sample_type: TextureSampleType,
@@ -107,12 +108,111 @@ impl BindGroupLayoutBuilder {
         self
     }
 
-    pub fn with_sampler(
+    pub fn add_sampler(
         &mut self,
         visibility: ShaderStages,
         ty: SamplerBindingType,
         count: Option<NonZero<u32>>,
     ) -> &mut Self {
+        let binding = self.entries.len() as u32;
+        self.entries.push(BindGroupLayoutEntry {
+            binding,
+            visibility,
+            ty: BindingType::Sampler(ty),
+            count,
+        });
+        self
+    }
+
+    pub fn with_label(&mut self, label: Label) -> &mut Self {
+        self.label = Some(label);
+        self
+    }
+
+    pub fn with_buffer(
+        mut self,
+        ty: BufferBindingType,
+        visibility: ShaderStages,
+        has_dynamic_offset: bool,
+        min_binding_size: Option<NonZero<u64>>,
+        count: Option<NonZero<u32>>,
+    ) -> Self {
+        let binding = self.entries.len() as u32;
+        self.entries.push(BindGroupLayoutEntry {
+            binding,
+            visibility,
+            ty: BindingType::Buffer {
+                ty,
+                has_dynamic_offset,
+                min_binding_size,
+            },
+            count,
+        });
+
+        self
+    }
+
+    pub fn with_uniform(
+        self,
+        visibility: ShaderStages,
+        has_dynamic_offset: bool,
+        min_binding_size: Option<NonZero<u64>>,
+        count: Option<NonZero<u32>>,
+    ) -> Self {
+        self.with_buffer(
+            BufferBindingType::Uniform,
+            visibility,
+            has_dynamic_offset,
+            min_binding_size,
+            count,
+        )
+    }
+
+    pub fn with_storage(
+        self,
+        read_only: bool,
+        visibility: ShaderStages,
+        has_dynamic_offset: bool,
+        min_binding_size: Option<NonZero<u64>>,
+        count: Option<NonZero<u32>>,
+    ) -> Self {
+        self.with_buffer(
+            BufferBindingType::Storage { read_only },
+            visibility,
+            has_dynamic_offset,
+            min_binding_size,
+            count,
+        )
+    }
+
+    pub fn with_texture(
+        mut self,
+        visibility: ShaderStages,
+        sample_type: TextureSampleType,
+        view_dimension: TextureViewDimension,
+        multisampled: bool,
+        count: Option<NonZero<u32>>,
+    ) -> Self {
+        let binding = self.entries.len() as u32;
+        self.entries.push(BindGroupLayoutEntry {
+            binding,
+            visibility,
+            ty: BindingType::Texture {
+                sample_type,
+                view_dimension,
+                multisampled,
+            },
+            count,
+        });
+        self
+    }
+
+    pub fn with_sampler(
+        mut self,
+        visibility: ShaderStages,
+        ty: SamplerBindingType,
+        count: Option<NonZero<u32>>,
+    ) -> Self {
         let binding = self.entries.len() as u32;
         self.entries.push(BindGroupLayoutEntry {
             binding,
@@ -218,15 +318,15 @@ impl<'a> BindGroupBuilder<'a> {
 #[derive(Default, Resource)]
 pub struct BindGroupLayoutRegistry {
     layouts: Vec<BindGroupLayout>,
-    map: HashMap<Vec<BindGroupLayoutEntry>, GpuResourceId<BindGroupLayout>>,
+    map: HashMap<Vec<BindGroupLayoutEntry>, BindGroupLayoutId>,
 }
 
 impl BindGroupLayoutRegistry {
-    pub fn get(&self, id: GpuResourceId<BindGroupLayout>) -> &BindGroupLayout {
+    pub fn get(&self, id: BindGroupLayoutId) -> &BindGroupLayout {
         &self.layouts[id.get() as usize]
     }
 
-    pub fn id(&self, key: &[BindGroupLayoutEntry]) -> Option<GpuResourceId<BindGroupLayout>> {
+    pub fn id(&self, key: &[BindGroupLayoutEntry]) -> Option<BindGroupLayoutId> {
         self.map.get(key).copied()
     }
 
@@ -234,11 +334,11 @@ impl BindGroupLayoutRegistry {
         &mut self,
         device: &RenderDevice,
         builder: BindGroupLayoutBuilder,
-    ) -> GpuResourceId<BindGroupLayout> {
+    ) -> BindGroupLayoutId {
         if let Some(id) = self.id(&builder.entries) {
             id
         } else {
-            let id = GpuResourceId::new(self.layouts.len() as u32);
+            let id = BindGroupLayoutId::new(self.layouts.len() as u32);
             let layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
                 label: builder.label.as_deref(),
                 entries: &builder.entries,
@@ -249,5 +349,13 @@ impl BindGroupLayoutRegistry {
 
             id
         }
+    }
+}
+
+impl Index<BindGroupLayoutId> for BindGroupLayoutRegistry {
+    type Output = BindGroupLayout;
+
+    fn index(&self, index: BindGroupLayoutId) -> &Self::Output {
+        &self.layouts[index.get() as usize]
     }
 }

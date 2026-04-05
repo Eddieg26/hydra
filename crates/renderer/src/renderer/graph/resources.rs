@@ -199,7 +199,7 @@ impl GraphResource for SurfaceTexture {
         builder: &mut crate::resources::BindGroupLayoutBuilder,
         visibility: wgpu::ShaderStages,
     ) {
-        builder.with_texture(
+        builder.add_texture(
             visibility,
             wgpu::TextureSampleType::Float { filterable: true },
             wgpu::TextureViewDimension::D2,
@@ -284,7 +284,7 @@ impl GraphResource for RenderOutput {
         builder: &mut crate::resources::BindGroupLayoutBuilder,
         visibility: wgpu::ShaderStages,
     ) {
-        builder.with_texture(
+        builder.add_texture(
             visibility,
             wgpu::TextureSampleType::Float { filterable: true },
             wgpu::TextureViewDimension::D2,
@@ -355,7 +355,7 @@ impl GraphResource for Sampler {
             },
         };
 
-        builder.with_sampler(visibility, ty, None);
+        builder.add_sampler(visibility, ty, None);
     }
 
     fn bind<'a>(&'a self, builder: &mut crate::resources::BindGroupBuilder<'a>) {
@@ -466,7 +466,7 @@ impl GraphResource for TextureView {
             .sample_type(None, None)
             .expect(&format!("Invalid texture format {:?}", desc.format));
 
-        builder.with_texture(visibility, sample_ty, desc.dimension, false, None);
+        builder.add_texture(visibility, sample_ty, desc.dimension, false, None);
     }
 
     fn bind<'a>(&'a self, builder: &mut crate::resources::BindGroupBuilder<'a>) {

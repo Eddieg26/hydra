@@ -667,6 +667,7 @@ dependencies = [
 name = "editor"
 version = "0.1.0"
 dependencies = [
+ "asset",
  "bitflags 2.9.1",
  "ecs",
  "math",

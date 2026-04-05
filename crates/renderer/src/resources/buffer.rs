@@ -1,6 +1,7 @@
 use crate::{
     core::RenderDevice,
-    resources::{Label, id::GpuResourceId},
+    gpu_resource_id,
+    resources::Label,
 };
 use bytemuck::Pod;
 use encase::{ShaderType, internal::WriteInto};
@@ -11,7 +12,7 @@ use wgpu::{
     wgt::BufferDescriptor,
 };
 
-pub type BufferId = GpuResourceId<Buffer>;
+gpu_resource_id!(BufferId);
 
 pub struct BufferDesc<'a, T = ()> {
     pub label: Option<&'a str>,

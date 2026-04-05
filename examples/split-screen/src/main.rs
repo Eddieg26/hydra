@@ -339,7 +339,7 @@ impl GraphResource for ClearBuffer {
         builder: &mut BindGroupLayoutBuilder,
         visibility: ShaderStages,
     ) {
-        builder.with_buffer(BufferBindingType::Uniform, visibility, true, None, None);
+        builder.add_buffer(BufferBindingType::Uniform, visibility, true, None, None);
     }
 
     fn bind<'a>(&'a self, builder: &mut renderer::resources::BindGroupBuilder<'a>) {

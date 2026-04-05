@@ -1,5 +1,5 @@
 use super::{Label, extract::RenderAssets, shader::GpuShader};
-use crate::{core::RenderDevice, resources::{GpuResourceId, Shader}};
+use crate::{core::RenderDevice, gpu_resource_id, resources::Shader};
 use asset::AssetId;
 use std::{borrow::Cow, sync::Arc};
 use wgpu::{
@@ -50,7 +50,7 @@ pub struct RenderPipelineDesc {
 #[derive(Default, Clone, Debug, Hash, Eq, PartialEq)]
 pub struct Pipeline;
 
-pub type PipelineId = GpuResourceId<Pipeline>;
+gpu_resource_id!(PipelineId);
 
 pub struct RenderPipeline {
     id: PipelineId,

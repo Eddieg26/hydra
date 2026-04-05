@@ -3,7 +3,7 @@ use crate::{
     renderer::graph::{
         BoxData, GraphResource, GraphResourceId, GraphResources, RenderGraph, ResourceKind,
     },
-    resources::{BindGroupBuilder, BindGroupLayoutBuilder, BindGroupLayoutRegistry, GpuResourceId},
+    resources::{BindGroupBuilder, BindGroupLayoutBuilder, BindGroupLayoutRegistry, BindGroupId},
 };
 use ecs::{FixedBitSet, IndexSet, World};
 use std::{collections::HashMap, hash::Hash};
@@ -170,7 +170,7 @@ impl CachedBindGroup {
 }
 
 pub struct BindGroupArchetype {
-    bind_groups: Vec<GpuResourceId<BindGroup>>,
+    bind_groups: Vec<BindGroupId>,
     allocations: FixedBitSet,
     resources: Box<[u32]>,
 }
@@ -248,8 +248,8 @@ impl BindGroupCache {
         }
     }
 
-    pub fn add(&mut self, archetype: u32, bind_group: CachedBindGroup) -> GpuResourceId<BindGroup> {
-        let id = GpuResourceId::new(self.bind_groups.len() as u32);
+    pub fn add(&mut self, archetype: u32, bind_group: CachedBindGroup) -> BindGroupId {
+        let id = BindGroupId::new(self.bind_groups.len() as u32);
         self.bind_groups.push(bind_group);
         self.archetypes[archetype as usize].bind_groups.push(id);
 
