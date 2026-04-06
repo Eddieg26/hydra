@@ -2,7 +2,7 @@ use asset::{Asset, AssetId};
 use math::{Size, Vec2, rect::Rect};
 use renderer::{
     core::RenderDevice,
-    resources::{GpuTexture, RenderAsset, RenderAssets, Texture},
+    resources::{GpuTexture, RenderAsset, RenderAssets, SamplerCache, Texture},
 };
 use std::collections::{HashMap, HashSet};
 
@@ -81,7 +81,14 @@ impl GlyphAtlas {
         queue: &mut GlyphQueue,
         textures: &mut RenderAssets<GpuTexture>,
     ) {
-        let mut buffer = Vec::new();
+        let atlas = match textures.get_mut(&GlyphAtlas::ID) {
+            Some(atlas) => atlas,
+            None => {
+                textures.insert(GlyphAtlas::ID, self.create_atlas(device));
+                textures.get_mut(&GlyphAtlas::ID).unwrap()
+            }
+        };
+
         for (id, entries) in queue.0.drain() {
             let Some(font) = fonts.get(&id) else {
                 continue;
@@ -89,45 +96,38 @@ impl GlyphAtlas {
 
             for entry in entries {
                 let (metrics, bitmap) = font.0.rasterize(entry.ch, entry.size as f32);
+                let glyph_w = metrics.width as f32;
+                let glyph_h = metrics.height as f32;
+                let padding = self.padding.ceil();
+                let padded_w = (glyph_w + padding * 2.0).ceil();
+                let padded_h = (glyph_h + padding * 2.0).ceil();
 
-                let width = self.padding * 2.0 + metrics.width as f32;
-                let height = self.padding * 2.0 + metrics.height as f32;
-
-                let Some(Vec2 { x, y }) = self.advance(width, height) else {
+                let Some(Vec2 { x, y }) = self.advance(padded_w, padded_h) else {
                     continue;
                 };
 
-                let rect = Rect::new(metrics.xmin as f32, metrics.ymin as f32, width, height);
+                let rect = Rect::new(metrics.xmin as f32, metrics.ymin as f32, glyph_w, glyph_h);
                 let uv = Rect::new(
-                    x / self.size.width,
-                    y / self.size.height,
-                    width / self.size.width,
-                    height / self.size.height,
+                    (x + padding) / self.size.width,
+                    (y + padding) / self.size.height,
+                    glyph_w / self.size.width,
+                    glyph_h / self.size.height,
                 );
-                let advance = Vec2::new(metrics.advance_width, metrics.advance_height);
 
+                let advance = Vec2::new(metrics.advance_width, metrics.advance_height);
                 let key = GlyphKey::new(id, entry.ch, entry.size);
                 let glyph = Glyph { rect, uv, advance };
 
-                buffer.extend(bitmap);
-                self.row_height = self.row_height.max(height);
+                self.row_height = self.row_height.max(padded_h);
                 self.glyphs.insert(key, glyph);
+                self.write_glyph(
+                    device,
+                    Rect::new(x + padding, y + padding, glyph_w, glyph_h).round(),
+                    bitmap,
+                    atlas,
+                );
             }
         }
-
-        if buffer.is_empty() {
-            return;
-        }
-
-        let atlas = match textures.get_mut(&GlyphAtlas::ID) {
-            Some(atlas) => atlas,
-            None => {
-                // Create texture
-                textures.get_mut(&GlyphAtlas::ID).unwrap()
-            }
-        };
-
-        // Write data into atlas
     }
 
     fn advance(&mut self, width: f32, height: f32) -> Option<Vec2> {
@@ -137,13 +137,73 @@ impl GlyphAtlas {
             self.row_height = 0.0;
         }
 
-        if self.cursor.y + height > self.row_height {
+        if self.cursor.y + height > self.size.height {
             return None;
         }
 
-        let x = self.cursor.x * self.padding;
-        let y = self.cursor.y * self.padding;
+        let pos = Vec2::new(self.cursor.x.floor(), self.cursor.y.floor());
+        self.cursor.x += width;
 
-        Some(Vec2::new(x, y))
+        Some(pos)
+    }
+
+    fn create_atlas(&self, device: &RenderDevice) -> GpuTexture {
+        use renderer::wgpu::{
+            Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+        };
+
+        GpuTexture::new(
+            device,
+            &TextureDescriptor {
+                label: Some("glyph_atlas"),
+                size: Extent3d {
+                    width: self.size.width as u32,
+                    height: self.size.height as u32,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::R8Uint,
+                usage: TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            SamplerCache::DEFAULT,
+        )
+    }
+
+    fn write_glyph(
+        &mut self,
+        device: &RenderDevice,
+        rect: Rect<u32>,
+        bitmap: Vec<u8>,
+        texture: &mut GpuTexture,
+    ) {
+        use renderer::wgpu::{
+            Extent3d, Origin3d, TexelCopyBufferLayout, TexelCopyTextureInfo, TextureAspect,
+        };
+        device.queue().write_texture(
+            TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: Origin3d {
+                    x: rect.x,
+                    y: rect.y,
+                    z: 0,
+                },
+                aspect: TextureAspect::All,
+            },
+            &bitmap,
+            TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(rect.width),
+                rows_per_image: None,
+            },
+            Extent3d {
+                width: rect.width,
+                height: rect.height,
+                depth_or_array_layers: 1,
+            },
+        );
     }
 }
