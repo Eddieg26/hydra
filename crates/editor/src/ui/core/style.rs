@@ -134,14 +134,30 @@ pub struct Border {
     pub color: Edges<Color>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct FontId(pub u32);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextAlign {
+    Start,
+    Center,
+    End,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontWeight {
+    Light,
+    Regular,
+    Medium,
+    Bold,
+}
 
 #[derive(Debug, Clone, Copy)]
-pub struct FontStyle {
-    pub id: FontId,
+pub struct TextStyle {
+    pub font_size: f32,
+    pub line_height: f32,
     pub color: Color,
-    pub size: f32,
+    pub vertical_align: TextAlign,
+    pub horizontal_align: TextAlign,
+    pub weight: FontWeight,
+    pub wrap_width: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -202,7 +218,7 @@ pub struct Style {
 
     pub background: Option<Color>,
     pub border: Option<Border>,
-    pub font: Option<FontStyle>,
+    pub text: Option<TextStyle>,
     pub flex_direction: Option<FlexDirection>,
     pub flex_grow: Option<f32>,
     pub flex_shrink: Option<f32>,
@@ -231,7 +247,7 @@ pub struct ComputedStyle {
 
     pub background: Color,
     pub border: Option<Border>,
-    pub font: FontStyle,
+    pub text: TextStyle,
     pub flex: Flex,
     pub wrap: FlexWrap,
     pub justify: Justify,
@@ -290,8 +306,8 @@ impl ComputedStyle {
             self.background = v
         };
 
-        if let Some(v) = style.font {
-            self.font = v
+        if let Some(v) = style.text {
+            self.text = v
         };
 
         if let Some(v) = style.flex_direction {

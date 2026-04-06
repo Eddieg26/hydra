@@ -565,7 +565,7 @@ mod tests {
             id::ElementId,
             image::{ImageHandle, ImageResolver},
             style::*,
-            text::{TextMeasureResult, TextMeasurer},
+            text::{TextMeasurement, TextMeasurer},
         },
         runtime::{
             node::{Element, ElementFlags, ElementNode},
@@ -602,10 +602,14 @@ mod tests {
             },
             background: TRANSPARENT,
             border: None,
-            font: FontStyle {
-                id: FontId(0),
+            text: TextStyle {
                 color: TRANSPARENT,
-                size: 16.0,
+                font_size: 16.0,
+                line_height: 20.0,
+                horizontal_align: TextAlign::Start,
+                vertical_align: TextAlign::Start,
+                wrap_width: None,
+                weight: FontWeight::Regular,
             },
             flex: Flex {
                 direction: FlexDirection::Row,
@@ -672,9 +676,10 @@ mod tests {
             _text: &str,
             _style: &ComputedStyle,
             _max_width: Option<f32>,
-        ) -> TextMeasureResult {
-            TextMeasureResult {
+        ) -> TextMeasurement {
+            TextMeasurement {
                 size: Vec2::ZERO,
+                line_count: 0,
             }
         }
     }
@@ -724,7 +729,7 @@ mod tests {
                     max_height: None,
                     background: None,
                     border: None,
-                    font: None,
+                    text: None,
                     flex_direction: None,
                     flex_grow: None,
                     flex_shrink: None,
@@ -769,7 +774,7 @@ mod tests {
                         max_height: None,
                         background: None,
                         border: None,
-                        font: None,
+                        text: None,
                         flex_direction: None,
                         flex_grow: None,
                         flex_shrink: None,
@@ -1139,8 +1144,16 @@ mod tests {
         let item = FlexItem {
             element: ElementId::default(),
             base_size: FlexValue::new(
-                Constrained { value: 40.0, min: 0.0, max: f32::INFINITY },
-                Constrained { value: 30.0, min: 0.0, max: f32::INFINITY },
+                Constrained {
+                    value: 40.0,
+                    min: 0.0,
+                    max: f32::INFINITY,
+                },
+                Constrained {
+                    value: 30.0,
+                    min: 0.0,
+                    max: f32::INFINITY,
+                },
             ),
             final_size: FlexValue::new(40.0, 30.0),
             margin: FlexValue::new(FlexBlock::new(5.0, 5.0), FlexBlock::new(0.0, 0.0)),
@@ -1415,11 +1428,7 @@ mod tests {
     fn layout_no_children() {
         let root_style = default_computed_style();
 
-        let (tree, root_id, _) = run_layout(
-            root_style,
-            vec![],
-            Rect::new(0.0, 0.0, 200.0, 100.0),
-        );
+        let (tree, root_id, _) = run_layout(root_style, vec![], Rect::new(0.0, 0.0, 200.0, 100.0));
 
         let root_layout = tree.layout(root_id).unwrap();
         assert_eq!(root_layout.outer, Rect::new(0.0, 0.0, 200.0, 100.0));
