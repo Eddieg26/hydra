@@ -1,15 +1,33 @@
 use asset::{Asset, AssetId};
+use fontdue::LineMetrics;
 use math::{Size, Vec2, rect::Rect};
 use renderer::{
     core::RenderDevice,
-    resources::{GpuTexture, RenderAsset, RenderAssets, SamplerCache, Texture},
+    resources::{ExtractError, GpuTexture, RenderAsset, RenderAssets, SamplerCache, Texture},
 };
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Asset)]
-pub struct Font {}
+pub struct Font {
+    data: Vec<u8>,
+}
 
-pub struct GpuFont(fontdue::Font);
+pub struct GpuFont {
+    inner: fontdue::Font,
+    metrics: HashMap<u32, LineMetrics>,
+}
+
+impl GpuFont {
+    pub fn add_metrics(&mut self, px: f32) -> Option<LineMetrics> {
+        let metrics = self.inner.horizontal_line_metrics(px)?;
+        self.metrics.insert(px.to_bits(), metrics);
+        Some(metrics)
+    }
+
+    pub fn metrics(&self, px: f32) -> Option<&LineMetrics> {
+        self.metrics.get(&px.to_bits())
+    }
+}
 
 impl RenderAsset for GpuFont {
     type Asset = Font;
@@ -17,11 +35,17 @@ impl RenderAsset for GpuFont {
     type Arg = ();
 
     fn extract(
-        id: AssetId<Self::Asset>,
+        _: AssetId<Self::Asset>,
         asset: Self::Asset,
-        arg: &mut ecs::ArgItem<Self::Arg>,
+        _: &mut ecs::ArgItem<Self::Arg>,
     ) -> Result<Self, renderer::resources::ExtractError<Self::Asset>> {
-        todo!()
+        let inner = fontdue::Font::from_bytes(asset.data, fontdue::FontSettings::default())
+            .map_err(|e| ExtractError::Custom(e.to_owned()))?;
+
+        Ok(GpuFont {
+            inner,
+            metrics: HashMap::new(),
+        })
     }
 }
 
@@ -77,7 +101,7 @@ impl GlyphAtlas {
     pub fn update(
         &mut self,
         device: &RenderDevice,
-        fonts: &RenderAssets<GpuFont>,
+        fonts: &mut RenderAssets<GpuFont>,
         queue: &mut GlyphQueue,
         textures: &mut RenderAssets<GpuTexture>,
     ) {
@@ -90,12 +114,12 @@ impl GlyphAtlas {
         };
 
         for (id, entries) in queue.0.drain() {
-            let Some(font) = fonts.get(&id) else {
+            let Some(font) = fonts.get_mut(&id) else {
                 continue;
             };
 
             for entry in entries {
-                let (metrics, bitmap) = font.0.rasterize(entry.ch, entry.size as f32);
+                let (metrics, bitmap) = font.inner.rasterize(entry.ch, entry.size as f32);
                 let glyph_w = metrics.width as f32;
                 let glyph_h = metrics.height as f32;
                 let padding = self.padding.ceil();
@@ -126,6 +150,7 @@ impl GlyphAtlas {
                     bitmap,
                     atlas,
                 );
+                font.add_metrics(f32::from_bits(entry.size));
             }
         }
     }
