@@ -1,5 +1,5 @@
 use crate::ui::{
-    core::{id::ElementId, style::Border, text::Glyph},
+    core::{id::ElementId, style::Border, font::Glyph},
     runtime::tree::ElementTree,
 };
 use asset::AssetId;

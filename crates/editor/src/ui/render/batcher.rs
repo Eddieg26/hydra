@@ -1,5 +1,5 @@
 use crate::ui::{
-    core::{style::Border, text::Glyph},
+    core::{style::Border, font::Glyph},
     render::pipelines::UiPipelines,
     runtime::paint::DrawCommand,
 };

@@ -15,17 +15,28 @@ pub struct Font {
 pub struct GpuFont {
     inner: fontdue::Font,
     metrics: HashMap<u32, LineMetrics>,
+    kern: HashMap<(char, char), f32>,
 }
 
 impl GpuFont {
+    pub fn metrics(&self, px: f32) -> Option<&LineMetrics> {
+        self.metrics.get(&px.to_bits())
+    }
+
     pub fn add_metrics(&mut self, px: f32) -> Option<LineMetrics> {
         let metrics = self.inner.horizontal_line_metrics(px)?;
         self.metrics.insert(px.to_bits(), metrics);
         Some(metrics)
     }
 
-    pub fn metrics(&self, px: f32) -> Option<&LineMetrics> {
-        self.metrics.get(&px.to_bits())
+    pub fn kern(&mut self, left: char, right: char, px: f32) -> Option<f32> {
+        if let Some(value) = self.kern.get(&(left, right)).copied() {
+            Some(value)
+        } else {
+            let value = self.inner.horizontal_kern(left, right, px)?;
+            self.kern.insert((left, right), value);
+            Some(value)
+        }
     }
 }
 
@@ -45,6 +56,7 @@ impl RenderAsset for GpuFont {
         Ok(GpuFont {
             inner,
             metrics: HashMap::new(),
+            kern: HashMap::new(),
         })
     }
 }
