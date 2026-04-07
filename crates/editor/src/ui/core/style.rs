@@ -1,7 +1,10 @@
+use asset::AssetId;
 use math::Vec2;
 use renderer::types::Color;
 use smallvec::SmallVec;
 use std::collections::HashMap;
+
+use crate::ui::core::Font;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Edges<T> {
@@ -151,6 +154,7 @@ pub enum FontWeight {
 
 #[derive(Debug, Clone, Copy)]
 pub struct TextStyle {
+    pub font: Option<AssetId<Font>>,
     pub font_size: f32,
     pub line_height: f32,
     pub color: Color,

@@ -16,6 +16,7 @@ pub struct GpuFont {
     inner: fontdue::Font,
     metrics: HashMap<u32, LineMetrics>,
     kern: HashMap<(char, char), f32>,
+    glyphs: HashMap<GlyphEntry, Glyph>,
 }
 
 impl GpuFont {
@@ -29,14 +30,20 @@ impl GpuFont {
         Some(metrics)
     }
 
-    pub fn kern(&mut self, left: char, right: char, px: f32) -> Option<f32> {
+    pub fn kern(&mut self, left: char, right: char, px: u32) -> Option<f32> {
         if let Some(value) = self.kern.get(&(left, right)).copied() {
             Some(value)
         } else {
-            let value = self.inner.horizontal_kern(left, right, px)?;
+            let value = self
+                .inner
+                .horizontal_kern(left, right, f32::from_bits(px))?;
             self.kern.insert((left, right), value);
             Some(value)
         }
+    }
+
+    pub fn glyph(&self, ch: char, size: u32) -> Option<&Glyph> {
+        self.glyphs.get(&GlyphEntry { ch, size })
     }
 }
 
@@ -57,6 +64,7 @@ impl RenderAsset for GpuFont {
             inner,
             metrics: HashMap::new(),
             kern: HashMap::new(),
+            glyphs: HashMap::new(),
         })
     }
 }
@@ -155,13 +163,13 @@ impl GlyphAtlas {
                 let glyph = Glyph { rect, uv, advance };
 
                 self.row_height = self.row_height.max(padded_h);
-                self.glyphs.insert(key, glyph);
                 self.write_glyph(
                     device,
                     Rect::new(x + padding, y + padding, glyph_w, glyph_h).round(),
                     bitmap,
                     atlas,
                 );
+                font.glyphs.insert(entry, glyph);
                 font.add_metrics(f32::from_bits(entry.size));
             }
         }

@@ -14,7 +14,7 @@ use math::{Size, rect::Rect};
 use std::ops::Range;
 
 pub struct ContentResolver<'a> {
-    pub text: &'a dyn TextMeasurer,
+    pub text: &'a mut dyn TextMeasurer,
     pub image: &'a dyn ImageResolver,
 }
 
@@ -603,6 +603,7 @@ mod tests {
             background: TRANSPARENT,
             border: None,
             text: TextStyle {
+                font: None,
                 color: TRANSPARENT,
                 font_size: 16.0,
                 line_height: 20.0,
@@ -670,19 +671,7 @@ mod tests {
     }
 
     struct DummyText;
-    impl TextMeasurer for DummyText {
-        fn measure(
-            &self,
-            _text: &str,
-            _style: &ComputedStyle,
-            _max_width: Option<f32>,
-        ) -> TextMeasurement {
-            TextMeasurement {
-                size: Vec2::ZERO,
-                line_count: 0,
-            }
-        }
-    }
+    impl TextMeasurer for DummyText {}
 
     struct DummyImage;
     impl ImageResolver for DummyImage {
@@ -1189,9 +1178,9 @@ mod tests {
         viewport: Rect,
     ) -> (ElementTree, ElementId, Vec<ElementId>) {
         let (mut tree, root_id, child_ids) = build_tree(root_style, children);
-        let (text, image) = make_resolver();
+        let (mut text, image) = make_resolver();
         let resolver = ContentResolver {
-            text: &text,
+            text: &mut text,
             image: &image,
         };
         let mut engine = LayoutEngine {
