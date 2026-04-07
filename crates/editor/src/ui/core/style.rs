@@ -137,11 +137,12 @@ pub struct Border {
     pub color: Edges<Color>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextAlign {
-    Start,
+    #[default]
+    Left,
     Center,
-    End,
+    Right,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,8 +159,7 @@ pub struct TextStyle {
     pub font_size: f32,
     pub line_height: f32,
     pub color: Color,
-    pub vertical_align: TextAlign,
-    pub horizontal_align: TextAlign,
+    pub align: TextAlign,
     pub weight: FontWeight,
     pub wrap_width: Option<f32>,
 }

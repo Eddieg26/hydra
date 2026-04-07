@@ -3,7 +3,7 @@ use crate::ui::core::{
     font::{GlyphQueue, GpuFont},
     style::{ComputedStyle, TextStyle},
 };
-use math::Size;
+use math::{Size, rect::Rect};
 use renderer::resources::RenderAssets;
 
 #[derive(Default)]
@@ -16,6 +16,18 @@ pub trait TextMeasurer {
     fn measure(&mut self, _text: &str, _style: &ComputedStyle) -> TextMeasurement {
         TextMeasurement::default()
     }
+}
+
+pub struct TextGlyph {
+    pub rect: Rect,
+    pub uv: Rect,
+}
+
+#[derive(Default)]
+pub struct TextLayout {
+    pub size: Size,
+    pub lines: u32,
+    pub glyphs: Vec<TextGlyph>,
 }
 
 pub struct TextSystem<'a> {
