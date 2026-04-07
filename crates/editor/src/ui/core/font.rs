@@ -112,7 +112,6 @@ pub struct GlyphAtlas {
     size: Size,
     row_height: f32,
     padding: f32,
-    glyphs: HashMap<GlyphKey, Glyph>,
 }
 
 impl GlyphAtlas {
