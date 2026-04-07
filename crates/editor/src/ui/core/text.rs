@@ -1,5 +1,5 @@
 use crate::ui::core::{
-    GlyphEntry, GlyphKey,
+    GlyphKey,
     font::{GlyphQueue, GpuFont},
     style::{ComputedStyle, TextStyle},
 };
@@ -51,7 +51,7 @@ impl<'a> TextMeasurer for TextSystem<'a> {
             }
 
             for entry in state.advance(font, token) {
-                queue.queue(GlyphKey::new(id, entry.ch, entry.size));
+                queue.queue(id, entry);
             }
         }
 
@@ -85,7 +85,7 @@ impl TextMeasureState {
         }
     }
 
-    pub fn advance(&mut self, font: &mut GpuFont, token: &str) -> impl Iterator<Item = GlyphEntry> {
+    pub fn advance(&mut self, font: &mut GpuFont, token: &str) -> impl Iterator<Item = GlyphKey> {
         let size = self.font_size;
 
         token.chars().filter_map(move |ch| {
@@ -101,7 +101,7 @@ impl TextMeasureState {
             self.pen_x += advance;
             self.prev = Some(ch);
 
-            missing.then_some(GlyphEntry { ch, size })
+            missing.then_some(GlyphKey { ch, size })
         })
     }
 

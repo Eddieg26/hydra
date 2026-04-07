@@ -16,7 +16,7 @@ pub struct GpuFont {
     inner: fontdue::Font,
     metrics: HashMap<u32, LineMetrics>,
     kern: HashMap<(char, char), f32>,
-    glyphs: HashMap<GlyphEntry, Glyph>,
+    glyphs: HashMap<GlyphKey, Glyph>,
 }
 
 impl GpuFont {
@@ -43,7 +43,7 @@ impl GpuFont {
     }
 
     pub fn glyph(&self, ch: char, size: u32) -> Option<&Glyph> {
-        self.glyphs.get(&GlyphEntry { ch, size })
+        self.glyphs.get(&GlyphKey { ch, size })
     }
 }
 
@@ -71,19 +71,6 @@ impl RenderAsset for GpuFont {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GlyphKey {
-    pub font: AssetId<Font>,
-    pub ch: char,
-    pub size: u32,
-}
-
-impl GlyphKey {
-    pub fn new(font: AssetId<Font>, ch: char, size: u32) -> Self {
-        Self { font, ch, size }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct GlyphEntry {
     pub ch: char,
     pub size: u32,
 }
@@ -96,14 +83,11 @@ pub struct Glyph {
 }
 
 #[derive(Default)]
-pub struct GlyphQueue(HashMap<AssetId<Font>, HashSet<GlyphEntry>>);
+pub struct GlyphQueue(HashMap<AssetId<Font>, HashSet<GlyphKey>>);
 
 impl GlyphQueue {
-    pub fn queue(&mut self, key: GlyphKey) {
-        self.0.entry(key.font).or_default().insert(GlyphEntry {
-            ch: key.ch,
-            size: key.size,
-        });
+    pub fn queue(&mut self, font: AssetId<Font>, key: GlyphKey) {
+        self.0.entry(font).or_default().insert(key);
     }
 }
 
@@ -158,7 +142,6 @@ impl GlyphAtlas {
                 );
 
                 let advance = Vec2::new(metrics.advance_width, metrics.advance_height);
-                let key = GlyphKey::new(id, entry.ch, entry.size);
                 let glyph = Glyph { rect, uv, advance };
 
                 self.row_height = self.row_height.max(padded_h);
