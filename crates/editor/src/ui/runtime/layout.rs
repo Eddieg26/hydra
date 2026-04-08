@@ -1,30 +1,25 @@
 use crate::ui::{
     core::{
         id::ElementId,
-        image::ImageResolver,
         style::{
             Align, ComputedStyle, Constrained, Edges, Flex, FlexDirection, FlexWrap, Justify,
             Length, Overflow,
         },
-        text::TextMeasurer,
     },
-    runtime::{node::ElementNode, tree::ElementTree},
+    runtime::{
+        element::{ElementNode, ElementResolver},
+        tree::ElementTree,
+    },
 };
 use math::{Size, rect::Rect};
 use std::ops::Range;
 
-pub struct ContentResolver<'a> {
-    pub text: &'a mut dyn TextMeasurer,
-    pub image: &'a dyn ImageResolver,
-}
-
 pub struct LayoutEngine<'a> {
     tree: &'a mut ElementTree,
-    resolver: ContentResolver<'a>,
 }
 
 impl<'a> LayoutEngine<'a> {
-    pub fn run(&mut self, id: ElementId, rect: Rect) {
+    pub fn run(&mut self, resolver: &mut ElementResolver<'a>, id: ElementId, rect: Rect) {
         let node = &self.tree.nodes[id];
         let style = &self.tree.computed_styles[id];
         let border_width = style.border.map(|b| b.width).unwrap_or(0.0);
@@ -42,7 +37,7 @@ impl<'a> LayoutEngine<'a> {
 
         let axis = FlexAxis::pair(style, content);
 
-        let mut items = self.create_items(node, style, &content);
+        let mut items = self.create_items(resolver, node, style, &content);
         let mut lines = self.create_lines(style.wrap, &axis.main, &mut items);
 
         self.pack_main_axis(&axis.main, &mut items, &mut lines);
@@ -54,11 +49,12 @@ impl<'a> LayoutEngine<'a> {
 
         let rects = self.position_items(style, &rect, &axis, lines, items);
 
-        self.tree.layouts[id].scroll = self.layout_children(&content, &clip, rects);
+        self.tree.layouts[id].scroll = self.layout_children(resolver, &content, &clip, rects);
     }
 
     fn create_items(
         &self,
+        resolver: &mut ElementResolver<'a>,
         node: &ElementNode,
         style: &ComputedStyle,
         content: &Rect,
@@ -71,7 +67,7 @@ impl<'a> LayoutEngine<'a> {
 
             let intrinisic = child_node
                 .element
-                .measure(&self.resolver)
+                .measure(*child, resolver)
                 .unwrap_or(Size::ZERO);
 
             let width = child_style
@@ -253,6 +249,7 @@ impl<'a> LayoutEngine<'a> {
 
     fn layout_children(
         &mut self,
+        resolver: &mut ElementResolver<'a>,
         content: &Rect,
         clip: &Rect,
         rects: Vec<(ElementId, Rect)>,
@@ -264,7 +261,7 @@ impl<'a> LayoutEngine<'a> {
             let height = (rect.y + rect.height) - content.y;
             content_size = content_size.max(width, height);
 
-            self.run(id, rect);
+            self.run(resolver, id, rect);
         }
 
         Rect {
@@ -565,14 +562,14 @@ mod tests {
             id::ElementId,
             image::{ImageHandle, ImageResolver},
             style::*,
-            text::{TextMeasurement, TextMeasurer},
         },
         runtime::{
-            node::{Element, ElementFlags, ElementNode},
+            element::{Element, ElementFlags, ElementNode},
+            text::TextResolver,
             tree::ElementTree,
         },
     };
-    use math::{Size, Vec2, rect::Rect};
+    use math::{Size, rect::Rect};
     use renderer::types::Color;
     use slotmap::{SecondaryMap, SlotMap};
 
@@ -653,12 +650,14 @@ mod tests {
     }
 
     impl Element for BoxElement {
-        fn measure(&self, _resolver: &ContentResolver) -> Option<Size> {
+        fn measure(&self, _id: ElementId, _resolver: &mut ElementResolver) -> Option<Size> {
             Some(self.size)
         }
 
         fn draw(
             &self,
+            _id: ElementId,
+            _resolver: &mut ElementResolver,
             _style: &ComputedStyle,
             _layout: &Layout,
         ) -> crate::ui::runtime::paint::DrawCommand {
@@ -670,12 +669,12 @@ mod tests {
     }
 
     struct DummyText;
-    impl TextMeasurer for DummyText {}
+    impl TextResolver for DummyText {}
 
     struct DummyImage;
     impl ImageResolver for DummyImage {
-        fn size(&self, _image: ImageHandle) -> Vec2 {
-            Vec2::ZERO
+        fn size(&self, _image: ImageHandle) -> Size {
+            Size::ZERO
         }
     }
 
@@ -1178,15 +1177,9 @@ mod tests {
     ) -> (ElementTree, ElementId, Vec<ElementId>) {
         let (mut tree, root_id, child_ids) = build_tree(root_style, children);
         let (mut text, image) = make_resolver();
-        let resolver = ContentResolver {
-            text: &mut text,
-            image: &image,
-        };
-        let mut engine = LayoutEngine {
-            tree: &mut tree,
-            resolver,
-        };
-        engine.run(root_id, viewport);
+        let mut resolver = ElementResolver::new(&mut text, &image);
+        let mut engine = LayoutEngine { tree: &mut tree };
+        engine.run(&mut resolver, root_id, viewport);
         (tree, root_id, child_ids)
     }
 
@@ -1271,7 +1264,7 @@ mod tests {
         };
         let child_style = default_computed_style();
 
-        let (tree, root_id, child_ids) = run_layout(
+        let (tree, root_id, _) = run_layout(
             root_style,
             vec![(child_style, Box::new(BoxElement::new(50.0, 30.0)))],
             Rect::new(0.0, 0.0, 200.0, 100.0),
@@ -1299,7 +1292,7 @@ mod tests {
         });
         let child_style = default_computed_style();
 
-        let (tree, root_id, child_ids) = run_layout(
+        let (tree, root_id, _) = run_layout(
             root_style,
             vec![(child_style, Box::new(BoxElement::new(50.0, 30.0)))],
             Rect::new(0.0, 0.0, 200.0, 100.0),

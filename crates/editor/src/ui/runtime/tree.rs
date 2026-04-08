@@ -3,7 +3,7 @@ use crate::ui::{
         id::ElementId,
         style::{ComputedStyle, ElementStyle},
     },
-    runtime::{layout::Layout, node::ElementNode},
+    runtime::{layout::Layout, element::ElementNode},
 };
 use slotmap::{SecondaryMap, SlotMap};
 

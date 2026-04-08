@@ -75,11 +75,27 @@ pub struct GlyphKey {
     pub size: u32,
 }
 
+impl GlyphKey {
+    pub fn new(ch: char, size: u32) -> Self {
+        Self { ch, size }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Glyph {
     pub rect: Rect,
     pub uv: Rect,
     pub advance: Vec2,
+}
+
+impl Default for Glyph {
+    fn default() -> Self {
+        Self {
+            rect: Rect::ZERO,
+            uv: Rect::ZERO,
+            advance: Vec2::ZERO,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -88,6 +104,10 @@ pub struct GlyphQueue(HashMap<AssetId<Font>, HashSet<GlyphKey>>);
 impl GlyphQueue {
     pub fn queue(&mut self, font: AssetId<Font>, key: GlyphKey) {
         self.0.entry(font).or_default().insert(key);
+    }
+
+    pub fn extend<T: IntoIterator<Item = GlyphKey>>(&mut self, font: AssetId<Font>, iter: T) {
+        self.0.entry(font).or_default().extend(iter);
     }
 }
 

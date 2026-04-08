@@ -1,6 +1,6 @@
 use crate::ui::{
-    core::{id::ElementId, style::Border, font::Glyph},
-    runtime::tree::ElementTree,
+    core::{font::Glyph, id::ElementId, style::Border},
+    runtime::{element::ElementResolver, tree::ElementTree},
 };
 use asset::AssetId;
 use math::rect::Rect;
@@ -41,7 +41,7 @@ impl<'a> Painter<'a> {
         }
     }
 
-    pub fn paint(&mut self, id: ElementId) {
+    pub fn paint(&mut self, resolver: &mut ElementResolver<'a>, id: ElementId) {
         let Some(node) = self.tree.node(id) else {
             return;
         };
@@ -62,10 +62,11 @@ impl<'a> Painter<'a> {
             });
         }
 
-        self.commands.push(node.element.draw(style, layout));
+        self.commands
+            .push(node.element.draw(id, resolver, style, layout));
 
         for child in &node.children {
-            self.paint(*child);
+            self.paint(resolver, *child);
         }
         // pop clip
     }
