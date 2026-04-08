@@ -79,7 +79,7 @@ pub enum Position {
     Absolute,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Overflow {
     Visible,
     Hidden,

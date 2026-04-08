@@ -1,5 +1,5 @@
 use crate::ui::{
-    core::{font::Glyph, id::ElementId, style::Border},
+    core::{Overflow, font::Glyph, id::ElementId, style::Border},
     runtime::{element::ElementResolver, tree::ElementTree},
 };
 use asset::AssetId;
@@ -54,7 +54,11 @@ impl<'a> Painter<'a> {
             return;
         };
 
-        // push clip
+        let clip = style.overflow_x != Overflow::Hidden || style.overlfow_y != Overflow::Hidden;
+        if clip {
+            self.commands.push(DrawCommand::PushClip(layout.clip));
+        }
+
         if let Some(border) = style.border.as_ref().copied() {
             self.commands.push(DrawCommand::Border {
                 rect: layout.border,
@@ -68,7 +72,10 @@ impl<'a> Painter<'a> {
         for child in &node.children {
             self.paint(resolver, *child);
         }
-        // pop clip
+
+        if clip {
+            self.commands.push(DrawCommand::PopClip);
+        }
     }
 
     pub fn finish(self) -> Vec<DrawCommand> {
